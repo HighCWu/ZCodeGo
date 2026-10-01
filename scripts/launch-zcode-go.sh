@@ -27,7 +27,11 @@ if [ ! -f "$STATE_DIR/official.json" ]; then
 fi
 
 ELECTRON_ROOT="$STATE_DIR/electron"
-APP_DIR="$ELECTRON_ROOT/resources/app"
+# app 目录与 ensure-official-electron.mjs 同构：mac 在 .app bundle 内，其余扁平
+case "$(uname -s)" in
+  Darwin) APP_DIR="$ELECTRON_ROOT/ZCode Go.app/Contents/Resources/app" ;;
+  *)      APP_DIR="$ELECTRON_ROOT/resources/app" ;;
+esac
 
 # 打包态 renderer（out/renderer/index.html）是必需产物：isPackaged=true 时主进程
 # 从文件加载 renderer，忽略 ELECTRON_RENDERER_URL。
