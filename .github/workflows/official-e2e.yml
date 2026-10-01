@@ -311,7 +311,7 @@ jobs:
           if-no-files-found: ignore
           include-hidden-files: true
       - name: 上传排障产物
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.os }}

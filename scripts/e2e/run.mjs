@@ -193,9 +193,15 @@ if (!skipLaunch) {
   }
   if (pid <= 0 && process.env.ZCODE_GO_E2E_ALLOW_NO_DESKTOP === "1") {
     // CI VM 无法承载真实 GUI 桌面（对照步骤已归因），标注跳过桌面/GUI 组
-    const tail = (() => {
+    // 豁免时输出诊断证据：takeover/ensure 关键行 + 日志尾部
+    const diag = (() => {
       try {
-        return readFileSync(join(stateDir, "desktop-launch.log"), "utf8").slice(-200);
+        const text = readFileSync(join(stateDir, "desktop-launch.log"), "utf8");
+        const keys = text
+          .split("\n")
+          .filter((l) => l.includes("[zcode-go]") || l.includes("ensure-official-electron") || l.includes("克隆") || l.includes("重签"))
+          .map((l) => l.slice(0, 160));
+        return `${keys.join(" || ")} <<<TAIL>>> ${text.slice(-600).replaceAll("\n", " | ")}`;
       } catch {
         return "(无日志)";
       }
@@ -203,7 +209,7 @@ if (!skipLaunch) {
     check(
       "launch: desktop.pid 出现（mac GUI 待实机排查：克隆 bundle SIGTRAP，官方原版在 CI VM 存活——核心组已全过）",
       true,
-      tail.replaceAll("\n", " | "),
+      diag.slice(0, 1500),
     );
   } else {
     check("launch: desktop.pid 出现", pid > 0, `pid=${pid || "无"}`);
