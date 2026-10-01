@@ -76,6 +76,28 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # ── 0. 缓存：官方锚点不变 → 复用 unpacked 产物，跳过官方安装+构建 ─────
+      # 键含锚点 SHA（merge-base），官方不动就命中；restore/save 分离 + 仅
+      # success() 保存，避免失败构建的半成品污染不可变缓存键。
+      - name: 恢复官方 unpacked 产物缓存（锚点级）
+        id: official-dist
+        uses: actions/cache/restore@v4
+        with:
+          path: official/packages/desktop/dist
+          key: official-dist-${{ matrix.os }}-${{ needs.anchor.outputs.anchor }}
+      - name: 恢复 Electron 下载缓存
+        if: steps.official-dist.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('official/packages/desktop/package.json') }}
+
       # ── 1. 构建 fork 产物（插件 CJS + 桌面 out/）─────────────────────────
       - name: fork 依赖
         run: pnpm install --no-frozen-lockfile
@@ -87,15 +109,20 @@ jobs:
           ZCODE_PREVIEW_IDENTITY=1 npx tsup
           ZCODE_PREVIEW_IDENTITY=1 npx vite build
 
-      # ── 2. 构建官方 @ 锚点（unpacked 即"安装态"）────────────────────────
+      # ── 2. 构建官方 @ 锚点（unpacked 即"安装态"；缓存命中则整段跳过）─────
       - name: 官方依赖
+        if: steps.official-dist.outputs.cache-hit != 'true'
         working-directory: official
         run: pnpm install --no-frozen-lockfile
       - name: 构建官方桌面（electron-builder --dir）
+        if: steps.official-dist.outputs.cache-hit != 'true'
         working-directory: official/packages/desktop
         run: |
           pnpm run prepare:runtime-assets || true
           npx electron-builder --dir || pnpm run build
+      - name: 缓存命中提示
+        if: steps.official-dist.outputs.cache-hit == 'true'
+        run: echo "官方产物缓存命中（锚点 ${{ needs.anchor.outputs.anchor }}），已跳过官方安装与构建"
       - name: 定位官方二进制
         id: officialbin
         env:
@@ -198,6 +225,25 @@ jobs:
           else
             node scripts/e2e/run.mjs
           fi
+      - name: 保存官方 unpacked 产物缓存（仅成功时，防半成品污染键）
+        if: success() && steps.official-dist.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: official/packages/desktop/dist
+          key: official-dist-${{ matrix.os }}-${{ needs.anchor.outputs.anchor }}
+      - name: 保存 Electron 下载缓存
+        if: success() && steps.official-dist.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('official/packages/desktop/package.json') }}
+
       - name: 上传分步截图（三平台，成功失败均产出，肉眼核对用）
         if: always()
         uses: actions/upload-artifact@v4
