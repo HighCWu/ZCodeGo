@@ -244,7 +244,7 @@ jobs:
         # 裸 Xvfb 不够；截图用 imagemagick，窗口树用 x11-utils。
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y xdotool xvfb openbox x11-utils imagemagick
+          sudo apt-get install -y xdotool xvfb openbox x11-utils imagemagick wmctrl
       - name: E2E（Linux Xvfb+openbox / 其他平台核心+启动+运行时）
         env:
           ZCODE_GO_E2E_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
@@ -297,6 +297,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.os }}
-          path: ~/.zcode-go/
+          path: |
+            ~/.zcode-go/
+            !~/.zcode-go/electron
           if-no-files-found: ignore
           include-hidden-files: true

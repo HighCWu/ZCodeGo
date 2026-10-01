@@ -100,21 +100,30 @@ function enforceSkipTaskbarViaXprop(target: BrowserWindow): void {
         ? handle.readUInt32LE(0)
         : Number.parseInt(handle.toString("utf8").trim(), 16);
     if (!Number.isFinite(xid) || xid <= 0) return;
-    const child = spawn(
-      "xprop",
-      [
-        "-id",
-        String(xid),
-        "-f",
-        "_NET_WM_STATE 32a",
-        "-set",
-        "_NET_WM_STATE",
-        "_NET_WM_STATE_ABOVE, _NET_WM_STATE_SKIP_TASKBAR",
-      ],
+    // EWMH 正规途径：向根窗口发 _NET_WM_STATE client message（WM 负责改属性；
+    // openbox 会忽略/覆盖客户端的直写）。wmctrl 缺失再退回 xprop 直写（xfwm 有效）。
+    const wmctrl = spawn(
+      "wmctrl",
+      ["-i", "-r", String(xid), "-b", "add,skip_taskbar,skip_pager,above"],
       { stdio: "ignore" },
     );
-    child.on("error", () => {
-      /* xprop 缺失时静默 */
+    wmctrl.on("error", () => {
+      const child = spawn(
+        "xprop",
+        [
+          "-id",
+          String(xid),
+          "-f",
+          "_NET_WM_STATE 32a",
+          "-set",
+          "_NET_WM_STATE",
+          "_NET_WM_STATE_ABOVE, _NET_WM_STATE_SKIP_TASKBAR",
+        ],
+        { stdio: "ignore" },
+      );
+      child.on("error", () => {
+        /* xprop 亦缺失时静默 */
+      });
     });
   } catch {
     /* best-effort */
