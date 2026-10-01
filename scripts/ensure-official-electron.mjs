@@ -35,8 +35,10 @@ function log(msg) {
   if (!jsonOut) console.log(`[ensure-official-electron] ${msg}`);
 }
 
+const binName = process.platform === "win32" ? "zcode.exe" : "zcode";
+
 function ensureBinary() {
-  const target = join(electronRoot, "zcode");
+  const target = join(electronRoot, binName);
   mkdirSync(electronRoot, { recursive: true });
   if (force && existsSync(target) && lstatSync(target).ino !== lstatSync(officialBin).ino) {
     rmSync(target);
@@ -61,14 +63,21 @@ function ensureBinary() {
 
 function ensureDistAssets() {
   for (const entry of readdirSync(officialDir)) {
-    if (entry === "zcode" || entry === "resources") continue;
+    if (entry === binName || entry === basename(officialBin) || entry === "resources") continue;
     const src = join(officialDir, entry);
     const dst = join(electronRoot, entry);
     if (existsSync(dst)) continue;
     try {
       symlinkSync(src, dst);
-    } catch (error) {
-      log(`资产符号链接失败 ${entry}: ${error.message}`);
+    } catch {
+      // Windows 无符号链接权限（或跨设备）时回退复制，保证 locales/*.pak 等
+      // Chromium 资产存在，否则 Electron 启动即缺资源
+      try {
+        cpSync(src, dst, { recursive: true });
+        log(`资产：复制（symlink 不可用）${entry}`);
+      } catch (error) {
+        log(`资产装配失败 ${entry}: ${error.message}`);
+      }
     }
   }
 }

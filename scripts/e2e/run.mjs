@@ -172,7 +172,9 @@ if (!skipLaunch) {
       unlinkSync(join(stateDir, f));
     } catch { /* 不存在即可 */ }
   }
-  const launcher = sh(`setsid '${join(repoRoot, "scripts", "launch-zcode-go.sh")}' >/dev/null 2>&1 &`);
+  // setsid 分离仅 POSIX；Windows Git bash 无 setsid，直接后台（无 SIGHUP 语义，子进程自然存活）
+  const detach = process.platform === "win32" ? "" : "setsid ";
+  const launcher = sh(`${detach}'${join(repoRoot, "scripts", "launch-zcode-go.sh")}' >/dev/null 2>&1 &`);
   check("launch: launcher 已分离启动", launcher.status === 0, `status=${launcher.status}`);
 
   const pidFile = join(stateDir, "desktop.pid");
