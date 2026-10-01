@@ -286,6 +286,12 @@ export function createZCodeGoBubble(options: {
         window.setSkipTaskbar(true);
         window.setAlwaysOnTop(true, "screen-saver");
         enforceSkipTaskbarViaXprop(window);
+        // 部分 WM（openbox）在窗口映射后会整体重写 _NET_WM_STATE，晚些再补写
+        for (const delay of [400, 1200]) {
+          setTimeout(() => {
+            if (window && !window.isDestroyed()) enforceSkipTaskbarViaXprop(window);
+          }, delay);
+        }
       } catch (error) {
         options.logger.warn("[zcode-go] 显示气泡失败", error);
       }

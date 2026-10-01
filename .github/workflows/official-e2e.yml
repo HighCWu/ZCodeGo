@@ -205,8 +205,9 @@ jobs:
         env:
           OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
         run: |
+          # mac: bin 在 .app/Contents/MacOS/ 内，Resources 是其上一级（Contents）的兄弟
           if [ "$RUNNER_OS" = "macOS" ]; then
-            BUNDLE="$(dirname "$(dirname "$(dirname "$OFFICIAL_BIN")")")/Resources/glm/zcode.cjs"
+            BUNDLE="$(dirname "$(dirname "$OFFICIAL_BIN")")/Resources/glm/zcode.cjs"
           else
             BUNDLE="$(dirname "$OFFICIAL_BIN")/resources/glm/zcode.cjs"
           fi
