@@ -174,8 +174,9 @@ if (!skipLaunch) {
       unlinkSync(join(stateDir, f));
     } catch { /* 不存在即可 */ }
   }
-  // setsid 分离仅 POSIX；Windows Git bash 无 setsid，直接后台（无 SIGHUP 语义，子进程自然存活）
-  const detach = process.platform === "win32" ? "" : "setsid ";
+  // 分离启动：nohup 三平台通用（macOS 无 setsid，Linux nohup 足以隔离挂断）；
+  // Windows Git bash 直接后台即可
+  const detach = process.platform === "win32" ? "" : "nohup ";
   const launcher = run("sh", ["-c", `${detach}'${join(repoRoot, "scripts", "launch-zcode-go.sh")}' >/dev/null 2>&1 &`], {
     env: { ...process.env, ZCODE_OFFICIAL_BIN: officialBin },
   });
