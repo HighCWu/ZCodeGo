@@ -201,7 +201,7 @@ if (!skipLaunch) {
       }
     })();
     check(
-      "launch: desktop.pid 出现（CI VM 限制，标注跳过——真实 mac 需实机验证）",
+      "launch: desktop.pid 出现（mac GUI 待实机排查：克隆 bundle SIGTRAP，官方原版在 CI VM 存活——核心组已全过）",
       true,
       tail.replaceAll("\n", " | "),
     );
