@@ -4,7 +4,8 @@ import type { ZCodeAgentStorageStartupSnapshot } from "#src/zcode-agent/zcodeAge
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Emitter } from "@zcode/rpc";
 import {
@@ -450,9 +451,12 @@ export function resolveDefaultZCodeAgentCommand(
     );
   }
 
-  // 顺序：env 显式覆盖 → monorepo dev 源码/dist（dev 改源码立刻生效，不会被远端历史装的 native binary
+  // 顺序：env 显式覆盖 → zcode-go 官方运行时重定向（~/.zcode-go/official.json，与打包态
+  // 官方完全同构：ELECTRON_RUN_AS_NODE=1 跑官方 zcode.cjs，保 150% 额度签名路径）→
+  // monorepo dev 源码/dist（dev 改源码立刻生效，不会被远端历史装的 native binary
   // 抢先匹配）→ 桌面打包态 Electron Node runtime 跑 zcode.cjs → 已部署 native binary（远端 SSH 兜底）。
   const bundled =
+    resolveZcodeGoOfficialRuntimeCommand(context) ??
     resolveBundledWorkspaceZCodeAgentCommand(context) ??
     resolveElectronRuntimeZCodeAgentCommand(context);
   return applyPresentationSurfaceToCommand(
@@ -461,6 +465,48 @@ export function resolveDefaultZCodeAgentCommand(
       : resolveDeployedZCodeAgentBinaryCommand(context),
     context.presentationSurface,
   );
+}
+
+/**
+ * zcode-go 桌面接管：优先使用插件在官方进程树内探测到的官方原生运行时。
+ *
+ * official.json 由 zcode-go 插件 hook 写入（跨平台祖先链回溯发现官方安装）；
+ * 命中时以与官方打包态完全相同的方式 spawn（本进程 Electron 以纯 Node 模式
+ * 执行官方 zcode.cjs app-server --stdio），不引入任何自建运行时。
+ */
+function resolveZcodeGoOfficialRuntimeCommand(
+  context: ZCodeAgentCommandResolverContext,
+): ZCodeAgentCommand | null {
+  if (!process.versions.electron) {
+    // 纯 Node 宿主（测试/CLI 场景）没有可复用的 Electron Node runtime，保持原链条。
+    return null;
+  }
+  try {
+    const overridePath = join(homedir(), ".zcode-go", "official.json");
+    const raw = readFileSync(overridePath, "utf8");
+    const runtimeBundle =
+      typeof JSON.parse(raw)?.runtimeBundle === "string"
+        ? (JSON.parse(raw) as { runtimeBundle: string }).runtimeBundle.trim()
+        : "";
+    if (!runtimeBundle || runtimeBundle.includes("..")) {
+      return null;
+    }
+    const bundlePath = resolve(runtimeBundle);
+    if (!existsSync(bundlePath)) {
+      return null;
+    }
+    // 与 resolveElectronRuntimeZCodeAgentCommand 同款构造：ELECTRON_RUN_AS_NODE 下
+    // 由本应用的 Electron Node 执行官方 bundle；storage preparation 也走官方入口。
+    return {
+      command: process.execPath,
+      args: [bundlePath, ...ZCODE_AGENT_RUNTIME.spawnArgs],
+      storagePreparationEntry: bundlePath,
+      cwd: context.workspacePath,
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    };
+  } catch {
+    return null;
+  }
 }
 
 function applyPresentationSurfaceToCommand(

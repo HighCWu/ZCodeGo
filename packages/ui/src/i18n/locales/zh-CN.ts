@@ -1393,6 +1393,7 @@ const zhCN: Record<string, string> = {
   "titleBar.menu.file.openWorkspace": "打开工作区",
   "titleBar.menu.file.closeWindow": "关闭窗口",
   "titleBar.windowMenu": "窗口菜单",
+  "titleBar.window.returnOfficial": "返回 ZCode 官方版",
   "titleBar.window.minimize": "最小化窗口",
   "titleBar.window.toggleMaximize": "最大化或还原窗口",
   "titleBar.menu.view.toggleFullScreen": "切换全屏",

@@ -143,6 +143,11 @@ import {
   syncApplicationUnreadBadge,
   handleDesktopWindowCloseRequest,
 } from "./desktopWindowLifecycle.js";
+import {
+  getZCodeGoTakeoverHandler,
+  initZCodeGoTakeover,
+} from "./zcodeGoTakeover.js";
+import { isZCodeGoBubbleWindow } from "./zcodeGoBubble.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
   getCredentialsDir,
@@ -1681,6 +1686,7 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         platform: process.platform,
         forceQuit: forceQuitRef.current,
         explicitQuitRequested: explicitQuitRef.current,
+        zcodeGoTakeover: getZCodeGoTakeoverHandler(),
         closeToTrayOnWindows,
         isLastWindow: getMainApplicationWindows().length === 1,
         label,
@@ -2277,6 +2283,16 @@ app.whenReady().then(async () => {
 
   logger.info("[startup] 创建主窗口");
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
+
+  // zcode-go 接管模式：写就绪标记、监听 SHOW 信号、准备悬浮气泡。
+  initZCodeGoTakeover({
+    // getAllWindows 顺序未定义：显式排除气泡窗口，取真正的应用主窗
+    getMainWindow: () =>
+      getApplicationWindowsExcludingCuaIndicator().find(
+        (win) => !isZCodeGoBubbleWindow(win) && win !== updateStatusWindow,
+      ) ?? null,
+    logger,
+  });
 
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];
   if (primaryWindow) {

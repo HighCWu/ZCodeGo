@@ -1,0 +1,173 @@
+name: official-e2e
+
+# 锚定官方提交（zai-org/ZCode merge-base）→ 三平台构建官方@锚点 + 本 fork 产物
+# → 以官方机制挂载插件 → E2E（本地同款 scripts/e2e/run.mjs）。
+# 官方升级后：merge-base 不变 → 锚点稳定；合并官方 → 锚点自动前移。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "plugin/**"
+      - "packages/desktop/src/**"
+      - "packages/services/src/zcode-agent/**"
+      - "scripts/**"
+      - ".github/workflows/official-e2e.yml"
+  schedule:
+    - cron: "0 19 * * *" # 每日 UTC 19 点（官方升级回归）
+
+concurrency:
+  group: official-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  anchor:
+    runs-on: ubuntu-latest
+    outputs:
+      anchor: ${{ steps.anchor.outputs.anchor }}
+      strategy: ${{ steps.anchor.outputs.strategy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # merge-base 需要本 fork 完整历史
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 锚定官方提交
+        id: anchor
+        run: node scripts/ci/find-official-anchor.mjs
+      - name: 摘要
+        run: |
+          echo "锚点（${{ steps.anchor.outputs.strategy }}）：${{ steps.anchor.outputs.anchorShort }}"
+
+  e2e:
+    needs: anchor
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            gui: "1"
+          - os: windows-2022
+            gui: ""
+          - os: macos-14
+            gui: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false" # 官方构建禁用签名发现
+      ZCODE_OFFICIAL_REMOTE: https://github.com/zai-org/ZCode.git
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 官方源码 @ 锚点
+        uses: actions/checkout@v4
+        with:
+          repository: zai-org/ZCode
+          ref: ${{ needs.anchor.outputs.anchor }}
+          path: official
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # ── 1. 构建 fork 产物（插件 CJS + 桌面 out/）─────────────────────────
+      - name: fork 依赖
+        run: pnpm install --no-frozen-lockfile
+      - name: 构建插件（zcode-go.cjs）
+        run: node plugin/build.mjs
+      - name: 构建桌面产物（tsup + vite build，preview 身份）
+        run: |
+          cd packages/desktop
+          ZCODE_PREVIEW_IDENTITY=1 npx tsup
+          ZCODE_PREVIEW_IDENTITY=1 npx vite build
+
+      # ── 2. 构建官方 @ 锚点（unpacked 即"安装态"）────────────────────────
+      - name: 官方依赖
+        working-directory: official
+        run: pnpm install --no-frozen-lockfile
+      - name: 构建官方桌面（electron-builder --dir）
+        working-directory: official/packages/desktop
+        run: |
+          pnpm run prepare:runtime-assets || true
+          npx electron-builder --dir || pnpm run build
+      - name: 定位官方二进制
+        id: officialbin
+        run: |
+          node - <<'EOF' >> "$GITHUB_OUTPUT"
+          const { globSync } = require("node:fs");
+          const path = require("node:path");
+          const candidates = [
+            ["linux", "dist/linux-unpacked"],
+            ["win32", "dist/win-unpacked"],
+            ["darwin", "dist/mac"],
+          ];
+          const [plat, dir] = candidates.find(([p]) => p === process.platform);
+          const root = path.join(process.cwd(), dir);
+          const bin = process.platform === "darwin"
+            ? globSync("**/MacOS/*", { cwd: root }).map((f) => path.join(root, f))[0]
+            : globSync("*", { cwd: root }).filter((f) => /\.(exe)?$/i.test(f) || !f.includes("."))
+                .map((f) => path.join(root, f))[0];
+          console.log(`bin=${bin}`);
+          EOF
+      - name: 官方二进制冒烟（RunAsNode）
+        run: |
+          ELECTRON_RUN_AS_NODE=1 "${{ steps.officialbin.outputs.bin }}" -e "console.log('official-as-node OK', process.versions.node)"
+
+      # ── 3. 以官方机制挂载插件（config plugins.dirs，冷加载生效）──────────
+      - name: 挂载插件到官方用户配置
+        run: |
+          node - <<'EOF'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const os = require("node:os");
+          const configPath = path.join(os.homedir(), ".zcode", "cli", "config.json");
+          fs.mkdirSync(path.dirname(configPath), { recursive: true });
+          const config = fs.existsSync(configPath)
+            ? JSON.parse(fs.readFileSync(configPath, "utf8"))
+            : {};
+          config.plugins = config.plugins ?? {};
+          config.plugins.dirs = [path.join(process.env.GITHUB_WORKSPACE, "plugin")];
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          console.log("plugins.dirs =", config.plugins.dirs[0]);
+          EOF
+
+      # ── 4. E2E ─────────────────────────────────────────────────────────
+      - name: Linux GUI 工具
+        if: runner.os == 'Linux'
+        # wails e2e 实践：xdotool 需要 WM（windowactivate/z 序/任务栏状态），
+        # 裸 Xvfb 不够；截图用 imagemagick，窗口树用 x11-utils。
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y xdotool xvfb openbox x11-utils imagemagick
+      - name: E2E（Linux Xvfb+openbox / 其他平台核心+启动+运行时）
+        env:
+          ZCODE_GO_E2E_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
+          ZCODE_GO_E2E_GUI: ${{ matrix.gui }}
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" bash -c '
+              openbox >/tmp/openbox.log 2>&1 &
+              sleep 2
+              node scripts/e2e/run.mjs
+              rc=$?
+              kill %1 2>/dev/null || true
+              exit $rc
+            '
+          else
+            node scripts/e2e/run.mjs
+          fi
+      - name: 上传排障产物
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ matrix.os }}
+          path: |
+            ~/.zcode-go/
+            official/packages/desktop/dist/
+          if-no-files-found: ignore

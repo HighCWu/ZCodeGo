@@ -26,6 +26,7 @@ import { checkForUpdateMenuClick } from "./autoUpdater.js";
 import { exportLogs } from "./exportLogs.js";
 import { openResourceManager } from "./resourceManagerWindow.js";
 import { resolveCuaOsSupport } from "./cuaOsSupport.js";
+import { isZCodeGoTakeoverEnabled, returnToOfficial } from "./zcodeGoTakeover.js";
 import { syncWindowControlsOverlayForZoomLevel } from "./desktopWindowButtonPosition.js";
 import {
   DEFAULT_DESKTOP_WINDOW_HEIGHT,
@@ -474,6 +475,16 @@ async function resolveCurrentZCodeEndpointOrigin(settingService: {
   });
 }
 
+function returnToOfficialZCodeFromCommand(options: {
+  logger: { warn: (...args: unknown[]) => void };
+}): void {
+  if (!isZCodeGoTakeoverEnabled()) {
+    options.logger.warn("[desktop-command] returnToOfficialZCode ignored: takeover disabled");
+    return;
+  }
+  void returnToOfficial();
+}
+
 export async function executeDesktopCommand(options: {
   command: DesktopCommandId;
   fetchHelpConfig?: () => Promise<unknown>;
@@ -514,6 +525,10 @@ export async function executeDesktopCommand(options: {
       return;
     case DesktopCommandIds.CloseWindow:
       targetWindow?.close();
+      return;
+    case DesktopCommandIds.ReturnToOfficialZCode:
+      // zcode-go：返回官方桌面（唤回官方窗口 + 主窗转气泡）；未启用接管时为空操作。
+      returnToOfficialZCodeFromCommand(options);
       return;
     case DesktopCommandIds.MinimizeWindow:
       targetWindow?.minimize();

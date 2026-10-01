@@ -1507,6 +1507,7 @@ const enUS: Record<string, string> = {
   "titleBar.menu.file.openWorkspace": "Open workspace",
   "titleBar.menu.file.closeWindow": "Close window",
   "titleBar.windowMenu": "Window menu",
+  "titleBar.window.returnOfficial": "Return to official ZCode",
   "titleBar.window.minimize": "Minimize window",
   "titleBar.window.toggleMaximize": "Maximize or restore window",
   "titleBar.menu.view.toggleFullScreen": "Toggle full screen",

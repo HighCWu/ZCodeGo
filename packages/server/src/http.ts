@@ -320,6 +320,22 @@ export function createHttpServer(
   app.get("/api/server-info", (c) => c.json(createServerInfo(options)));
   app.post("/api/rpc-host-capability", (c) => c.json(hostCapabilities.issue()));
 
+  // ── zcode-go：端点 ID + 访问密码 + 远端路由 ──────────────────────────────
+  const endpointId = randomUUID().replace(/-/g, "").slice(0, 12);
+  const accessPassword = Array.from({ length: 10 }, () =>
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)],
+  ).join("");
+  app.get("/api/zcode-go/info", (c) =>
+    c.json({
+      endpointId,
+      password: accessPassword,
+      remoteUrl: `https://zcode-go.aimon.win/remote/${endpointId}-${accessPassword}/`,
+      localUrl: `http://127.0.0.1:${port}/`,
+    }),
+  );
+  log(`[zcode-go] endpoint: ${endpointId} password: ${accessPassword}`);
+  log(`[zcode-go] remote: https://zcode-go.aimon.win/remote/${endpointId}-${accessPassword}/`);
+
   // 普通 `/ws` 永远是 terminal-client；浏览器/任意客户端设置旧 mode header
   // 都不能再把自己提升为 trusted host。
   app.get(
@@ -449,7 +465,13 @@ export function createHttpServer(
   if (options.staticRoot?.trim()) {
     const staticRoot = options.staticRoot.trim();
     app.get("*", async (c) => {
-      const pathname = new URL(c.req.url).pathname;
+      let pathname = new URL(c.req.url).pathname;
+      // zcode-go 远端路由格式：/remote/<端点ID>-<密码>/... → 剥离前缀后按静态路径处理
+      if (pathname.startsWith("/remote/")) {
+        const rest = pathname.slice("/remote/".length);
+        const slashIdx = rest.indexOf("/");
+        pathname = slashIdx >= 0 ? rest.slice(slashIdx) : "/";
+      }
       const filePath = await resolveStaticFile(staticRoot, pathname, options.spaFallback ?? true);
       if (!filePath) {
         return c.notFound();
