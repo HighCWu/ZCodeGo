@@ -162,12 +162,19 @@ function ensureApp() {
     log(`app 产物已同步（out/）`);
     syncedOut = true;
   }
-  // package.json：main → out/main/index.js（version 保持与 desktop 包一致，electron-updater 需合法 semver）
+  // package.json：main → out/main/index.js。
+  // version 与官方打包同源：electron-builder.config.js 的 extraMetadata 取
+  // 根 package.json version（scripts/build-metadata.mjs normalizeVersion 去
+  // 前导非数字）；我们未走 electron-builder，等价于装配时写入
+  // resources/app/package.json。electron-updater 需要合法 semver。
   const desktopPkg = JSON.parse(readFileSync(join(desktopDir, "package.json"), "utf8"));
+  const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  const appVersion =
+    String(rootPkg.version ?? "").replace(/^[^\d]*/, "") || desktopPkg.version || "0.0.0";
   writeFileSync(
     join(appDir, "package.json"),
     JSON.stringify(
-      { name: "zcode-go", version: desktopPkg.version || "3.14.3", main: "out/main/index.js", type: desktopPkg.type ?? "module" },
+      { name: "zcode-go", version: appVersion, main: "out/main/index.js", type: desktopPkg.type ?? "module" },
       null,
       1,
     ) + "\n",
