@@ -13,6 +13,7 @@
  *   launch launcher 冷启动 → desktop.pid + “takeover 模式就绪” 日志
  *   runtime host 子进程树中 zcode-cli 的 exe == 官方二进制（ELECTRON_RUN_AS_NODE）
  *   gui    主窗存在；bare /zcode-go → SHOW → 官方窗隐藏 + ZCode Go 可见；close→气泡
+ *          → 点气泡回切；全程分步截图至 ~/.zcode-go/e2e-shots/（CI artifact 可拉本地肉眼核对）
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
@@ -44,6 +45,29 @@ function run(command, args, options = {}) {
 }
 function sh(script, stdin = "") {
   return run("sh", ["-c", script], { input: stdin });
+}
+
+// 分步截图（三平台，wails e2e 同款思路：每阶段留证据，artifact 拉本地肉眼核对）：
+//   linux: import（imagemagick）| darwin: screencapture | win32: CopyFromScreen
+const shotsDir = join(stateDir, "e2e-shots");
+rmSync(shotsDir, { recursive: true, force: true });
+run("sh", ["-c", `mkdir -p '${shotsDir}'`]);
+function snapScreen(name) {
+  const file = join(shotsDir, name);
+  if (process.platform === "linux") {
+    run("sh", ["-c", `import -window root '${file}' 2>/dev/null || true`]);
+  } else if (process.platform === "darwin") {
+    run("screencapture", ["-x", file]);
+  } else {
+    const ps =
+      "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;" +
+      "$b=[System.Windows.Forms.SystemInformation]::VirtualScreen;" +
+      "$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;" +
+      "$g=[System.Drawing.Graphics]::FromImage($bmp);" +
+      "$g.CopyFromScreen($b.X,$b.Y,0,0,$bmp.Size);" +
+      `$bmp.Save('${file.replaceAll("\\", "/")}');`;
+    run("powershell", ["-NoProfile", "-Command", ps]);
+  }
 }
 
 // ── core：hook fixtures（用系统 node 直接跑 CJS；CI/LINUX 均可）──────────
@@ -169,6 +193,8 @@ if (!skipLaunch) {
       launchLog.includes("takeover 模式就绪"),
       `pid=${pid}`,
     );
+    await new Promise((r) => setTimeout(r, 3000));
+    snapScreen("10-launch-desktop.png");
 
     // runtime：desktop 子树里的 zcode-cli，其 exe 应为官方二进制
     await new Promise((r) => setTimeout(r, 8000));
@@ -217,6 +243,7 @@ if (!skipLaunch) {
     } else {
       check("runtime: 非 Linux 仅验证运行时进程存在", true, "(exe 校验仅 Linux)");
     }
+    snapScreen("20-runtime-spawned.png");
   }
 
   // ── gui（Linux + ZCODE_GO_E2E_GUI=1；模式取自 wails e2e 实践）────────────
@@ -279,8 +306,16 @@ if (!skipLaunch) {
         .split("\n")
         .includes(w);
 
+    // Linux 窗口级截图（xdotool 有窗口句柄；其他平台用全屏 snapScreen 已覆盖阶段证据）
+    const snapWindow = (name, w) => {
+      if (!w) return;
+      run("sh", ["-c", `import -window ${w} '${join(shotsDir, name)}' 2>/dev/null || true`]);
+    };
+    const snapRoot = (name) => snapScreen(name);
+
     const mainWin = findWindowByWidth(800, 100000);
     check("gui: ZCode Go 主窗存在", mainWin !== "", `win=${mainWin}`);
+    snapWindow("31-main-window.png", mainWin);
 
     if (mainWin) {
       // bare /zcode-go → SHOW → enterZCodeGo（官方在跑则其窗口被隐藏）
@@ -296,6 +331,8 @@ if (!skipLaunch) {
         const officialVisible = xdotool("search", "--pid", officialMainPid, "--onlyvisible");
         check("gui: 官方窗口已隐藏", (officialVisible ?? "") === "", `可见=${officialVisible}`);
       }
+      snapWindow("32-entered-main.png", mainWin);
+      snapRoot("32-entered-root.png");
 
       // ── 返回官方 → 气泡（尺寸定位 + X 属性断言）→ 点气泡回切 ──────────
       xdotool("windowactivate", "--sync", mainWin);
@@ -322,6 +359,9 @@ if (!skipLaunch) {
           wmState.includes("_NET_WM_STATE_SKIP_TASKBAR"),
           wmState.trim().slice(0, 80),
         );
+        snapWindow("33-bubble.png", bubbleWin);
+        run("sh", ["-c", `convert '${join(shotsDir, "33-bubble.png")}' -resize 400% '${join(shotsDir, "33-bubble-4x.png")}' 2>/dev/null || true`]);
+        snapRoot("33-returned-root.png");
 
         // 坐标点击气泡中心 → 回切
         const g = windowGeometry(bubbleWin);
@@ -334,7 +374,14 @@ if (!skipLaunch) {
         check("gui: 回切后主窗可见", isVisible(mainWin));
         check("gui: 回切后气泡隐藏", !isVisible(bubbleWin));
       }
+      snapWindow("34-reentered-main.png", mainWin);
     }
+
+    // 截图完整性断言（列名进日志，方便 CI 页面直接看产出了哪些）
+    const shots = existsSync(shotsDir)
+      ? (run("sh", ["-c", `ls -1 '${shotsDir}'`]).stdout ?? "").trim().split("\n").filter(Boolean)
+      : [];
+    check("gui: 分步截图产出（≥7 张）", shots.length >= 7, shots.join(", ") || "(无)");
   }
 }
 

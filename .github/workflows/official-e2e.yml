@@ -198,6 +198,13 @@ jobs:
           else
             node scripts/e2e/run.mjs
           fi
+      - name: 上传分步截图（三平台，成功失败均产出，肉眼核对用）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-shots-${{ matrix.os }}
+          path: ~/.zcode-go/e2e-shots/
+          if-no-files-found: ignore
       - name: 上传排障产物
         if: failure()
         uses: actions/upload-artifact@v4
