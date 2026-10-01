@@ -131,6 +131,7 @@ function ensureDistAssets() {
  */
 function ensureMacClone() {
   const exeProbe = join(execDir, basename(officialBin));
+  const cloneResourcesDir = join(cloneAppDir, "Contents", "Resources");
   const stamp = (() => {
     const st = statSync(officialBin);
     return `${officialBin}\n${st.size}\n${Math.round(st.mtimeMs)}`;
@@ -153,6 +154,12 @@ function ensureMacClone() {
   // 源 app 可能带 quarantine（真实用户从 DMG 安装），克隆后清除，避免
   // Gatekeeper 对未公证的改封 bundle 弹窗
   spawnSync("xattr", ["-rd", "com.apple.quarantine", cloneAppDir], { stdio: "ignore" });
+  // 关键：Electron 加载顺序 app.asar → app/。克隆带入的官方 app.asar 会
+  // 抢先加载（CI 实测：窗口/host 全正常但跑的是官方代码，takeover 不生效）。
+  // 删掉它让 fallback 落到我们的 Resources/app/。
+  for (const stale of ["app.asar", "app.asar.unpacked"]) {
+    rmSync(join(cloneResourcesDir, stale), { recursive: true, force: true });
+  }
   writeFileSync(cloneMarker, `${stamp}\n`, "utf8");
   log(`官方 bundle 克隆完成（clonefile→${cloneAppDir}）`);
   assembled = true;
