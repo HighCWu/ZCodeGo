@@ -56,14 +56,19 @@ fi
 node "$REPO_ROOT/scripts/ensure-official-electron.mjs" >>"$STATE_DIR/desktop-launch.log" 2>&1
 
 cd "$APP_DIR"
-# Windows（Git bash）下可执行文件必须带 .exe 后缀
+# Windows（Git bash）下可执行文件必须带 .exe 后缀；
+# mac 克隆 bundle 内二进制保留官方原名（CFBundleExecutable 必须一致），
+# 取 MacOS 目录下首个条目
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) ZCODE_EXE="$ELECTRON_ROOT/zcode.exe" ;;
-  Darwin)               ZCODE_EXE="$ELECTRON_ROOT/ZCode Go.app/Contents/MacOS/zcode" ;;
+  Darwin)
+    set -- "$ELECTRON_ROOT/ZCode Go.app/Contents/MacOS/"*
+    ZCODE_EXE="${1:-}"
+    [ -x "$ZCODE_EXE" ] || { echo "[zcode-go] 克隆 bundle 缺少可执行文件" >>"$STATE_DIR/desktop-launch.log" 2>&1; exit 1; }
+    ;;
   *)                    ZCODE_EXE="$ELECTRON_ROOT/zcode" ;;
 esac
-# mac CI 虚拟机（arm64 virtualization.framework）GPU helper 常被杀且拖垮 main，
-# 软件渲染足够（气泡/主窗均为自绘 UI）
+# CI 虚拟机 GPU helper 可能不稳，显式开关降级软件渲染（真实用户默认走 GPU）
 GPU_FLAGS=""
-[ "$(uname -s)" = "Darwin" ] && GPU_FLAGS="--disable-gpu"
+[ -n "${ZCODE_GO_DISABLE_GPU:-}" ] && GPU_FLAGS="--disable-gpu"
 exec "$ZCODE_EXE" --no-sandbox $GPU_FLAGS >>"$STATE_DIR/desktop-launch.log" 2>&1

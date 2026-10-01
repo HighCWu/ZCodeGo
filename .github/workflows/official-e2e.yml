@@ -266,6 +266,7 @@ jobs:
           ZCODE_GO_E2E_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
           ZCODE_GO_E2E_GUI: ${{ matrix.gui }}
           ZCODE_GO_E2E_ALLOW_NO_RUNTIME: "1"
+          ZCODE_GO_DISABLE_GPU: ${{ runner.os == 'macOS' && '1' || '' }}
           ZCODE_GO_E2E_ALLOW_NO_DESKTOP: ${{ runner.os == 'macOS' && '1' || '' }}
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
