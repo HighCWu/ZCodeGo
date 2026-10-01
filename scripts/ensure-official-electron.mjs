@@ -16,7 +16,7 @@
  *   --force 重装二进制与 app 产物（日常重建 out/ 后无需 --force，脚本按 mtime 同步）
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, statSync, readdirSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,9 +24,21 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "packages", "desktop");
 const electronRoot = join(homedir(), ".zcode-go", "electron");
-const appDir = join(electronRoot, "resources", "app");
 const officialBin = process.env.ZCODE_OFFICIAL_BIN?.trim() || "/opt/ZCode/zcode";
 const officialDir = dirname(officialBin);
+// macOS 官方二进制在 .app/Contents/MacOS/ 内，Chromium 需要完整的 bundle
+// 结构（../Frameworks、../Resources 相对布局），裸复制 MacOS 下的二进制会
+// dyld 找不到 Electron Framework 立即崩溃 —— 因此 mac 上重建同名结构：
+//   ~/.zcode-go/electron/ZCode Go.app/Contents/{MacOS/zcode, Resources/app, …}
+const isMacBundle = process.platform === "darwin";
+const macContents = isMacBundle ? join(electronRoot, "ZCode Go.app", "Contents") : null;
+const execDir = isMacBundle ? join(macContents, "MacOS") : electronRoot;
+const resourcesDir = isMacBundle ? join(macContents, "Resources") : join(electronRoot, "resources");
+const appDir = join(resourcesDir, "app");
+const officialContents = isMacBundle ? dirname(officialDir) : null;
+const officialResources = isMacBundle ? join(officialContents, "Resources") : join(officialDir, "resources");
+const assetsSource = isMacBundle ? officialContents : officialDir;
+const assetsTarget = isMacBundle ? macContents : electronRoot;
 const force = process.argv.includes("--force");
 const jsonOut = process.argv.includes("--json");
 let syncedOut = false;
@@ -38,8 +50,8 @@ function log(msg) {
 const binName = process.platform === "win32" ? "zcode.exe" : "zcode";
 
 function ensureBinary() {
-  const target = join(electronRoot, binName);
-  mkdirSync(electronRoot, { recursive: true });
+  const target = join(execDir, binName);
+  mkdirSync(execDir, { recursive: true });
   if (force && existsSync(target) && lstatSync(target).ino !== lstatSync(officialBin).ino) {
     rmSync(target);
   }
@@ -50,22 +62,37 @@ function ensureBinary() {
       log(`二进制：硬链接（0 字节）`);
       return;
     }
-    // 2) reflink（btrfs/xfs/zfs 写时复制 ≈0 块）；文件系统不支持时 cp 自动退化为完整复制
+    // 2) reflink（btrfs/xfs/zfs 写时复制 ≈0 块）；文件系统不支持时 cp 自动退化为完整复制。
+    //    macOS/BSD cp 无 --reflink，直接落到 3)。
     const reflink = spawnSync("cp", ["--reflink=auto", officialBin, target], { stdio: "ignore" });
     if (reflink.status === 0 && existsSync(target)) {
       const shared = statSync(target).blocks < statSync(officialBin).blocks / 2;
       log(`二进制：${shared ? "reflink（≈0 字节）" : "完整复制（ext4 回退，约 200MB）"}`);
       return;
     }
-    throw new Error(`无法放置二进制：ln 与 cp --reflink 均失败`);
+    // 3) node 原生复制（跨平台兜底；copyFileSync 不保留可执行位，需 chmod）
+    try {
+      copyFileSync(officialBin, target);
+      chmodSync(target, 0o755);
+      log(`二进制：完整复制（约 200MB）`);
+      return;
+    } catch (error) {
+      throw new Error(`无法放置二进制：ln/cp/copyFileSync 均失败：${error.message}`);
+    }
   }
 }
 
 function ensureDistAssets() {
-  for (const entry of readdirSync(officialDir)) {
-    if (entry === binName || entry === basename(officialBin) || entry === "resources") continue;
-    const src = join(officialDir, entry);
-    const dst = join(electronRoot, entry);
+  for (const entry of readdirSync(assetsSource)) {
+    // mac：Contents 下跳过 MacOS（二进制单独放）与 Resources（下方按需装配）；
+    // 其他平台：根下跳过二进制与 resources 目录
+    if (isMacBundle) {
+      if (entry === "MacOS" || entry === "Resources") continue;
+    } else if (entry === binName || entry === basename(officialBin) || entry === "resources") {
+      continue;
+    }
+    const src = join(assetsSource, entry);
+    const dst = join(assetsTarget, entry);
     if (existsSync(dst)) continue;
     try {
       symlinkSync(src, dst);
@@ -85,11 +112,10 @@ function ensureDistAssets() {
 function ensureIcons() {
   // 打包态主进程从 resourcesPath 读图标（index.ts: icon.png / icon_512x512.png /
   // icon_windows.png）。直接链入官方图标：窗口图标与官方一致。
-  const officialResources = join(officialDir, "resources");
-  mkdirSync(join(electronRoot, "resources"), { recursive: true });
+  mkdirSync(resourcesDir, { recursive: true });
   for (const name of ["icon.png", "icon_512x512.png", "icon_windows.png"]) {
     const src = join(officialResources, name);
-    const dst = join(electronRoot, "resources", name);
+    const dst = join(resourcesDir, name);
     if (!existsSync(dst) && existsSync(src)) {
       symlinkSync(src, dst);
       log(`图标链接：${name}`);
@@ -137,7 +163,7 @@ function ensureLinuxDesktopEntry() {
 }
 
 function ensureApp() {
-  mkdirSync(join(electronRoot, "resources"), { recursive: true });
+  mkdirSync(resourcesDir, { recursive: true });
   // out/ 产物同步（mtime 检查，避免每次全量拷贝）
   const outSrc = join(desktopDir, "out");
   const outDst = join(appDir, "out");

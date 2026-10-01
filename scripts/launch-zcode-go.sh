@@ -55,6 +55,7 @@ cd "$APP_DIR"
 # Windows（Git bash）下可执行文件必须带 .exe 后缀
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) ZCODE_EXE="$ELECTRON_ROOT/zcode.exe" ;;
+  Darwin)               ZCODE_EXE="$ELECTRON_ROOT/ZCode Go.app/Contents/MacOS/zcode" ;;
   *)                    ZCODE_EXE="$ELECTRON_ROOT/zcode" ;;
 esac
 exec "$ZCODE_EXE" --no-sandbox >>"$STATE_DIR/desktop-launch.log" 2>&1

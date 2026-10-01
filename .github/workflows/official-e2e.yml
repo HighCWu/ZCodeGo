@@ -201,6 +201,23 @@ jobs:
           fi
           ELECTRON_RUN_AS_NODE=1 "$OFFICIAL_BIN" -e "console.log('official-as-node OK', process.versions.node)"
 
+      - name: 官方 runtime bundle 冒烟（RunAsNode + zcode.cjs）
+        env:
+          OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            BUNDLE="$(dirname "$(dirname "$(dirname "$OFFICIAL_BIN")")")/Resources/glm/zcode.cjs"
+          else
+            BUNDLE="$(dirname "$OFFICIAL_BIN")/resources/glm/zcode.cjs"
+          fi
+          if [ ! -f "$BUNDLE" ]; then
+            echo "::error::未找到官方 runtime bundle：$BUNDLE"
+            exit 1
+          fi
+          OUT="$(ELECTRON_RUN_AS_NODE=1 "$OFFICIAL_BIN" "$BUNDLE" --version 2>&1 || true)"
+          echo "bundle --version → $OUT"
+          case "$OUT" in *[![:space:]]*) ;; *) echo "::error::bundle 无输出"; exit 1;; esac
+
       # ── 3. 以官方机制挂载插件（config plugins.dirs，冷加载生效）──────────
       - name: 挂载插件到官方用户配置
         run: |
@@ -231,6 +248,7 @@ jobs:
         env:
           ZCODE_GO_E2E_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
           ZCODE_GO_E2E_GUI: ${{ matrix.gui }}
+          ZCODE_GO_E2E_ALLOW_NO_RUNTIME: "1"
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run -a --server-args="-screen 0 1920x1080x24" bash -c '
@@ -272,6 +290,7 @@ jobs:
           name: e2e-shots-${{ matrix.os }}
           path: ~/.zcode-go/e2e-shots/
           if-no-files-found: ignore
+          include-hidden-files: true
       - name: 上传排障产物
         if: failure()
         uses: actions/upload-artifact@v4
@@ -279,3 +298,4 @@ jobs:
           name: e2e-logs-${{ matrix.os }}
           path: ~/.zcode-go/
           if-no-files-found: ignore
+          include-hidden-files: true

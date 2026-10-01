@@ -92,11 +92,19 @@ function bubbleDataUrl(): string {
 function enforceSkipTaskbarViaXprop(target: BrowserWindow): void {
   if (process.platform !== "linux") return;
   try {
+    // BrowserWindow.id 是 Electron 序号，xprop 需要 X 窗口 id（XID）。
+    // getNativeWindowHandle 在 X11 返回 4 字节小端 XID（旧版可能为 hex 字符串）。
+    const handle = target.getNativeWindowHandle();
+    const xid =
+      handle.length === 4
+        ? handle.readUInt32LE(0)
+        : Number.parseInt(handle.toString("utf8").trim(), 16);
+    if (!Number.isFinite(xid) || xid <= 0) return;
     const child = spawn(
       "xprop",
       [
         "-id",
-        String(target.id),
+        String(xid),
         "-f",
         "_NET_WM_STATE 32a",
         "-set",
