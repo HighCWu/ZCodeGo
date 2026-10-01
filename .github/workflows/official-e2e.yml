@@ -110,6 +110,13 @@ jobs:
           ZCODE_PREVIEW_IDENTITY=1 npx vite build
 
       # ── 2. 构建官方 @ 锚点（unpacked 即"安装态"；缓存命中则整段跳过）─────
+      # 官方 desktop package.json 无 version 字段（官方发布管线另行注入），
+      # electron-builder 会 ⨯ 失败 —— 从官方根 package.json 借 version。
+      - name: 注入 desktop version（electron-builder 必需）
+        if: steps.official-dist.outputs.cache-hit != 'true'
+        working-directory: official/packages/desktop
+        run: |
+          node -e "const fs=require('fs');const root=JSON.parse(fs.readFileSync('../../package.json','utf8'));const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=p.version||root.version||'0.0.0';fs.writeFileSync('package.json',JSON.stringify(p,null,2));console.log('desktop version =',p.version)"
       - name: 官方依赖
         if: steps.official-dist.outputs.cache-hit != 'true'
         working-directory: official
@@ -119,7 +126,7 @@ jobs:
         working-directory: official/packages/desktop
         run: |
           pnpm run prepare:runtime-assets || true
-          npx electron-builder --dir || pnpm run build
+          npx electron-builder --dir --publish never || pnpm run build
       - name: 缓存命中提示
         if: steps.official-dist.outputs.cache-hit == 'true'
         run: echo "官方产物缓存命中（锚点 ${{ needs.anchor.outputs.anchor }}），已跳过官方安装与构建"
