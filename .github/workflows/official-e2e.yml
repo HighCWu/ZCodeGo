@@ -98,26 +98,62 @@ jobs:
           npx electron-builder --dir || pnpm run build
       - name: 定位官方二进制
         id: officialbin
+        env:
+          DESKTOP_DIR: ${{ github.workspace }}/official/packages/desktop
         run: |
           node - <<'EOF' >> "$GITHUB_OUTPUT"
-          const { globSync } = require("node:fs");
+          const fs = require("node:fs");
           const path = require("node:path");
-          const candidates = [
-            ["linux", "dist/linux-unpacked"],
-            ["win32", "dist/win-unpacked"],
-            ["darwin", "dist/mac"],
-          ];
-          const [plat, dir] = candidates.find(([p]) => p === process.platform);
-          const root = path.join(process.cwd(), dir);
-          const bin = process.platform === "darwin"
-            ? globSync("**/MacOS/*", { cwd: root }).map((f) => path.join(root, f))[0]
-            : globSync("*", { cwd: root }).filter((f) => /\.(exe)?$/i.test(f) || !f.includes("."))
-                .map((f) => path.join(root, f))[0];
+          const dist = path.join(process.env.DESKTOP_DIR, "dist");
+          const dirsByPlat = {
+            linux: ["linux-unpacked"],
+            win32: ["win-unpacked"],
+            darwin: ["mac", "mac-unpacked", "mac_universal"],
+          };
+          const namesByPlat = {
+            linux: ["zcode", "ZCode"],
+            win32: ["ZCode.exe", "zcode.exe"],
+            darwin: [],
+          };
+          function listDir(p) {
+            try { return fs.readdirSync(p, { withFileTypes: true }).map((e) => e.name); } catch { return null; }
+          }
+          // 精确名匹配 + 相对于 official/packages/desktop 的绝对路径（旧版在仓库根
+          // glob dist/... 永远落空输出 undefined；字典序还会先撞上 chrome_crashpad_handler）
+          let bin = null; const notes = [];
+          for (const d of dirsByPlat[process.platform] ?? []) {
+            const dir = path.join(dist, d);
+            for (const n of namesByPlat[process.platform] ?? []) {
+              const f = path.join(dir, n);
+              if (fs.existsSync(f) && fs.statSync(f).isFile()) { bin = f; break; }
+            }
+            if (!bin && process.platform === "darwin") {
+              const app = listDir(dir)?.find((e) => e.endsWith(".app"));
+              if (app) {
+                const macBin = path.join(dir, app, "Contents", "MacOS");
+                const exes = (listDir(macBin) ?? []).filter((e) => !e.includes("."));
+                if (exes.length > 0) bin = path.join(macBin, exes[0]);
+              }
+            }
+            if (bin) break;
+            const listing = listDir(dir);
+            if (listing) notes.push(`${d}: ${listing.slice(0, 20).join(", ")}`);
+          }
+          if (!bin) {
+            console.error(`未找到官方二进制。dist/=${JSON.stringify(listDir(dist))} 子目录=${notes.join(" | ") || "(无)"}`);
+            process.exit(1);
+          }
           console.log(`bin=${bin}`);
           EOF
       - name: 官方二进制冒烟（RunAsNode）
+        env:
+          OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
         run: |
-          ELECTRON_RUN_AS_NODE=1 "${{ steps.officialbin.outputs.bin }}" -e "console.log('official-as-node OK', process.versions.node)"
+          if [ -z "$OFFICIAL_BIN" ] || [ "$OFFICIAL_BIN" = "undefined" ]; then
+            echo "::error::官方二进制路径未解析：'$OFFICIAL_BIN'"
+            exit 1
+          fi
+          ELECTRON_RUN_AS_NODE=1 "$OFFICIAL_BIN" -e "console.log('official-as-node OK', process.versions.node)"
 
       # ── 3. 以官方机制挂载插件（config plugins.dirs，冷加载生效）──────────
       - name: 挂载插件到官方用户配置
