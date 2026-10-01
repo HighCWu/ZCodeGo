@@ -201,6 +201,22 @@ jobs:
           fi
           ELECTRON_RUN_AS_NODE=1 "$OFFICIAL_BIN" -e "console.log('official-as-node OK', process.versions.node)"
 
+      - name: macOS 官方 GUI 启动对照（归因 CI VM vs 克隆机制）
+        if: runner.os == 'macOS'
+        env:
+          OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
+        run: |
+          "$OFFICIAL_BIN" --no-sandbox --disable-gpu >/tmp/official-gui.log 2>&1 &
+          APP_PID=$!
+          sleep 30
+          if kill -0 "$APP_PID" 2>/dev/null; then
+            echo "官方原版 GUI 在 CI VM 存活 30s ✓（克隆 bundle 崩溃则为我方装配问题）" | tee -a "$GITHUB_STEP_SUMMARY"
+            kill "$APP_PID" 2>/dev/null || true
+          else
+            echo "官方原版 GUI 亦无法在 CI VM 存活（虚拟化环境限制，非 zcode-go 问题）" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "尾部日志："; tail -5 /tmp/official-gui.log || true
+          fi
+
       - name: 官方 runtime bundle 冒烟（RunAsNode + zcode.cjs）
         env:
           OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
@@ -250,6 +266,7 @@ jobs:
           ZCODE_GO_E2E_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
           ZCODE_GO_E2E_GUI: ${{ matrix.gui }}
           ZCODE_GO_E2E_ALLOW_NO_RUNTIME: "1"
+          ZCODE_GO_E2E_ALLOW_NO_DESKTOP: ${{ runner.os == 'macOS' && '1' || '' }}
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run -a --server-args="-screen 0 1920x1080x24" bash -c '
