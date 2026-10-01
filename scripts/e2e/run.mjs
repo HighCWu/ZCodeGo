@@ -88,10 +88,12 @@ function hookFeed(prompt) {
 }
 {
   const status = hookFeed("/zcode-go status");
-  const ok =
-    status.stdout.includes('"continue":false') &&
-    status.stdout.includes("官方 bin") &&
-    status.stdout.includes(officialBin);
+  // hook 输出为 JSON 字符串，Windows 反斜杠会被转义 —— parse 后比较原始值
+  let stopReason = "";
+  try {
+    stopReason = JSON.parse(status.stdout.slice(status.stdout.indexOf("{"))).stopReason ?? "";
+  } catch { /* 保持空，走失败分支 */ }
+  const ok = status.stdout.includes('"continue":false') && stopReason.includes(officialBin);
   check("hook: status 拦截并含官方路径", ok, status.stdout.slice(0, 80));
 }
 {
@@ -174,7 +176,9 @@ if (!skipLaunch) {
   }
   // setsid 分离仅 POSIX；Windows Git bash 无 setsid，直接后台（无 SIGHUP 语义，子进程自然存活）
   const detach = process.platform === "win32" ? "" : "setsid ";
-  const launcher = sh(`${detach}'${join(repoRoot, "scripts", "launch-zcode-go.sh")}' >/dev/null 2>&1 &`);
+  const launcher = run("sh", ["-c", `${detach}'${join(repoRoot, "scripts", "launch-zcode-go.sh")}' >/dev/null 2>&1 &`], {
+    env: { ...process.env, ZCODE_OFFICIAL_BIN: officialBin },
+  });
   check("launch: launcher 已分离启动", launcher.status === 0, `status=${launcher.status}`);
 
   const pidFile = join(stateDir, "desktop.pid");

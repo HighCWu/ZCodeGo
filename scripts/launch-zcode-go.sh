@@ -43,6 +43,12 @@ if [ "$build_needed" = 1 ]; then
     && ZCODE_PREVIEW_IDENTITY=1 npx tsup >>"$STATE_DIR/desktop-launch.log" 2>&1 \
     && ZCODE_PREVIEW_IDENTITY=1 npx vite build >>"$STATE_DIR/desktop-launch.log" 2>&1)
 fi
+# ensure 需要官方二进制：优先 env，其次插件发现写入的 official.json
+# （CI 与真实用户都是 official.json 路径；本机默认 /opt/ZCode/zcode 仅是兜底）
+if [ -z "${ZCODE_OFFICIAL_BIN:-}" ] && [ -f "$STATE_DIR/official.json" ]; then
+  ZCODE_OFFICIAL_BIN="$(node -e "try{console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).bin||'')}catch{}" "$STATE_DIR/official.json")"
+  export ZCODE_OFFICIAL_BIN
+fi
 node "$REPO_ROOT/scripts/ensure-official-electron.mjs" >>"$STATE_DIR/desktop-launch.log" 2>&1
 
 cd "$APP_DIR"

@@ -277,7 +277,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.os }}
-          path: |
-            ~/.zcode-go/
-            official/packages/desktop/dist/
+          path: ~/.zcode-go/
           if-no-files-found: ignore
