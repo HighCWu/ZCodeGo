@@ -62,4 +62,8 @@ case "$(uname -s)" in
   Darwin)               ZCODE_EXE="$ELECTRON_ROOT/ZCode Go.app/Contents/MacOS/zcode" ;;
   *)                    ZCODE_EXE="$ELECTRON_ROOT/zcode" ;;
 esac
-exec "$ZCODE_EXE" --no-sandbox >>"$STATE_DIR/desktop-launch.log" 2>&1
+# mac CI 虚拟机（arm64 virtualization.framework）GPU helper 常被杀且拖垮 main，
+# 软件渲染足够（气泡/主窗均为自绘 UI）
+GPU_FLAGS=""
+[ "$(uname -s)" = "Darwin" ] && GPU_FLAGS="--disable-gpu"
+exec "$ZCODE_EXE" --no-sandbox $GPU_FLAGS >>"$STATE_DIR/desktop-launch.log" 2>&1

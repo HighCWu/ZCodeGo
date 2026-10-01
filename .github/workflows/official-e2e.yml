@@ -300,5 +300,7 @@ jobs:
           path: |
             ~/.zcode-go/
             !~/.zcode-go/electron
+            ~/.zcode/v2/crash/
+            ~/Library/Logs/DiagnosticReports/
           if-no-files-found: ignore
           include-hidden-files: true
