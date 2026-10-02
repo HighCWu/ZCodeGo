@@ -38,6 +38,7 @@ export function TaskActionMenuContent({
   onCopyTaskPath,
   onCopyTaskLogPath,
   onCopySessionId,
+  onDeriveCompactSession,
   onViewModelTrajectory,
 }: {
   intl: {
@@ -73,6 +74,7 @@ export function TaskActionMenuContent({
   onCopyTaskPath: () => void;
   onCopyTaskLogPath: () => void;
   onCopySessionId?: () => void;
+  onDeriveCompactSession?: () => void;
   onViewModelTrajectory?: () => void;
 }) {
   const taskTargetActionsDisabled = disableTaskActions || disableTaskTargetActions;
@@ -193,6 +195,18 @@ export function TaskActionMenuContent({
             onSelect={onViewModelTrajectory}
           >
             {intl.formatMessage({ id: "taskList.viewModelTrajectory" })}
+          </Item>
+        </>
+      ) : null}
+      {onDeriveCompactSession ? (
+        <>
+          <Separator />
+          <Item
+            disabled={taskTargetActionsDisabled || !activeSessionId}
+            title={taskTargetActionsDisabled ? disabledReason : undefined}
+            onSelect={onDeriveCompactSession}
+          >
+            {intl.formatMessage({ id: "zcodeGo.oversizedBanner.action" })}
           </Item>
         </>
       ) : null}

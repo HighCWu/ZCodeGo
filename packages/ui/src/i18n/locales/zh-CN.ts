@@ -6493,6 +6493,8 @@ const zhCN: Record<string, string> = {
   "scheduledPreview.toast.running": "正在运行“{title}”…",
   "scheduledPreview.toast.view": "查看",
   "scheduledPreview.addSchedule": "添加计划",
-};
+
+  "zcodeGo.oversizedBanner.hint": "此会话历史 {count} 条，切换与发送可能变慢。建议分叉精简历史后的新会话：",
+  "zcodeGo.oversizedBanner.action": "分叉新会话",};
 
 export default zhCN;

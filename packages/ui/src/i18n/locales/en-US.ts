@@ -6815,6 +6815,8 @@ const enUS: Record<string, string> = {
   "scheduledPreview.toast.running": "Running “{title}”…",
   "scheduledPreview.toast.view": "View",
   "scheduledPreview.addSchedule": "Add schedule",
-};
+
+  "zcodeGo.oversizedBanner.hint": "This session has {count} messages; switching and sending may be slow. Consider forking a new session with compacted history:",
+  "zcodeGo.oversizedBanner.action": "Fork new session",};
 
 export default enUS;

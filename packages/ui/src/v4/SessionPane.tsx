@@ -133,6 +133,7 @@ import { ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
 import { SessionSubscriptionErrorPanel } from "@/v4/SessionSubscriptionErrorPanel.js";
 import { ConversationTimeline } from "@/v4/ConversationTimeline.js";
 import { filterZcodeGoGoalVerifyRows } from "@/v4/zcodeGoGoalVerifyRows.js";
+import { consumeZcodeGoForkIntent } from "@/v4/zcodeGoForkIntent.js";
 import { ConversationShareImportNotice } from "@/v4/ConversationShareImportNotice.js";
 import { ConversationShareConfirmationDock } from "@/v4/ConversationShareConfirmationDock.js";
 import { ConversationShareSuccessDock } from "@/v4/ConversationShareSuccessDock.js";
@@ -4558,6 +4559,17 @@ export function SessionPane({
         // 模型前缀 → provider 缓存命中，推理成本连续。
         const totalRows = timelineSnapshot?.rows.totalCount ?? 0;
         if (!forkActionsEnabled || totalRows < 5000) return null;
+        if (consumeZcodeGoForkIntent(sessionId ?? "")) {
+          const rowsWindow = timelineSnapshot?.rows.window ?? [];
+          for (let i = rowsWindow.length - 1; i >= 0; i -= 1) {
+            const row = rowsWindow[i]!;
+            if (row.kind === "assistantText" && row.actions?.canFork === true) {
+              handleFork({ rowId: row.rowId, entityId: row.entityId });
+              break;
+            }
+          }
+          return null;
+        }
         const windowRows = timelineSnapshot?.rows.window ?? [];
         let latestForkTarget: { rowId: number; entityId: string } | null = null;
         for (let i = windowRows.length - 1; i >= 0; i -= 1) {
@@ -4574,14 +4586,17 @@ export function SessionPane({
             className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
           >
             <span className="text-amber-200/90">
-              此会话历史 {totalRows.toLocaleString()} 条，切换与发送可能变慢。可派生新会话：模型上下文与缓存完全延续。
+              {intl.formatMessage(
+                { id: "zcodeGo.oversizedBanner.hint" },
+                { count: totalRows.toLocaleString() },
+              )}
             </span>
             <button
               type="button"
               className="shrink-0 rounded-md border border-amber-400/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20"
               onClick={() => handleFork(latestForkTarget)}
             >
-              派生新会话
+              {intl.formatMessage({ id: "zcodeGo.oversizedBanner.action" })}
             </button>
           </div>
         );
