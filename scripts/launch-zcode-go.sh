@@ -35,12 +35,22 @@ esac
 
 # 打包态 renderer（out/renderer/index.html）是必需产物：isPackaged=true 时主进程
 # 从文件加载 renderer，忽略 ELECTRON_RENDERER_URL。
+# 产物新鲜度：repo mtime 比 app 侧新超过 5s 才判重建（cpSync preserveTimestamps
+# 存在亚秒精度损失，-nt 严格比较会在 CI 上误触发全量重建，耗时数分钟）
 build_needed=0
 [ ! -f "$REPO_ROOT/packages/desktop/out/main/index.js" ] && build_needed=1
 [ ! -f "$REPO_ROOT/packages/desktop/out/renderer/index.html" ] && build_needed=1
-[ "$REPO_ROOT/packages/desktop/out/main/index.js" -nt "$APP_DIR/out/main/index.js" ] 2>/dev/null && build_needed=1
-[ "$REPO_ROOT/packages/desktop/out/renderer/index.html" -nt "$APP_DIR/out/renderer/index.html" ] 2>/dev/null && build_needed=1
 [ ! -f "$APP_DIR/out/main/index.js" ] && build_needed=1
+if [ "$build_needed" = 0 ]; then
+  stale=$(node -e "
+    const s = require('node:fs').statSync;
+    const repo = s(process.argv[1]).mtimeMs;
+    const app = s(process.argv[2]).mtimeMs;
+    process.stdout.write(repo - app > 5000 ? '1' : '0');
+  " "$REPO_ROOT/packages/desktop/out/main/index.js" "$APP_DIR/out/main/index.js" 2>>"$STATE_DIR/desktop-launch.log") || stale=0
+  [ "$stale" = "1" ] && build_needed=1
+fi
+echo "[zcode-go] build_needed=$build_needed" >>"$STATE_DIR/desktop-launch.log" 2>&1
 if [ "$build_needed" = 1 ]; then
   echo "[zcode-go] 构建桌面产物（tsup + vite build，preview 身份）…" >>"$STATE_DIR/desktop-launch.log" 2>&1
   (cd "$REPO_ROOT/packages/desktop" \

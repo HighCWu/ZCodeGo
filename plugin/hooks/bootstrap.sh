@@ -22,6 +22,7 @@ if [ -d /proc ]; then
 elif command -v ps >/dev/null 2>/dev/null; then
   pid=$$
   depth=0
+  trace="${HOME:-.}/.zcode-go/bootstrap-trace.log"
   while [ "${pid:-0}" -gt 1 ] && [ "$depth" -lt 64 ]; do
     e=$(ps -o comm= -p "$pid" 2>/dev/null || true)
     case "$e" in
@@ -30,6 +31,7 @@ elif command -v ps >/dev/null 2>/dev/null; then
         e=$(ps -o args= -p "$pid" 2>/dev/null | awk '{print $1}')
         ;;
     esac
+    echo "ps-walk depth=$depth pid=$pid exe=${e:-<empty>}" >> "$trace" 2>/dev/null
     case "$e" in
       *[Zz][Cc]ode*)
         case "$e" in *zcode-go*|*zcode_go*) ;; *) exe="$e"; break ;; esac
@@ -43,8 +45,10 @@ elif command -v ps >/dev/null 2>/dev/null; then
 fi
 
 if [ -z "$exe" ] || [ ! -x "$exe" ]; then
+  echo "ps-walk result: not-found" >> "$trace" 2>/dev/null
   echo "zcode-go bootstrap: official binary not found in ancestors" >&2
   exit 3
 fi
+echo "ps-walk result: $exe" >> "$trace" 2>/dev/null
 
 ELECTRON_RUN_AS_NODE=1 exec "$exe" "$HOOK_CJS" hook
