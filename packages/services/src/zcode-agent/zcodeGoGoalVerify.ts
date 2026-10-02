@@ -214,19 +214,44 @@ async function sendAndCollectVerdict(
   const collector = { turnId: null as string | null, text: "", lastAppendAt: Date.now() };
   replyCollectors.set(wsKey, collector);
   try {
-    await agent.sendConversationCommandV4({
-      ...workspace,
-      sessionId,
-      subscriberScope: SUBSCRIBER_SCOPE,
-      envelope: {
-        commandId: randomUUID(),
-        clientId: CLIENT_ID,
-        sessionId,
-        type: "sendText",
-        payload: { text },
-        issuedAt: new Date().toISOString(),
-      },
-    });
+    // 发送失败（传输异常/被拒）重试数次
+    let accepted = false;
+    for (let attempt = 1; attempt <= 3 && !accepted; attempt += 1) {
+      try {
+        const ack = (await agent.sendConversationCommandV4({
+          ...workspace,
+          sessionId,
+          subscriberScope: SUBSCRIBER_SCOPE,
+          envelope: {
+            commandId: randomUUID(),
+            clientId: CLIENT_ID,
+            sessionId,
+            type: "sendText",
+            payload: { text },
+            issuedAt: Date.now(),
+          },
+        })) as { status?: string } | undefined;
+        accepted = ack?.status === "accepted";
+        if (!accepted) {
+          logger?.warn(traceId, "[zcode-go goal 复核] 复核消息未被接受，将重试", {
+            sessionId,
+            attempt,
+            status: ack?.status ?? "no-ack",
+          });
+        }
+      } catch (error) {
+        logger?.warn(traceId, "[zcode-go goal 复核] 复核消息发送异常，将重试", {
+          sessionId,
+          attempt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (!accepted && attempt < 3) await sleep(5_000);
+    }
+    if (!accepted) {
+      logger?.warn(traceId, "[zcode-go goal 复核] 复核消息多次发送失败，放行完成", { sessionId });
+      return null;
+    }
     const deadline = Date.now() + REPLY_TIMEOUT_MS;
     while (Date.now() < deadline) {
       await sleep(1_000);
@@ -265,7 +290,7 @@ function judgmentPrompt(objective: string): string {
     `The session goal (GOAL) is:\n${objective}\n\n` +
     "This goal was previously marked as complete, but that verdict may be wrong.\n" +
     "Judge from the conversation context alone whether the goal has actually been completed.\n" +
-    "Do not call tools and do not investigate files or commands \u2014 context awareness only.\n" +
+    "Do not call tools and do not investigate files or commands \u2014 context awareness only. Reply immediately and briefly, without an extended reasoning phase.\n" +
     "Superficial, partial, or plan-only completion counts as not complete; when in doubt, treat it as not complete.\n\n" +
     'On the first line, output only the verdict JSON: {"passed": true or false, "reason": "one-sentence justification"}. ' +
     "A brief explanation may follow. Write the reason in the primary natural language of the objective."
@@ -276,7 +301,7 @@ function doubleCheckPrompt(objective: string): string {
   return (
     `${ZCODE_GO_GOAL_VERIFY_MARKER} r2\n` +
     "To avoid misjudgment on complex projects, discard your previous conclusion and re-judge from the " +
-    "conversation context alone whether the goal above has truly been completed. Do not call tools or investigate.\n" +
+    "conversation context alone whether the goal above has truly been completed. Do not call tools or investigate. Reply immediately and briefly.\n" +
     "Superficial, partial, or plan-only completion counts as not complete; when in doubt, treat it as not complete.\n" +
     'On the first line, output only the JSON: {"passed": true or false, "reason": "one-sentence justification"}.'
   );
@@ -301,7 +326,7 @@ async function retriggerGoal(
           sessionId,
           type: "sendGoalCommand",
           payload: { text: objective },
-          issuedAt: new Date().toISOString(),
+          issuedAt: Date.now(),
         },
       });
       logger?.info(traceId, "[zcode-go goal 复核] 已重触发 goal（v4 sendGoalCommand → active + 自动续跑）", {
