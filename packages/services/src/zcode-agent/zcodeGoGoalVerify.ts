@@ -262,21 +262,25 @@ async function sendAndCollectVerdict(
 function judgmentPrompt(objective: string): string {
   return (
     `${ZCODE_GO_GOAL_VERIFY_MARKER} r1\n` +
-    `本会话的目标（GOAL）原文如下：\n${objective}\n\n` +
-    "该目标此前已被判定为完成，但判定可能有误。请你作为执行该目标的模型，认真核查它是否已经真正完成：\n" +
-    "- 可以使用只读工具检查实际状态（读文件、运行只读命令、查看 todo 列表）。\n" +
-    "- 不要修改任何文件、不要执行有副作用的命令。\n" +
-    "- 逐条核对目标的每个显式要求（文件、命令、测试、验收条件）；表面完成、部分完成、仅计划完成都算未完成；有疑问按未完成处理。\n\n" +
-    '第一行只输出复核结论 JSON：{"passed": true 或 false, "reason": "一句话依据"}，随后可补充简短说明。'
+    `The session goal (GOAL) is:\n${objective}\n\n` +
+    "This goal was previously marked as complete, but that verdict may be wrong. " +
+    "As the model that executed this goal, carefully verify whether it has actually been completed:\n" +
+    "- You may use read-only tools to inspect the actual state (read files, run read-only commands, check the todo list).\n" +
+    "- Do not modify any files and do not run commands with side effects.\n" +
+    "- Check every explicit requirement of the goal one by one (files, commands, tests, acceptance criteria). " +
+    "Superficial, partial, or plan-only completion counts as not complete. When in doubt, treat it as not complete.\n\n" +
+    'On the first line, output only the verdict JSON: {"passed": true or false, "reason": "one-sentence justification"}. ' +
+    "A brief explanation may follow. Write the reason in the primary natural language of the objective."
   );
 }
 
 function doubleCheckPrompt(objective: string): string {
   return (
     `${ZCODE_GO_GOAL_VERIFY_MARKER} r2\n` +
-    "为避免复杂项目中的判断失误，请忽略你刚才的结论，重新独立核查一次上述目标是否真正完成：" +
-    "再次逐条检查关键交付物、todo 状态与验收条件，宁可多查一轮。\n" +
-    '第一行只输出 JSON：{"passed": true 或 false, "reason": "一句话依据"}。'
+    "To avoid misjudgment on complex projects, discard your previous conclusion and independently " +
+    "re-verify whether the goal above has truly been completed: re-check the key deliverables, todo status, " +
+    "and acceptance criteria one by one. When in doubt, run another check instead of assuming.\n" +
+    'On the first line, output only the JSON: {"passed": true or false, "reason": "one-sentence justification"}.'
   );
 }
 
