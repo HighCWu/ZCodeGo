@@ -336,12 +336,22 @@ function runTakeover(): void {
     return;
   }
   try {
-    const child = spawn(launcher, [], {
-      detached: true,
-      stdio: "ignore",
-      cwd: homedir(),
-      shell: false,
-    });
+    // Windows 无法直接 exec .sh（spawn EFTYPE），须经 bash（hooks.json 的
+    // sh 同源——Git bash 在 PATH 上）
+    const isWin = process.platform === "win32";
+    const child = isWin
+      ? spawn(process.env.SHELL?.trim() || "bash", [launcher], {
+          detached: true,
+          stdio: "ignore",
+          cwd: homedir(),
+          shell: false,
+        })
+      : spawn(launcher, [], {
+          detached: true,
+          stdio: "ignore",
+          cwd: homedir(),
+          shell: false,
+        });
     child.unref();
     log(`拉起 zcode-go：${launcher}`);
   } catch (error) {

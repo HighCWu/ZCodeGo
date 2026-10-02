@@ -296,7 +296,13 @@ function runTakeover() {
     return;
   }
   try {
-    const child = (0, import_node_child_process.spawn)(launcher, [], {
+    const isWin = process.platform === "win32";
+    const child = isWin ? (0, import_node_child_process.spawn)(process.env.SHELL?.trim() || "bash", [launcher], {
+      detached: true,
+      stdio: "ignore",
+      cwd: (0, import_node_os.homedir)(),
+      shell: false
+    }) : (0, import_node_child_process.spawn)(launcher, [], {
       detached: true,
       stdio: "ignore",
       cwd: (0, import_node_os.homedir)(),

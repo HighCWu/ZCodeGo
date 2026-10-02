@@ -384,20 +384,14 @@ function hookFeed(prompt) {
     if (!settled) {
       console.error(`[e2e][session][events] ${eventsRaw.slice(-2000)}`);
     }
-    const isStatusProbe = /\bstatus\b/.test(sessionPrompt);
-    if (isStatusProbe) {
-      check(
-        "session: 真实会话 hook 拦截（status 回复含官方路径）",
-        eventsRaw.includes("官方 bin") || eventsRaw.includes("HookRunBlocked"),
-        eventsRaw.slice(-260),
-      );
-    } else {
-      check(
-        "session: 真实会话 hook 拦截（正在切换 / HookRunBlocked）",
-        eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked"),
-        eventsRaw.slice(-260),
-      );
-    }
+    // 注：协议路径会把斜杠命令展开为包装文本且不带子命令参数，因此经
+    // session/send 的 "/zcode-go [status]" 一律按裸 /zcode-go（接管）处理；
+    // status 子命令仅在桌面原始输入路径下可达
+    check(
+      "session: 真实会话 hook 拦截（正在切换 / HookRunBlocked）",
+      eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked"),
+      eventsRaw.slice(-260),
+    );
 
     // 祖先链发现：hook 进程在真实运行时树内经 bootstrap.sh 解析出官方 bin
     let ancestryOk = false;
@@ -409,14 +403,12 @@ function hookFeed(prompt) {
     } catch { /* 保持失败态 */ }
     check("session: 祖先链发现官方 bin（真实进程树解析）", ancestryOk, ancestryDetail);
 
-    if (!isStatusProbe) {
-      let pidS = 0;
-      for (let i = 0; i < 45 && !pidS; i += 1) {
-        try { pidS = Number(readFileSync(join(stateDir, "desktop.pid"), "utf8").trim()) || 0; } catch { /* 等待 */ }
-        if (!pidS) await new Promise((r) => setTimeout(r, 2000));
-      }
-      check("session: 接管桌面被真实 hook 拉起（desktop.pid）", pidS > 0, `pid=${pidS || "无"}`);
+    let pidS = 0;
+    for (let i = 0; i < 75 && !pidS; i += 1) {
+      try { pidS = Number(readFileSync(join(stateDir, "desktop.pid"), "utf8").trim()) || 0; } catch { /* 等待 */ }
+      if (!pidS) await new Promise((r) => setTimeout(r, 2000));
     }
+    check("session: 接管桌面被真实 hook 拉起（desktop.pid）", pidS > 0, `pid=${pidS || "无"}`);
 
     try { appServer.kill("SIGTERM"); } catch { /* 尽力而为 */ }
     try { provider.kill(); } catch { /* 尽力而为 */ }

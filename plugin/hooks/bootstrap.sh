@@ -19,11 +19,17 @@ if [ -d /proc ]; then
     pid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || break
     [ -n "${pid:-}" ] || break
   done
-elif command -v ps >/dev/null 2>&1; then
+elif command -v ps >/dev/null 2>/dev/null; then
   pid=$$
   depth=0
   while [ "${pid:-0}" -gt 1 ] && [ "$depth" -lt 64 ]; do
     e=$(ps -o comm= -p "$pid" 2>/dev/null || true)
+    case "$e" in
+      */*) ;;                 # 全路径
+      *)  # 某些平台 comm 只有程序名——回退 args 首词（完整可执行路径）
+        e=$(ps -o args= -p "$pid" 2>/dev/null | awk '{print $1}')
+        ;;
+    esac
     case "$e" in
       *[Zz][Cc]ode*)
         case "$e" in *zcode-go*|*zcode_go*) ;; *) exe="$e"; break ;; esac
