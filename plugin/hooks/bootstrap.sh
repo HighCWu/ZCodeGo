@@ -4,6 +4,8 @@
 # 非 Linux/macOS 环境以退出码 3 交回 hooks.json 的 || 链（Windows → PowerShell）。
 set -u
 
+trace="${HOME:-.}/.zcode-go/bootstrap-trace.log"
+
 HOOK_CJS="$(dirname "$0")/zcode-go.cjs"
 
 exe=""
@@ -22,7 +24,6 @@ if [ -d /proc ]; then
 elif command -v ps >/dev/null 2>/dev/null; then
   pid=$$
   depth=0
-  trace="${HOME:-.}/.zcode-go/bootstrap-trace.log"
   while [ "${pid:-0}" -gt 1 ] && [ "$depth" -lt 64 ]; do
     e=$(ps -o comm= -p "$pid" 2>/dev/null || true)
     case "$e" in
@@ -45,10 +46,10 @@ elif command -v ps >/dev/null 2>/dev/null; then
 fi
 
 if [ -z "$exe" ] || [ ! -x "$exe" ]; then
-  echo "ps-walk result: not-found" >> "$trace" 2>/dev/null
+  echo "ps-walk result: not-found" >> "${trace:-/dev/null}" 2>/dev/null
   echo "zcode-go bootstrap: official binary not found in ancestors" >&2
   exit 3
 fi
-echo "ps-walk result: $exe" >> "$trace" 2>/dev/null
+echo "ps-walk result: $exe" >> "${trace:-/dev/null}" 2>/dev/null
 
 ELECTRON_RUN_AS_NODE=1 exec "$exe" "$HOOK_CJS" hook
