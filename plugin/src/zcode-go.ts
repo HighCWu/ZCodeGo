@@ -198,9 +198,21 @@ function runHook(): void {
     }
     const prompt = String(event.prompt ?? "").trim();
     const low = prompt.toLowerCase();
-    if (!low.startsWith("/zcode-go") && !low.startsWith("/zcode_go")) return; // 放行
+    // 两种到达形态：
+    //   原始斜杠输入（桌面提交）："/zcode-go [status|off|on]"
+    //   运行时命令展开包装（协议路径先把自定义命令展开再进 hook）：
+    //     "Run custom command /zcode-go[ args].\nCommand source: user/plugin.\n…" + 命令正文
+    const rawForm = /^\/zcode[_-]go\b/.test(low);
+    const expanded = low.includes("run custom command /zcode-go");
+    if (!rawForm && !expanded) return; // 放行
 
-    const sub = (prompt.split(/\s+/)[1] ?? "").toLowerCase();
+    let sub = "";
+    if (rawForm) {
+      sub = (prompt.split(/\s+/)[1] ?? "").toLowerCase();
+    } else {
+      const m = prompt.match(/[Rr]un custom command\s+\/zcode[_-]go\s+([^\n.]+)/);
+      if (m) sub = m[1].trim().toLowerCase();
+    }
     const info = (discoverOfficial() ?? readJson(OFFICIAL_JSON) ?? {}) as Record<string, unknown>;
 
     if (sub === "status") {
@@ -279,6 +291,21 @@ function resolveLauncher(): string | null {
   const config = readJson(CONFIG_JSON);
   const fromConfig = String(config?.zcodeGoLauncher ?? "").trim();
   if (fromConfig && existsSync(fromConfig)) return fromConfig;
+  // 仓库开发/CI 布局：<repo>/plugin/hooks → <repo>/scripts/launch-zcode-go.sh
+  // （市场安装副本无此兄弟目录，自然落到下方 marker/配置）
+  for (const candidate of [
+    join(__dirname, "..", "..", "scripts", "launch-zcode-go.sh"),
+    join(__dirname, "zcode-go-home"),
+  ]) {
+    try {
+      if (candidate.endsWith("launch-zcode-go.sh")) {
+        if (existsSync(candidate)) return candidate;
+        continue;
+      }
+    } catch {
+      /* 下一候选 */
+    }
+  }
   // 插件携带的仓库路径标记（sync-plugin.mjs 写入）
   for (const marker of [
     join(__dirname, "zcode-go-home"),

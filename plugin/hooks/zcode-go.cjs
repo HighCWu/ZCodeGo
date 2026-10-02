@@ -179,8 +179,16 @@ function runHook() {
     }
     const prompt = String(event.prompt ?? "").trim();
     const low = prompt.toLowerCase();
-    if (!low.startsWith("/zcode-go") && !low.startsWith("/zcode_go")) return;
-    const sub = (prompt.split(/\s+/)[1] ?? "").toLowerCase();
+    const rawForm = /^\/zcode[_-]go\b/.test(low);
+    const expanded = low.includes("run custom command /zcode-go");
+    if (!rawForm && !expanded) return;
+    let sub = "";
+    if (rawForm) {
+      sub = (prompt.split(/\s+/)[1] ?? "").toLowerCase();
+    } else {
+      const m = prompt.match(/[Rr]un custom command\s+\/zcode[_-]go\s+([^\n.]+)/);
+      if (m) sub = m[1].trim().toLowerCase();
+    }
     const info = discoverOfficial() ?? readJson(OFFICIAL_JSON) ?? {};
     if (sub === "status") {
       emit({
@@ -249,6 +257,18 @@ function resolveLauncher() {
   const config = readJson(CONFIG_JSON);
   const fromConfig = String(config?.zcodeGoLauncher ?? "").trim();
   if (fromConfig && (0, import_node_fs.existsSync)(fromConfig)) return fromConfig;
+  for (const candidate of [
+    (0, import_node_path.join)(__dirname, "..", "..", "scripts", "launch-zcode-go.sh"),
+    (0, import_node_path.join)(__dirname, "zcode-go-home")
+  ]) {
+    try {
+      if (candidate.endsWith("launch-zcode-go.sh")) {
+        if ((0, import_node_fs.existsSync)(candidate)) return candidate;
+        continue;
+      }
+    } catch {
+    }
+  }
   for (const marker of [
     (0, import_node_path.join)(__dirname, "zcode-go-home"),
     (0, import_node_path.join)((0, import_node_path.dirname)(__dirname), "scripts", "zcode-go-home")

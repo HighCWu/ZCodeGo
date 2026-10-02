@@ -15,9 +15,9 @@
  *   gui    主窗存在；bare /zcode-go → SHOW → 官方窗隐藏 + ZCode Go 可见；close→气泡
  *          → 点气泡回切；全程分步截图至 ~/.zcode-go/e2e-shots/（CI artifact 可拉本地肉眼核对）
  */
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve, dirname as pathDirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +43,10 @@ function check(name, ok, detail = "") {
 function run(command, args, options = {}) {
   return spawnSync(command, args, { encoding: "utf8", timeout: 120_000, ...options });
 }
+const dirname0 = (p) => {
+  const i = p.replaceAll("\\", "/").lastIndexOf("/");
+  return i > 0 ? p.slice(0, i) : p;
+};
 function sh(script, stdin = "") {
   return run("sh", ["-c", script], { input: stdin });
 }
@@ -158,6 +162,266 @@ function hookFeed(prompt) {
     !!a && !!b && b.synced === false,
     `first.synced=${a?.synced} second.synced=${b?.synced}`,
   );
+}
+
+// ── session：真实官方运行时端到端（补"官方会话输入 /zcode-go"）──────────
+// 本地假供应商（无需凭据）→ 官方 app-server（NDJSON over stdio）→ 创建会话
+// → 提交 /zcode-go → plugins.dirs 装载的本插件 UserPromptSubmit hook 在
+// 真实运行时进程树内触发：bootstrap.sh 祖先链发现官方 bin（写
+// official.json）+ 接管编排拉起桌面。这是 CI 上最接近真实用户流程的验证。
+// ZCODE_GO_E2E_SESSION_PROMPT 默认裸 "/zcode-go"（全链）；本地调试可设
+// "/zcode-go status"（只验证发现与拦截，不拉桌面、不动官方窗口）。
+{
+  const sessionPrompt = (process.env.ZCODE_GO_E2E_SESSION_PROMPT ?? "/zcode-go").trim();
+  const infoS = (() => {
+    try {
+      return JSON.parse(readFileSync(join(stateDir, "official.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  })();
+  const runtimeBundle = infoS?.runtimeBundle;
+  if (!runtimeBundle || !existsSync(runtimeBundle)) {
+    check("session: 官方 runtime bundle 缺失，标注跳过", true, "官方包无 glm/zcode.cjs");
+  } else {
+    // 插件目录并入 plugins.dirs（幂等合并，保留其余配置）——CI 由 workflow
+    // 预挂载，这里兜底保证本地直跑同样成立
+    const configPath = join(homedir(), ".zcode", "cli", "config.json");
+    try {
+      mkdirSync(dirname0(configPath), { recursive: true });
+      const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")) : {};
+      config.plugins = config.plugins ?? {};
+      const dirs = new Set(config.plugins.dirs ?? []);
+      dirs.add(join(repoRoot, "plugin"));
+      config.plugins.dirs = [...dirs];
+      writeFileSync(configPath, JSON.stringify(config, null, 2));
+    } catch { /* 配置不可写时依赖 workflow 预挂载 */ }
+
+    // 假供应商：随机端口，写端口文件
+    const portFile = join(stateDir, "e2e-fake-provider.port");
+    try { unlinkSync(portFile); } catch { /* 不存在即可 */ }
+    const provider = spawn(
+      process.execPath,
+      [join(repoRoot, "scripts", "e2e", "fake-provider.mjs"), "--port-file", portFile],
+      { stdio: "ignore" },
+    );
+    let port = 0;
+    for (let i = 0; i < 50 && !port; i += 1) {
+      try { port = Number(readFileSync(portFile, "utf8").trim()) || 0; } catch { /* 等待 */ }
+      if (!port) await new Promise((r) => setTimeout(r, 200));
+    }
+    check("session: 本地假供应商已就绪", port > 0, `port=${port}`);
+
+    // 个人供应商配置：经 ZCODE_DATA_BASE_DIR 隔离数据根（provider_config.json
+    // 位于 <dataRoot>/.zcode/v2/，CLI 以 dataBaseDir 解析个人配置）。不用
+    // 单独 env 覆盖——app-server 派生的运行时子进程会重建环境，数据根更底层。
+    const dataRoot = join(stateDir, "e2e-data");
+    mkdirSync(join(dataRoot, ".zcode", "v2"), { recursive: true });
+    const providerCfg = join(dataRoot, ".zcode", "v2", "provider_config.json");
+    writeFileSync(
+      providerCfg,
+      // 形状与真实 ~/.zcode/v2/provider_config.json 完全同构（schema 见
+      // packages/provider/src/config/{provider,rule}-data-schema.ts）：
+      // api 类型经 templateId "openai" 推断；模型走 providerModelRules 简形
+      JSON.stringify({
+        schemaVersion: 1,
+        config: {
+          providerOrder: ["zcode-go-fake"],
+          providerConfigRules: {
+            providerRules: [
+              {
+                providerId: "zcode-go-fake",
+                templateId: "openai",
+                providerName: "zcode-go-fake",
+                config: {
+                  group: "standard-personal",
+                  access: { type: "api-key", apiKey: "sk-zcode-go-e2e" },
+                  api: { type: "openai-chat-completions", baseUrl: `http://127.0.0.1:${port}/v1` },
+                  personalModelIds: [],
+                  modelOrder: ["fake-model"],
+                },
+              },
+            ],
+          },
+          modelConfigRules: {
+            providerModelRules: [
+              {
+                providerId: "zcode-go-fake",
+                modelId: "fake-model",
+                config: { enabled: true, properties: { contextWindow: 128000 } },
+              },
+            ],
+            manualProviderModelRules: [],
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    // 官方 app-server（NDJSON over stdio）——与桌面真实链路同构：session/send
+    // 提交的是原始 prompt，UserPromptSubmit hook 先于命令展开/模型解析触发。
+    // 注意不能用 CLI --prompt 模式：它在 CLI 层预展开自定义命令，hook 收到的
+    // 是 markdown 正文而非原始 "/zcode-go"，startsWith 匹配会放行（实测）。
+    let stdoutBuf = "";
+    const appServer = spawn(
+      officialBin,
+      [runtimeBundle, "app-server", "--stdio"],
+      {
+        env: {
+          ...env,
+          ELECTRON_RUN_AS_NODE: "1",
+          ZCODE_DATA_BASE_DIR: dataRoot,
+          // 双显式路径对（runtime-paths 要求成对）：builtin 用官方 bundle 自带
+          // 配置，personal 用我们的假供应商——无论运行时在哪层进程解析，都指向假端点
+          ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: join(
+            dirname0(runtimeBundle),
+            "..",
+            "config",
+            "provider",
+            "zcode-builtin.json",
+          ),
+          ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: providerCfg,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const pending = new Map();
+    const notifications = [];
+    let nonce = 0;
+    let buf = "";
+    appServer.stdout.setEncoding("utf8");
+    appServer.stdout.on("data", (chunk) => {
+      buf += chunk;
+      let at;
+      while ((at = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, at).trim();
+        buf = buf.slice(at + 1);
+        if (!line.startsWith("{")) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch { continue; }
+        if (msg.id != null && pending.has(msg.id)) {
+          pending.get(msg.id)(msg);
+          pending.delete(msg.id);
+        } else if (msg.method != null && msg.id != null) {
+          // 反向请求（server → client；桌面端由 GUI 应答）。e2e 按最小合法
+          // result 应答，避免 15s 超时阻断会话创建
+          const result = msg.method === "session/requestRuntimePreferences"
+            ? { nativeSearchEnhancementsEnabled: false }
+            : {};
+          appServer.stdin.write(`${JSON.stringify({ id: msg.id, result })}\n`);
+        } else if (msg.method) {
+          notifications.push(msg);
+        }
+      }
+    });
+    const request = (method, params, timeoutMs = 20000) =>
+      new Promise((resolve0) => {
+        const id = ++nonce;
+        const timer = setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve0({ error: { message: `timeout: ${method}` } });
+          }
+        }, timeoutMs);
+        pending.set(id, (msg) => {
+          clearTimeout(timer);
+          resolve0(msg);
+        });
+        appServer.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      });
+
+    const wsDir = join(tmpdir(), "zcode-go-e2e-ws");
+    mkdirSync(wsDir, { recursive: true });
+    // hook 在 turn 开始即拦截（先于模型解析）——最小创建即可
+    let created = await request("session/create", {
+      workspace: { workspaceKey: wsDir, workspacePath: wsDir },
+    });
+    const createdJson = JSON.stringify(created);
+    // projection 里的 sessionId 可能是 "unknown" 占位——真实 id 形如 sess_*
+    const sessionId = createdJson.match(/"sessionId"\s*:\s*"(sess_[^"]+)"/)?.[1] ?? "";
+    check(
+      "session: 会话创建（真实官方运行时 + 假供应商）",
+      !created.error && sessionId !== "",
+      createdJson.slice(0, 200),
+    );
+
+    // 先清掉 core 段环境变量注入的 official.json——下面的断言只认"真实
+    // 运行时进程树内 hook 经 bootstrap.sh 重建"的结果
+    try { unlinkSync(join(stateDir, "official.json")); } catch { /* 不存在即可 */ }
+    let sent = { error: { message: "会话未创建" } };
+    if (sessionId) sent = await request("session/send", { sessionId, content: sessionPrompt });
+    check("session: prompt 已提交", !sent.error, JSON.stringify(sent).slice(0, 200));
+
+    // 轮询事件直到 turn 收尾；同时吸收推送通知（两种投递都覆盖）
+    let eventsRaw = "";
+    let afterSeq = 0;
+    let settled = false;
+    let emptyPolls = 0;
+    for (let i = 0; i < 40 && !settled; i += 1) {
+      if (notifications.length > 0) {
+        eventsRaw += notifications.splice(0).map((n) => JSON.stringify(n)).join("");
+      }
+      const ev = await request("session/events", { sessionId, afterSeq }, 8000);
+      if (ev.error) {
+        emptyPolls += 1;
+        if (emptyPolls >= 8) break;
+      } else {
+        emptyPolls = 0;
+        const text = JSON.stringify(ev.result ?? {});
+        eventsRaw += text;
+        for (const m of text.matchAll(/"seq"\s*:\s*(\d+)/g)) {
+          afterSeq = Math.max(afterSeq, Number(m[1]) + 1);
+        }
+      }
+      settled =
+        eventsRaw.includes("TurnComplete") ||
+        eventsRaw.includes("HookRunBlocked") ||
+        eventsRaw.includes("turn.completed") ||
+        eventsRaw.includes("turn.failed");
+      if (!settled) await new Promise((r) => setTimeout(r, 1000));
+    }
+    eventsRaw += notifications.splice(0).map((n) => JSON.stringify(n)).join("");
+    if (!settled) {
+      console.error(`[e2e][session][events] ${eventsRaw.slice(-2000)}`);
+    }
+    const isStatusProbe = /\bstatus\b/.test(sessionPrompt);
+    if (isStatusProbe) {
+      check(
+        "session: 真实会话 hook 拦截（status 回复含官方路径）",
+        eventsRaw.includes("官方 bin") || eventsRaw.includes("HookRunBlocked"),
+        eventsRaw.slice(-260),
+      );
+    } else {
+      check(
+        "session: 真实会话 hook 拦截（正在切换 / HookRunBlocked）",
+        eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked"),
+        eventsRaw.slice(-260),
+      );
+    }
+
+    // 祖先链发现：hook 进程在真实运行时树内经 bootstrap.sh 解析出官方 bin
+    let ancestryOk = false;
+    let ancestryDetail = "(无 official.json)";
+    try {
+      const o = JSON.parse(readFileSync(join(stateDir, "official.json"), "utf8"));
+      ancestryOk = typeof o.bin === "string" && resolve(o.bin) === resolve(officialBin);
+      ancestryDetail = `bin=${o.bin}`;
+    } catch { /* 保持失败态 */ }
+    check("session: 祖先链发现官方 bin（真实进程树解析）", ancestryOk, ancestryDetail);
+
+    if (!isStatusProbe) {
+      let pidS = 0;
+      for (let i = 0; i < 45 && !pidS; i += 1) {
+        try { pidS = Number(readFileSync(join(stateDir, "desktop.pid"), "utf8").trim()) || 0; } catch { /* 等待 */ }
+        if (!pidS) await new Promise((r) => setTimeout(r, 2000));
+      }
+      check("session: 接管桌面被真实 hook 拉起（desktop.pid）", pidS > 0, `pid=${pidS || "无"}`);
+    }
+
+    try { appServer.kill("SIGTERM"); } catch { /* 尽力而为 */ }
+    try { provider.kill(); } catch { /* 尽力而为 */ }
+    // session 拉起的桌面交给下方 launch 段统一清理（冷启动逻辑自带杀旧）
+  }
 }
 
 // ── launch + runtime + gui ───────────────────────────────────────────────
@@ -381,10 +645,15 @@ if (!skipLaunch) {
       snapRoot("32-entered-root.png");
 
       // ── 返回官方 → 气泡（尺寸定位 + X 属性断言）→ 点气泡回切 ──────────
-      xdotool("windowactivate", "--sync", mainWin);
-      await settle(1000);
-      xdotool("key", "Alt+F4");
-      const returned = await waitLog("returnToOfficial 完成");
+      // Alt+F4 偶发焦点丢失：激活+按键+等标记，失败重试（最多 3 次）
+      let returned = { ok: false, detail: "未执行" };
+      for (let attempt = 1; attempt <= 3 && !returned.ok; attempt += 1) {
+        xdotool("windowactivate", "--sync", mainWin);
+        await settle(1000);
+        xdotool("key", "Alt+F4");
+        returned = await waitLog("returnToOfficial 完成", 20000);
+        if (!returned.ok) await settle(2000);
+      }
       check("gui: 关闭主窗 → returnToOfficial 完成（日志标记）", returned.ok, returned.detail);
       await settle(600);
       check("gui: 主窗已隐藏", !isVisible(mainWin));
