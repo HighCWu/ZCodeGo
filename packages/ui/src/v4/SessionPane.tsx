@@ -4552,6 +4552,40 @@ export function SessionPane({
           snapshot={snapshot}
         />
       ) : null}
+      {(() => {
+        // zcode-go：超大历史会话引导派生。forkAssistant 物理复制含 compaction
+        // part 的完整前缀，子会话 hydrator 切出与父逐字节一致的 post-compact
+        // 模型前缀 → provider 缓存命中，推理成本连续。
+        const totalRows = timelineSnapshot?.rows.totalCount ?? 0;
+        if (!forkActionsEnabled || totalRows < 5000) return null;
+        const windowRows = timelineSnapshot?.rows.window ?? [];
+        let latestForkTarget: { rowId: number; entityId: string } | null = null;
+        for (let i = windowRows.length - 1; i >= 0; i -= 1) {
+          const row = windowRows[i]!;
+          if (row.kind === "assistantText" && row.actions?.canFork === true) {
+            latestForkTarget = { rowId: row.rowId, entityId: row.entityId };
+            break;
+          }
+        }
+        if (!latestForkTarget) return null;
+        return (
+          <div
+            data-testid="zcode-go-oversized-banner"
+            className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
+          >
+            <span className="text-amber-200/90">
+              此会话历史 {totalRows.toLocaleString()} 条，切换与发送可能变慢。可派生新会话：模型上下文与缓存完全延续。
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-amber-400/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20"
+              onClick={() => handleFork(latestForkTarget)}
+            >
+              派生新会话
+            </button>
+          </div>
+        );
+      })()}
       {composerNode}
       {/* 办公模式显示主动任务推荐；编程模式保留原有小型场景入口。 */}
       {isDraft && (!isOfficeMode || sharedSettings?.proactiveSuggestionsEnabled === true) ? (
