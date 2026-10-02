@@ -211,7 +211,7 @@ export function TaskActionMenuContent({
               onDeriveCompactSession?.();
             }}
           >
-            {intl.formatMessage({ id: "zcodeGo.oversizedBanner.action" })}
+            {intl.formatMessage({ id: "taskList.forkCompactHistory" })}
           </Item>
         </>
       ) : null}
