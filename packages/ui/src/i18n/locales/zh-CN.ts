@@ -6494,8 +6494,9 @@ const zhCN: Record<string, string> = {
   "scheduledPreview.toast.view": "查看",
   "scheduledPreview.addSchedule": "添加计划",
 
-  "zcodeGo.oversizedBanner.hint": "此会话历史 {count} 条，切换与发送可能变慢。建议分叉精简历史后的新会话：",
-  "zcodeGo.oversizedBanner.action": "分叉新会话",
+  "zcodeGo.oversizedBanner.hint": "此会话历史已达 {count} 条，切换与发送可能变慢。建议分叉压缩历史的新会话继续。",
+  "zcodeGo.oversizedBanner.action": "分叉压缩历史会话",
+  "zcodeGo.oversizedBanner.dismiss": "本会话不再提醒",
   "taskList.forkCompactHistory": "分叉压缩历史会话",
 };
 

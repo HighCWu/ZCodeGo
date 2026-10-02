@@ -4558,7 +4558,13 @@ export function SessionPane({
         // part 的完整前缀，子会话 hydrator 切出与父逐字节一致的 post-compact
         // 模型前缀 → provider 缓存命中，推理成本连续。
         const totalRows = timelineSnapshot?.rows.totalCount ?? 0;
-        if (!forkActionsEnabled || totalRows < 5000) return null;
+        if (!forkActionsEnabled || totalRows < 5000 || !sessionId) return null;
+        // 按会话持久化忽略（localStorage；重载后仍生效）
+        let dismissedMap: Record<string, number> = {};
+        try {
+          dismissedMap = JSON.parse(localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}");
+        } catch { /* 忽略坏数据 */ }
+        if (dismissedMap[sessionId]) return null;
         if (consumeZcodeGoForkIntent(sessionId ?? "")) {
           const rowsWindow = timelineSnapshot?.rows.window ?? [];
           for (let i = rowsWindow.length - 1; i >= 0; i -= 1) {
@@ -4591,13 +4597,30 @@ export function SessionPane({
                 { count: totalRows.toLocaleString() },
               )}
             </span>
-            <button
-              type="button"
-              className="shrink-0 rounded-md border border-amber-400/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20"
-              onClick={() => handleFork(latestForkTarget)}
-            >
-              {intl.formatMessage({ id: "zcodeGo.oversizedBanner.action" })}
-            </button>
+            <span className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-amber-400/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20"
+                onClick={() => handleFork(latestForkTarget)}
+              >
+                {intl.formatMessage({ id: "zcodeGo.oversizedBanner.action" })}
+              </button>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200"
+                onClick={(event) => {
+                  try {
+                    const raw = localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}";
+                    const map = JSON.parse(raw) as Record<string, number>;
+                    map[sessionId] = Date.now();
+                    localStorage.setItem("zcodeGoOversizedDismissed", JSON.stringify(map));
+                  } catch { /* 尽力而为 */ }
+                  (event.currentTarget.closest("[data-testid=zcode-go-oversized-banner]") ?? null)?.remove();
+                }}
+              >
+                {intl.formatMessage({ id: "zcodeGo.oversizedBanner.dismiss" })}
+              </button>
+            </span>
           </div>
         );
       })()}

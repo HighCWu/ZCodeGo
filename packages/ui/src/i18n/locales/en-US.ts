@@ -6816,8 +6816,9 @@ const enUS: Record<string, string> = {
   "scheduledPreview.toast.view": "View",
   "scheduledPreview.addSchedule": "Add schedule",
 
-  "zcodeGo.oversizedBanner.hint": "This session has {count} messages; switching and sending may be slow. Consider forking a new session with compacted history:",
-  "zcodeGo.oversizedBanner.action": "Fork new session",
+  "zcodeGo.oversizedBanner.hint": "This session history has reached {count} messages; switching and sending may be slow. Consider forking a new session with compacted history to continue.",
+  "zcodeGo.oversizedBanner.action": "Fork compacted-history session",
+  "zcodeGo.oversizedBanner.dismiss": "Don't show again for this session",
   "taskList.forkCompactHistory": "Fork compacted-history session",
 };
 
