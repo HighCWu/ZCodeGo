@@ -12,6 +12,7 @@ import {
   observeZcodeGoSessionsIndexFrame,
 } from "./zcodeGoGoalVerify.js";
 import { observeZcodeGoGoalKeepAliveFrame } from "./zcodeGoGoalKeepAlive.js";
+import { observeZcodeGoQueueDrainFrame } from "./zcodeGoQueueDrain.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -2072,6 +2073,7 @@ export function createZCodeAgentService(
               getSessionsIndexFrameEmitter(workspace).fire(indexParsed.data);
               observeZcodeGoSessionsIndexFrame(workspace, indexParsed.data);
               observeZcodeGoGoalKeepAliveFrame(workspace, indexParsed.data);
+              observeZcodeGoQueueDrainFrame(workspace, indexParsed.data);
             } else {
               logger.warn(undefined, "丢弃无效 v4 sessions-index frame", {
                 issues: indexParsed.error.issues.map((issue) => ({
