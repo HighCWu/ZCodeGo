@@ -404,7 +404,8 @@ function hookFeed(prompt) {
     check("session: 祖先链发现官方 bin（真实进程树解析）", ancestryOk, ancestryDetail);
 
     let pidS = 0;
-    for (let i = 0; i < 75 && !pidS; i += 1) {
+    // CI 冷启动实测可达 2min37s（首次 out 同步 + 平台安全扫描），等待 300s
+    for (let i = 0; i < 150 && !pidS; i += 1) {
       try { pidS = Number(readFileSync(join(stateDir, "desktop.pid"), "utf8").trim()) || 0; } catch { /* 等待 */ }
       if (!pidS) await new Promise((r) => setTimeout(r, 2000));
     }
