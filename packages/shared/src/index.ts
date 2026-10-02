@@ -306,3 +306,8 @@ export * from "./clientConfig.js";
 export * from "./pluginStoreOrdering.js";
 export * from "./session-debug.js";
 export { redactFeedbackText } from "./feedbackPrivacy.js";
+
+export {
+  isZcodeGoGoalVerifyMarkerText,
+  ZCODE_GO_GOAL_VERIFY_MARKER,
+} from "./zcode-go-goal-verify.js";

@@ -7,6 +7,10 @@ import {
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
 import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
+import {
+  observeZcodeGoConversationFrame,
+  observeZcodeGoSessionsIndexFrame,
+} from "./zcodeGoGoalVerify.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -2065,6 +2069,7 @@ export function createZCodeAgentService(
             const indexParsed = sessionsIndexTopicWireCandidateSchema.safeParse(message.params);
             if (indexParsed.success) {
               getSessionsIndexFrameEmitter(workspace).fire(indexParsed.data);
+              observeZcodeGoSessionsIndexFrame(workspace, indexParsed.data);
             } else {
               logger.warn(undefined, "丢弃无效 v4 sessions-index frame", {
                 issues: indexParsed.error.issues.map((issue) => ({
@@ -2096,6 +2101,7 @@ export function createZCodeAgentService(
           const parsed = conversationTopicWireCandidateSchema.safeParse(message.params);
           if (parsed.success) {
             getConversationFrameEmitter(workspace).fire(parsed.data);
+            observeZcodeGoConversationFrame(workspace, parsed.data);
           } else {
             logger.warn(undefined, "丢弃无效 v4 conversation frame", {
               issues: parsed.error.issues.map((issue) => ({

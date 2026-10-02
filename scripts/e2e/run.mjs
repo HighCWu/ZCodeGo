@@ -16,6 +16,7 @@
  *          → 点气泡回切；全程分步截图至 ~/.zcode-go/e2e-shots/（CI artifact 可拉本地肉眼核对）
  */
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, dirname as pathDirname } from "node:path";
@@ -333,8 +334,11 @@ function hookFeed(prompt) {
     const wsDir = join(tmpdir(), "zcode-go-e2e-ws");
     mkdirSync(wsDir, { recursive: true });
     // hook 在 turn 开始即拦截（先于模型解析）——最小创建即可
+    // persistence:"deferred"（官方 automation 路径同款）：v4 输入型命令的
+    // admission 会在首发前补建 session 主行，否则 FOREIGN KEY constraint failed
     let created = await request("session/create", {
       workspace: { workspaceKey: wsDir, workspacePath: wsDir },
+      persistence: "deferred",
     });
     const createdJson = JSON.stringify(created);
     // projection 里的 sessionId 可能是 "unknown" 占位——真实 id 形如 sess_*
@@ -348,41 +352,51 @@ function hookFeed(prompt) {
     // 先清掉 core 段环境变量注入的 official.json——下面的断言只认"真实
     // 运行时进程树内 hook 经 bootstrap.sh 重建"的结果
     try { unlinkSync(join(stateDir, "official.json")); } catch { /* 不存在即可 */ }
-    let sent = { error: { message: "会话未创建" } };
-    if (sessionId) sent = await request("session/send", { sessionId, content: sessionPrompt });
-    check("session: prompt 已提交", !sent.error, JSON.stringify(sent).slice(0, 200));
 
-    // 轮询事件直到 turn 收尾；同时吸收推送通知（两种投递都覆盖）
-    let eventsRaw = "";
-    let afterSeq = 0;
-    let settled = false;
-    let emptyPolls = 0;
-    for (let i = 0; i < 40 && !settled; i += 1) {
-      if (notifications.length > 0) {
-        eventsRaw += notifications.splice(0).map((n) => JSON.stringify(n)).join("");
-      }
-      const ev = await request("session/events", { sessionId, afterSeq }, 8000);
-      if (ev.error) {
-        emptyPolls += 1;
-        if (emptyPolls >= 8) break;
-      } else {
-        emptyPolls = 0;
-        const text = JSON.stringify(ev.result ?? {});
-        eventsRaw += text;
-        for (const m of text.matchAll(/"seq"\s*:\s*(\d+)/g)) {
-          afterSeq = Math.max(afterSeq, Number(m[1]) + 1);
+    // v4 通道：订阅会话帧 → v4/command sendText 提交（与桌面同构的最新协议面）
+    const v4frames = [];
+    await request("v4/conversation/subscribe", {
+      topic: `conversation/${sessionId}`,
+      connectionId: "zcode-go-e2e",
+      clientMode: "desktop-continuous",
+    }, 10000);
+    // v4 帧经 NDJSON 客户端的通知管道汇聚（onNotification 通知统一入队），
+    // 轮询时捞出 conversation 帧相关通知。
+    const drainFrames = () => {
+      while (notifications.length > 0) {
+        const n = notifications.shift();
+        const raw = JSON.stringify(n);
+        if (raw.includes("v4/conversation/frame") || raw.includes('"events"') || raw.includes("row.appended")) {
+          v4frames.push(n);
         }
       }
-      settled =
-        eventsRaw.includes("TurnComplete") ||
-        eventsRaw.includes("HookRunBlocked") ||
-        eventsRaw.includes("turn.completed") ||
-        eventsRaw.includes("turn.failed");
-      if (!settled) await new Promise((r) => setTimeout(r, 1000));
+    };
+
+    let sent = { error: { message: "会话未创建" } };
+    if (sessionId) {
+      sent = await request("v4/command", {
+        commandId: randomUUID(),
+        clientId: "zcode-go-e2e",
+        sessionId,
+        type: "sendText",
+        payload: { text: sessionPrompt },
+        issuedAt: Date.now(),
+      }, 20000);
     }
-    eventsRaw += notifications.splice(0).map((n) => JSON.stringify(n)).join("");
+    check("session: prompt 已提交（v4 sendText）", !sent.error, JSON.stringify(sent).slice(0, 200));
+
+    // 等待 hook 拦截结果：v4 帧（assistantText 行含 stopReason 文案）
+    let eventsRaw = "";
+    let settled = false;
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline && !settled) {
+      await new Promise((r) => setTimeout(r, 1000));
+      drainFrames();
+      eventsRaw = v4frames.map((f) => JSON.stringify(f)).join("");
+      settled = eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked");
+    }
     if (!settled) {
-      console.error(`[e2e][session][events] ${eventsRaw.slice(-2000)}`);
+      console.error(`[e2e][session][frames] ${eventsRaw.slice(-2000)}`);
     }
     // 注：协议路径会把斜杠命令展开为包装文本且不带子命令参数，因此经
     // session/send 的 "/zcode-go [status]" 一律按裸 /zcode-go（接管）处理；
