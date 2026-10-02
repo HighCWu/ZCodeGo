@@ -263,12 +263,10 @@ function judgmentPrompt(objective: string): string {
   return (
     `${ZCODE_GO_GOAL_VERIFY_MARKER} r1\n` +
     `The session goal (GOAL) is:\n${objective}\n\n` +
-    "This goal was previously marked as complete, but that verdict may be wrong. " +
-    "As the model that executed this goal, carefully verify whether it has actually been completed:\n" +
-    "- You may use read-only tools to inspect the actual state (read files, run read-only commands, check the todo list).\n" +
-    "- Do not modify any files and do not run commands with side effects.\n" +
-    "- Check every explicit requirement of the goal one by one (files, commands, tests, acceptance criteria). " +
-    "Superficial, partial, or plan-only completion counts as not complete. When in doubt, treat it as not complete.\n\n" +
+    "This goal was previously marked as complete, but that verdict may be wrong.\n" +
+    "Judge from the conversation context alone whether the goal has actually been completed.\n" +
+    "Do not call tools and do not investigate files or commands \u2014 context awareness only.\n" +
+    "Superficial, partial, or plan-only completion counts as not complete; when in doubt, treat it as not complete.\n\n" +
     'On the first line, output only the verdict JSON: {"passed": true or false, "reason": "one-sentence justification"}. ' +
     "A brief explanation may follow. Write the reason in the primary natural language of the objective."
   );
@@ -277,9 +275,9 @@ function judgmentPrompt(objective: string): string {
 function doubleCheckPrompt(objective: string): string {
   return (
     `${ZCODE_GO_GOAL_VERIFY_MARKER} r2\n` +
-    "To avoid misjudgment on complex projects, discard your previous conclusion and independently " +
-    "re-verify whether the goal above has truly been completed: re-check the key deliverables, todo status, " +
-    "and acceptance criteria one by one. When in doubt, run another check instead of assuming.\n" +
+    "To avoid misjudgment on complex projects, discard your previous conclusion and re-judge from the " +
+    "conversation context alone whether the goal above has truly been completed. Do not call tools or investigate.\n" +
+    "Superficial, partial, or plan-only completion counts as not complete; when in doubt, treat it as not complete.\n" +
     'On the first line, output only the JSON: {"passed": true or false, "reason": "one-sentence justification"}.'
   );
 }
