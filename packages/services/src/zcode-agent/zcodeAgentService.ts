@@ -7,6 +7,7 @@ import {
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
 import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
+import { observeZcodeGoSessionsIndexFrame } from "./zcodeGoGoalVerify.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -2065,6 +2066,8 @@ export function createZCodeAgentService(
             const indexParsed = sessionsIndexTopicWireCandidateSchema.safeParse(message.params);
             if (indexParsed.success) {
               getSessionsIndexFrameEmitter(workspace).fire(indexParsed.data);
+              // zcode-go goal 完成复核（观察官方协议面，不修改运行时）
+              observeZcodeGoSessionsIndexFrame(workspace, indexParsed.data);
             } else {
               logger.warn(undefined, "丢弃无效 v4 sessions-index frame", {
                 issues: indexParsed.error.issues.map((issue) => ({
