@@ -15,12 +15,13 @@ case "$exe" in
   */*) [ -x "$exe" ] || exe="" ;;
   *) exe="" ;;
 esac
+echo "env-shortcut: ${ZCODE_GO_OFFICIAL_BIN:+set} exe=${exe:+resolved}" >> "$trace" 2>/dev/null
 if [ -d /proc ]; then
   pid=$$
   while [ "${pid:-0}" -gt 1 ]; do
     e=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
     case "$e" in
-      *[Zz][Cc]ode*)
+      */*[Zz][Cc]ode*)
         case "$e" in *zcode-go*|*zcode_go*) ;; *) exe="$e"; break ;; esac
         ;;
     esac
@@ -40,7 +41,7 @@ elif command -v ps >/dev/null 2>/dev/null; then
     esac
     echo "ps-walk depth=$depth pid=$pid exe=${e:-<empty>}" >> "$trace" 2>/dev/null
     case "$e" in
-      *[Zz][Cc]ode*)
+      */*[Zz][Cc]ode*)
         case "$e" in *zcode-go*|*zcode_go*) ;; *) exe="$e"; break ;; esac
         ;;
       *)
