@@ -277,6 +277,80 @@ export function trimForkedSessionHistory(input: {
       /* 思考强度继承失败不阻塞裁剪 */
     }
 
+    // 任务索引行兜底：syncer 靠 readSession 建任务行，大会话子会话上实测挂 179s
+    // 后失败 → 任务行缺失 → 任何侧栏都不显示、标题回退「新建任务」。父行镜像 +
+    // on conflict do nothing（syncer/用户后续状态不覆盖）。侧栏重查由 renderer
+    // 的 bumpTaskListVersion 触发，行在本函数返回前已就位。
+    try {
+      const parentSession = db
+        .prepare("select directory, title from session where id = ?")
+        .get(parentSessionId) as { directory: string; title: string } | undefined;
+      if (parentSession) {
+        let tasksDb: SqliteDb | null = null;
+        try {
+          tasksDb = new (loadSqlite().DatabaseSync)(TASKS_INDEX_DB, { timeout: 10_000 });
+          const now = Date.now();
+          const childTitle = `Fork of ${parentSession.title}`;
+          const parentTask = tasksDb
+            .prepare("select provider, mode, task_status, model, meta_json from tasks where task_id = ?")
+            .get(parentSessionId) as
+            | { provider: string | null; mode: string | null; task_status: string | null; model: string | null; meta_json: string | null }
+            | undefined;
+          const meta = {
+            taskId: childSessionId,
+            title: childTitle,
+            titleOverridden: false,
+            workspacePath: parentSession.directory,
+            createdAt: now,
+            updatedAt: now,
+            ...(parentTask?.mode ? { mode: parentTask.mode } : {}),
+            ...(parentTask?.provider ? { provider: parentTask.provider } : {}),
+            forkedFromTaskId: parentSessionId,
+            ...(parentTask?.task_status ? { status: parentTask.task_status } : {}),
+          };
+          tasksDb.exec("begin immediate");
+          try {
+            tasksDb
+              .prepare(
+                "insert into tasks (workspace_key, workspace_path, task_id, title, task_status, provider, mode, model, forked_from_task_id, created_at, updated_at, unread_at, last_unread_at, pinned, archived, deleted, title_overridden, meta_json, searchable_text) " +
+                  "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, 0, 0, 0, 0, ?, '') " +
+                  "on conflict(task_id) do nothing",
+              )
+              .run(
+                parentSession.directory,
+                parentSession.directory,
+                childSessionId,
+                childTitle,
+                parentTask?.task_status ?? "completed",
+                parentTask?.provider ?? null,
+                parentTask?.mode ?? null,
+                parentTask?.model ?? null,
+                parentSessionId,
+                now,
+                now,
+                JSON.stringify(meta),
+              );
+            tasksDb.exec("commit");
+          } catch (transactionError) {
+            try {
+              tasksDb.exec("rollback");
+            } catch {
+              /* 尽力而为 */
+            }
+            throw transactionError;
+          }
+        } finally {
+          try {
+            tasksDb?.close();
+          } catch {
+            /* 尽力而为 */
+          }
+        }
+      }
+    } catch {
+      /* 任务行兜底失败不阻塞裁剪（syncer 可能稍后自行建行） */
+    }
+
     return {
       ok: true,
       childSessionId,
