@@ -147,7 +147,6 @@ import {
   initZCodeGoTakeover,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
-import { isZCodeGoBubbleWindow } from "./zcodeGoBubble.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
   getCredentialsDir,
@@ -2290,9 +2289,7 @@ app.whenReady().then(async () => {
   initZCodeGoTakeover({
     // getAllWindows 顺序未定义：显式排除气泡窗口，取真正的应用主窗
     getMainWindow: () =>
-      getApplicationWindowsExcludingCuaIndicator().find(
-        (win) => !isZCodeGoBubbleWindow(win) && win !== updateStatusWindow,
-      ) ?? null,
+      getApplicationWindowsExcludingCuaIndicator().find((win) => win !== updateStatusWindow) ?? null,
     logger,
   });
 

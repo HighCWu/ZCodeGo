@@ -188,7 +188,6 @@ export default defineConfig([
       "preload/index": "src/preload/index.ts",
       "preload/resourceManager": "src/preload/resourceManager.ts",
       "preload/cuaPermissionPanel": "src/preload/cuaPermissionPanel.ts",
-      "preload/zcodeGoBubble": "src/preload/zcodeGoBubble.ts",
     },
     outDir: "out",
     format: "cjs",

@@ -311,8 +311,8 @@ function runHook(): void {
       emit({
         continue: false,
         stopReason:
-          "✅ 正在切换到 ZCode Go 桌面…（官方进程与会话不受影响；" +
-          "首次启动约需数秒，气泡可随时切回官方）",
+          "✅ 正在切换到 ZCode Go 桌面…（zcode-go 就绪后原版 zcode 将自动退出；" +
+          "磁盘上的会话与官方安装完全共享，重开官方即回到官方）",
       });
     } catch (error) {
       log(`拉起编排失败: ${String(error)}`);

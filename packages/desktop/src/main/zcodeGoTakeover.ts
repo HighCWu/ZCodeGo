@@ -18,7 +18,7 @@
  */
 import { app, BrowserWindow } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -123,7 +123,8 @@ function runCommand(
 function isOwnTreePid(pid: number): boolean {
   if (pid === process.pid) return true;
   try {
-    const exe = readFileSync(`/proc/${pid}/exe`, "utf8").trim();
+    // 必须 readlink：readFileSync 读 /proc/<pid>/exe 会把整个二进制内容读进内存。
+    const exe = readlinkSync(`/proc/${pid}/exe`);
     return exe.length > 0 && exe.startsWith(ZCODE_GO_DIR);
   } catch {
     return false;
@@ -157,6 +158,9 @@ export async function killOfficialProcesses(): Promise<boolean> {
     return ok;
   }
   // linux
+  // 候选集：pgrep -f 官方路径 ∪ pgrep -x ZCode；再按 /proc/<pid>/exe 符号链接
+  // 精确等于官方 bin 才动手——pgrep -f 会命中「命令行里碰巧含该路径」的无关进程
+  // （bash 包装、编辑器等，演练实证），exe 判定把它们全部排除。
   const pids = new Set<number>();
   const byPath = await runCommand("pgrep", ["-f", officialBin]);
   for (const line of (byPath?.stdout ?? "").split("\n")) {
@@ -168,7 +172,17 @@ export async function killOfficialProcesses(): Promise<boolean> {
     const pid = Number(line.trim());
     if (Number.isInteger(pid) && pid > 0) pids.add(pid);
   }
-  const targets = [...pids].filter((pid) => !isOwnTreePid(pid));
+  const targets: number[] = [];
+  for (const pid of pids) {
+    if (isOwnTreePid(pid)) continue;
+    let exe = "";
+    try {
+      exe = readlinkSync(`/proc/${pid}/exe`);
+    } catch {
+      continue; // exe 不可读（已退出/权限）：宁可放过
+    }
+    if (exe === officialBin) targets.push(pid);
+  }
   if (targets.length === 0) {
     writeState({ officialQuitAt: Date.now(), lastError: "official-process-not-found" });
     return false;
