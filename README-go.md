@@ -57,16 +57,6 @@ pnpm install && pnpm run build
 
 `packages/server` 构建含 dist/（entry-http）；`packages/web` 构建含 dist/（前端静态文件）。
 
-## 远端架构
-
-浏览器访问 `zcode-go.aimon.win/remote/<端点>-<密码>/`：
-1. 该域部署静态入口（本项目的 `packages/web/dist`）
-2. 前端从 URL 提取端点凭据
-3. WebSocket 连接本地服务器的 `/ws`（或经 libp2p/WebRTC 隧道直连）
-4. 端到端校验由部署侧中间件完成
-
-本地模式无需任何部署即可完整使用。
-
 ## Goal 完成复核（goal-keeper 标准版子集）
 
 会话设置了 goal 后，运行时判定完成（goal 面板显示已验证）时，zcode-go 桌面会自动在**原会话内**追加一轮复核：向模型发送 GOAL 原文与 JSON 判定格式要求（判定轮带只读工具，模型可真实核查文件与 todo，与手动提问同构）。
