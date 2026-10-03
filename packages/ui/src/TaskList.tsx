@@ -459,7 +459,7 @@ export const TaskList = memo(function TaskList({
                   intl={intl}
                   onDeriveCompactSession={() => {
                     // zcode-go：直连 fork（不打开父会话）。
-                    void forkCompactSessionViaHost(contextMenuTask.taskId);
+                    void forkCompactSessionViaHost(contextMenuTask.taskId, intl.formatMessage);
                   }}
                   zcodeGoForkDisabled={isZcodeGoForking(contextMenuTask.taskId)}
                   onTogglePinTask={handleTogglePinTask}

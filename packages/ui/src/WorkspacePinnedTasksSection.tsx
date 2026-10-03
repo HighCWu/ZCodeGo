@@ -590,7 +590,7 @@ export function WorkspacePinnedTasksSection({
             intl={intl}
             onDeriveCompactSession={() => {
               // zcode-go：直连 fork（不打开父会话）。
-              void forkCompactSessionViaHost(contextMenuItem.taskId);
+              void forkCompactSessionViaHost(contextMenuItem.taskId, intl.formatMessage);
             }}
             zcodeGoForkDisabled={isZcodeGoForking(contextMenuItem.taskId)}
             onTogglePinTask={(_taskId, pinned) => {

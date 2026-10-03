@@ -6820,6 +6820,7 @@ const enUS: Record<string, string> = {
   "zcodeGo.oversizedBanner.dismiss": "Don't show again for this session",
   "zcodeGo.forkIntent.noForkableTurn": "No completed turn is available to fork in this session (the latest assistant turn must have completed successfully)",
   "zcodeGo.fork.inProgress": "Forking {count} messages — the official fork copies full history and may take a while; the model context continues from the compaction summary. Switching automatically…",
+  "zcodeGo.forkCompact.failed": "Failed to fork compacted-history session: {error}",
   "taskList.forkCompactHistoryDisabled": "Session is open (use the in-session banner) or a fork is in progress",
   "taskList.forkCompactHistory": "Fork compacted-history session",
 };

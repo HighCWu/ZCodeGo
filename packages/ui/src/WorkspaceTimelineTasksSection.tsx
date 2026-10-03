@@ -744,7 +744,7 @@ export function WorkspaceTimelineTasksSection({
             }
             onDeriveCompactSession={() => {
               // zcode-go：直连 fork（不打开父会话）；完成后侧栏立即出现子任务。
-              void forkCompactSessionViaHost(contextMenuItem.taskId);
+              void forkCompactSessionViaHost(contextMenuItem.taskId, intl.formatMessage);
             }}
             onTogglePinTask={(_taskId, pinned) => {
               // timeline 现在本地和远端分属两套缓存，pin 时需要同时维护成员关系。

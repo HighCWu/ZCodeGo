@@ -28,9 +28,11 @@ export interface ForkCompactSessionOutcome {
 /**
  * 菜单点击统一入口：登记分叉中（封锁点击）→ 主进程直连 fork（不打开父会话）
  * → 失效任务列表并 bump 重查（子任务即刻可见）→ 解除封锁。
+ * formatMessage 由调用点组件传入（非组件模块不持有 intl，官方 orchestrator 同款）。
  */
 export async function forkCompactSessionViaHost(
   parentSessionId: string,
+  formatMessage: (desc: { id: string }, values?: Record<string, string>) => string,
 ): Promise<ForkCompactSessionOutcome> {
   markZcodeGoForking(parentSessionId);
   try {
@@ -58,7 +60,10 @@ export async function forkCompactSessionViaHost(
     if (!outcome.ok) {
       // 分叉失败必须可见（此前静默：用户只看到菜单项恢复可点、什么都没发生）。
       void import("@/components/ui/toast.js").then((m) =>
-        m.toast(`分叉压缩历史会话失败：${outcome.error ?? "未知错误"}`, { variant: "warning" }),
+        m.toast(
+          formatMessage({ id: "zcodeGo.forkCompact.failed" }, { error: outcome.error ?? "unknown" }),
+          { variant: "warning" },
+        ),
       );
     }
     return outcome;
