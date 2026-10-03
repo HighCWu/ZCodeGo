@@ -1,7 +1,7 @@
 /**
  * zcode-go「分叉压缩历史会话」意图总线（侧栏菜单 → SessionPane）。
- * 菜单项设置意图；SessionPane 在该会话的 fork 目标行就绪后消费并自动派生，
- * 60 秒未消费自动过期。
+ * 菜单项设置意图并导航；SessionPane 在该会话的 fork 目标行就绪后消费并自动派生，
+ * 5 分钟未消费自动过期（大会话打开可能远超一分钟）。
  *
  * 已打开的会话没有挂载/切换事件，intent 设置时同步广播 window 事件，
  * 活跃的 SessionPane 订阅自己 sessionId 的事件即时消费。
@@ -17,14 +17,14 @@ export function setZcodeGoForkIntent(sessionId: string): void {
   }
 }
 
-/** 是否有未过期意图（不消费）。 */
+/** 是否有未过期意图（不消费）。大会话打开可能远超一分钟，TTL 给 5 分钟。 */
 export function peekZcodeGoForkIntent(sessionId: string): boolean {
   const at = intents.get(sessionId);
-  return at !== undefined && Date.now() - at <= 60_000;
+  return at !== undefined && Date.now() - at <= 300_000;
 }
 
 export function consumeZcodeGoForkIntent(sessionId: string): boolean {
   const at = intents.get(sessionId);
   intents.delete(sessionId);
-  return at !== undefined && Date.now() - at <= 60_000;
+  return at !== undefined && Date.now() - at <= 300_000;
 }

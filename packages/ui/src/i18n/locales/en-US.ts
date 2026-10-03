@@ -6819,6 +6819,7 @@ const enUS: Record<string, string> = {
   "zcodeGo.oversizedBanner.hint": "This session history has reached {count} messages; switching and sending may be slow. Consider forking a new session with compacted history to continue.",
   "zcodeGo.oversizedBanner.action": "Fork compacted-history session",
   "zcodeGo.oversizedBanner.dismiss": "Don't show again for this session",
+  "zcodeGo.forkIntent.noForkableTurn": "No completed turn is available to fork in this session (the latest assistant turn must have completed successfully)",
   "taskList.forkCompactHistory": "Fork compacted-history session",
 };
 

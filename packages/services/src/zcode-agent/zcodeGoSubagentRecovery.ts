@@ -127,22 +127,31 @@ const inFlight = new Set<string>();
 /** childSessionId → 恢复流程等待的子会话快照观察器。 */
 const childObservers = new Map<string, ChildSnapshotObservation>();
 
+/** 配置读取带 10s TTL 缓存：readConfig 位于每帧分发路径，同步文件 I/O 不可每帧做。 */
+let configCache: { at: number; value: SubagentRecoveryConfig } | null = null;
+const CONFIG_TTL_MS = 10_000;
+
 function readConfig(): SubagentRecoveryConfig {
+  if (configCache && Date.now() - configCache.at <= CONFIG_TTL_MS) return configCache.value;
   const defaults: SubagentRecoveryConfig = { enabled: true, maxPerChild: 2, quietWindowMs: DEFAULT_QUIET_WINDOW_MS };
-  try {
-    const path = join(STATE_DIR, "config.json");
-    if (!existsSync(path)) return defaults;
-    const raw = JSON.parse(readFileSync(path, "utf8")) as {
-      subagentRecovery?: { enabled?: boolean; maxPerChild?: number; quietWindowSeconds?: number };
-    };
-    return {
-      enabled: raw.subagentRecovery?.enabled !== false,
-      maxPerChild: Math.max(1, Math.min(5, raw.subagentRecovery?.maxPerChild ?? 2)),
-      quietWindowMs: Math.max(5_000, Math.min(300_000, (raw.subagentRecovery?.quietWindowSeconds ?? 30) * 1_000)),
-    };
-  } catch {
-    return defaults;
-  }
+  const resolved = (() => {
+    try {
+      const path = join(STATE_DIR, "config.json");
+      if (!existsSync(path)) return defaults;
+      const raw = JSON.parse(readFileSync(path, "utf8")) as {
+        subagentRecovery?: { enabled?: boolean; maxPerChild?: number; quietWindowSeconds?: number };
+      };
+      return {
+        enabled: raw.subagentRecovery?.enabled !== false,
+        maxPerChild: Math.max(1, Math.min(5, raw.subagentRecovery?.maxPerChild ?? 2)),
+        quietWindowMs: Math.max(5_000, Math.min(300_000, (raw.subagentRecovery?.quietWindowSeconds ?? 30) * 1_000)),
+      };
+    } catch {
+      return defaults;
+    }
+  })();
+  configCache = { at: Date.now(), value: resolved };
+  return resolved;
 }
 
 async function sleep(ms: number): Promise<void> {

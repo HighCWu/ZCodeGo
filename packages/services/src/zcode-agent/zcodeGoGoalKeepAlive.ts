@@ -105,30 +105,45 @@ const preExisting = new Set<string>();
 /** 本次启动后启用的 goal（active 边沿注册）。 */
 const tracked = new Map<string, TrackedGoal>();
 
+/** 配置读取带 10s TTL 缓存：readConfig 位于每帧分发路径，同步文件 I/O 不可每帧做。 */
+let configCache: { at: number; value: GoalKeepAliveConfig } | null = null;
+const CONFIG_TTL_MS = 10_000;
+
 function readConfig(): GoalKeepAliveConfig {
+  if (configCache && Date.now() - configCache.at <= CONFIG_TTL_MS) return configCache.value;
   const defaults: GoalKeepAliveConfig = {
-  enabled: true,
-  stallSeconds: 60,
-  modelWaitSeconds: 60,
-  budgetRetryMinutes: 5,
-  maxAutoResumes: 3,
-};
-  try {
-    const path = join(STATE_DIR, "config.json");
-    if (!existsSync(path)) return defaults;
-    const raw = JSON.parse(readFileSync(path, "utf8")) as {
-      goalKeepAlive?: { enabled?: boolean; stallMinutes?: number; maxAutoResumes?: number };
-    };
-    return {
-      enabled: raw.goalKeepAlive?.enabled !== false,
-      stallSeconds: Math.max(30, raw.goalKeepAlive?.stallSeconds ?? 60),
-      modelWaitSeconds: Math.max(30, raw.goalKeepAlive?.modelWaitSeconds ?? 60),
-      budgetRetryMinutes: Math.max(1, raw.goalKeepAlive?.budgetRetryMinutes ?? 5),
-      maxAutoResumes: Math.max(1, Math.min(10, raw.goalKeepAlive?.maxAutoResumes ?? defaults.maxAutoResumes)),
-    };
-  } catch {
-    return defaults;
-  }
+    enabled: true,
+    stallSeconds: 60,
+    modelWaitSeconds: 60,
+    budgetRetryMinutes: 5,
+    maxAutoResumes: 3,
+  };
+  const resolved = (() => {
+    try {
+      const path = join(STATE_DIR, "config.json");
+      if (!existsSync(path)) return defaults;
+      const raw = JSON.parse(readFileSync(path, "utf8")) as {
+        goalKeepAlive?: {
+          enabled?: boolean;
+          stallSeconds?: number;
+          modelWaitSeconds?: number;
+          budgetRetryMinutes?: number;
+          maxAutoResumes?: number;
+        };
+      };
+      return {
+        enabled: raw.goalKeepAlive?.enabled !== false,
+        stallSeconds: Math.max(30, raw.goalKeepAlive?.stallSeconds ?? 60),
+        modelWaitSeconds: Math.max(30, raw.goalKeepAlive?.modelWaitSeconds ?? 60),
+        budgetRetryMinutes: Math.max(1, raw.goalKeepAlive?.budgetRetryMinutes ?? 5),
+        maxAutoResumes: Math.max(1, Math.min(10, raw.goalKeepAlive?.maxAutoResumes ?? defaults.maxAutoResumes)),
+      };
+    } catch {
+      return defaults;
+    }
+  })();
+  configCache = { at: Date.now(), value: resolved };
+  return resolved;
 }
 
 interface IndexSessionEntry {

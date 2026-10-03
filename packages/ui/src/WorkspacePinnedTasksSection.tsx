@@ -587,6 +587,15 @@ export function WorkspacePinnedTasksSection({
             task={contextMenuItem}
             isPinned
             intl={intl}
+            onDeriveCompactSession={() => {
+              // zcode-go：菜单点击 → 打开会话；SessionPane 消费派生意图自动 fork。
+              onSelectTaskRef.current(
+                contextMenuItem.workspacePath,
+                contextMenuItem.taskId,
+                contextMenuItem.workspaceIdentity,
+                contextMenuItem.unreadAt,
+              );
+            }}
             onTogglePinTask={(_taskId, pinned) => {
               if (contextMenuItem.workspaceIdentity) {
                 useRemotePinnedTaskStore

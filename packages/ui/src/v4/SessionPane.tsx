@@ -3725,6 +3725,21 @@ export function SessionPane({
         return;
       }
     }
+    // 快照已就绪仍无可分叉行（最新轮未成功完成/无 entityId）：消费掉意图并给出
+    // 可见反馈，避免菜单点击表现为"什么都没发生"。窗口尚无任何 turnHeader 时视为
+    // 快照未就绪，保留意图等下一轮。
+    let hasTurnHeader = false;
+    for (const row of rowsWindow) {
+      if (row.kind === "turnHeader") {
+        hasTurnHeader = true;
+        break;
+      }
+    }
+    if (!hasTurnHeader) return;
+    consumeZcodeGoForkIntent(sessionId);
+    toast(
+      intl.formatMessage({ id: "zcodeGo.forkIntent.noForkableTurn" }),
+    );
   };
   useEffect(() => {
     zcodeGoForkTriggerRef.current();

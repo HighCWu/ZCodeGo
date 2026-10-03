@@ -9,16 +9,24 @@
 import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
 import { isZcodeGoGoalVerifyMarkerText } from "@zcode/shared";
 
+// 按 rows 数组引用记忆化：大会话（数万行）在加载/流式期每帧触发渲染，逐渲染
+// 全量扫描会在 renderer 主线程反复分配大数组，造成会话打开卡顿。
+const filterCache = new WeakMap<readonly ConversationRow[], readonly ConversationRow[]>();
+
 export function filterZcodeGoGoalVerifyRows(
   rows: readonly ConversationRow[],
 ): readonly ConversationRow[] {
   if (rows.length === 0) return rows;
+  const cached = filterCache.get(rows);
+  if (cached) return cached;
   const hiddenTurnIds = new Set<string>();
   for (const row of rows) {
     if (row.kind === "userInput" && isZcodeGoGoalVerifyMarkerText(row.text)) {
       hiddenTurnIds.add(row.turnId);
     }
   }
-  if (hiddenTurnIds.size === 0) return rows;
-  return rows.filter((row) => !hiddenTurnIds.has(row.turnId));
+  const result =
+    hiddenTurnIds.size === 0 ? rows : rows.filter((row) => !hiddenTurnIds.has(row.turnId));
+  filterCache.set(rows, result);
+  return result;
 }

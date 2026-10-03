@@ -456,6 +456,10 @@ export const TaskList = memo(function TaskList({
                   task={contextMenuTask}
                   isPinned={pinnedTaskIdSet.has(contextMenuTask.taskId)}
                   intl={intl}
+                  onDeriveCompactSession={() => {
+                    // zcode-go：菜单点击 → 打开会话；SessionPane 消费派生意图自动 fork。
+                    onSelectTaskRef.current(contextMenuTask.taskId);
+                  }}
                   onTogglePinTask={handleTogglePinTask}
                   onStartRenameTask={handleStartRenameTask}
                   onArchiveTask={handleArchiveTask}

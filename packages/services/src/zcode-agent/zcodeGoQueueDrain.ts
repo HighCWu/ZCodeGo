@@ -73,21 +73,30 @@ const userStopIntents = new Map<string, number>();
 /** 每会话自动恢复计数（滑动窗口：30 分钟内 ≤3 次）。 */
 const autoRestoreLog = new Map<string, number[]>();
 
+/** 配置读取带 10s TTL 缓存：readConfig 位于每帧分发路径，同步文件 I/O 不可每帧做。 */
+let configCache: { at: number; value: QueueDrainConfig } | null = null;
+const CONFIG_TTL_MS = 10_000;
+
 function readConfig(): QueueDrainConfig {
+  if (configCache && Date.now() - configCache.at <= CONFIG_TTL_MS) return configCache.value;
   const defaults: QueueDrainConfig = { enabled: true, maxAutoRestores: 3 };
-  try {
-    const path = join(STATE_DIR, "config.json");
-    if (!existsSync(path)) return defaults;
-    const raw = JSON.parse(readFileSync(path, "utf8")) as {
-      queueDrain?: { enabled?: boolean; maxAutoRestores?: number };
-    };
-    return {
-      enabled: raw.queueDrain?.enabled !== false,
-      maxAutoRestores: Math.max(1, Math.min(10, raw.queueDrain?.maxAutoRestores ?? defaults.maxAutoRestores)),
-    };
-  } catch {
-    return defaults;
-  }
+  const resolved = (() => {
+    try {
+      const path = join(STATE_DIR, "config.json");
+      if (!existsSync(path)) return defaults;
+      const raw = JSON.parse(readFileSync(path, "utf8")) as {
+        queueDrain?: { enabled?: boolean; maxAutoRestores?: number };
+      };
+      return {
+        enabled: raw.queueDrain?.enabled !== false,
+        maxAutoRestores: Math.max(1, Math.min(10, raw.queueDrain?.maxAutoRestores ?? defaults.maxAutoRestores)),
+      };
+    } catch {
+      return defaults;
+    }
+  })();
+  configCache = { at: Date.now(), value: resolved };
+  return resolved;
 }
 
 export function notifyUserQueueStop(sessionId: string): void {

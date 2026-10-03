@@ -129,25 +129,45 @@ function runCommand(
 /** 跨平台隐藏官方应用全部窗口（进程与会话不中断）。 */
 export async function hideOfficialWindows(officialBin: string): Promise<boolean> {
   if (process.platform === "linux") {
-    const pgrep = await runCommand("pgrep", ["-f", officialBin]);
-    const pids = (pgrep?.stdout ?? "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => /^\d+$/.test(line));
-    if (pids.length === 0) {
-      writeState({ lastError: "official-process-not-found", officialBin });
-      return false;
-    }
-    let hidden = 0;
-    for (const pid of pids) {
-      const search = await runCommand("xdotool", ["search", "--pid", pid]);
-      if (!search || search.code !== 0) continue;
-      for (const windowId of search.stdout.split("\n").map((l) => l.trim()).filter(Boolean)) {
-        const unmap = await runCommand("xdotool", ["windowunmap", windowId]);
-        if (unmap && unmap.code === 0) hidden += 1;
+    // 官方主进程的 cmdline 被 Electron 改写为 "ZCode"（comm 同），pgrep -f 官方路径
+    // 只能命中无窗口的 zygote（实测 hiddenWindows=0 的根因）——改按窗口 class 锚定
+    // 搜索再按 pid 过滤：官方主窗 class="ZCode"，本应用为 "ZCode Go"，互不重叠；
+    // class="Zcode" 的辅助窗口按 _NET_WM_PID 排除本进程后一并处理（unmap 不可见
+    // 辅助窗无害）。被 unmap 的窗口在 X 窗口树仍可被 search 到，恢复见 returnToOfficial。
+    const search = await runCommand("xdotool", ["search", "--class", "^(ZCode|zcode)$"]);
+    let windowIds =
+      search && search.code === 0
+        ? search.stdout.split("\n").map((l) => l.trim()).filter(Boolean)
+        : [];
+    if (windowIds.length === 0) {
+      // 回退：pgrep 路径匹配（非 Electron 改写场景，如官方以脚本包装启动）
+      const pgrep = await runCommand("pgrep", ["-f", officialBin]);
+      const pids = (pgrep?.stdout ?? "").split("\n").map((l) => l.trim()).filter((l) => /^\d+$/.test(l));
+      for (const pid of pids) {
+        const byPid = await runCommand("xdotool", ["search", "--pid", pid]);
+        if (byPid && byPid.code === 0) {
+          windowIds.push(...byPid.stdout.split("\n").map((l) => l.trim()).filter(Boolean));
+        }
       }
     }
-    writeState({ officialBin, hiddenWindows: hidden, officialHiddenAt: Date.now() });
+    let hidden = 0;
+    const unmapped: string[] = [];
+    for (const windowId of windowIds) {
+      const pidProp = await runCommand("xprop", ["-id", windowId, "_NET_WM_PID"]);
+      const ownerPid = Number(pidProp?.stdout.match(/(\d+)\s*$/)?.[1] ?? 0);
+      if (ownerPid === process.pid) continue;
+      const unmap = await runCommand("xdotool", ["windowunmap", windowId]);
+      if (unmap && unmap.code === 0) {
+        hidden += 1;
+        unmapped.push(windowId);
+      }
+    }
+    writeState({
+      officialBin,
+      hiddenWindows: hidden,
+      ...(unmapped.length > 0 ? { unmappedWindowIds: unmapped } : {}),
+      officialHiddenAt: Date.now(),
+    });
     return hidden > 0;
   }
   if (process.platform === "darwin") {
@@ -208,6 +228,29 @@ export async function returnToOfficial(): Promise<void> {
       context.logger.warn("[zcode-go] 未找到官方安装（official.json / config.json / 平台默认均未命中）");
       writeState({ lastError: "official-bin-not-found", at: Date.now() });
       return;
+    }
+    if (process.platform === "linux") {
+      // 被 unmap 的官方窗口，Electron 单实例唤回的 show() 未必重新 map——按隐藏时
+      // 记录的窗口 id（缺省按 class 重搜）显式 map + 激活，保证切回时窗口必回。
+      const state = readJsonFile(STATE_JSON) ?? {};
+      const recorded = Array.isArray(state.unmappedWindowIds)
+        ? (state.unmappedWindowIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [];
+      let windowIds = recorded;
+      if (windowIds.length === 0) {
+        const search = await runCommand("xdotool", ["search", "--class", "^(ZCode|zcode)$"]);
+        windowIds =
+          search && search.code === 0
+            ? search.stdout.split("\n").map((l) => l.trim()).filter(Boolean)
+            : [];
+      }
+      for (const windowId of windowIds) {
+        await runCommand("xdotool", ["windowmap", windowId]);
+      }
+      if (windowIds.length > 0) {
+        await runCommand("xdotool", ["windowactivate", windowIds[0]!]);
+      }
+      writeState({ unmappedWindowIds: [] });
     }
     // 官方单实例锁保证已运行时只唤回窗口；未运行则冷启动。
     const child = spawn(officialBin, [], {
