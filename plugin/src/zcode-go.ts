@@ -21,6 +21,7 @@ const PID_FILE = join(STATE_DIR, "desktop.pid");
 const SHOW_FILE = join(STATE_DIR, "SHOW");
 const DISABLE_FILE = join(STATE_DIR, "DISABLE");
 const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+const TASKS_INDEX_DB = join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
 
 /**
  * 清理 /zcode-go 空会话：提交动作先于 hook 把草稿会话持久化，continue:false 拦得住
@@ -61,6 +62,26 @@ function deleteEmptyJunkSession(event: Record<string, unknown>): void {
       }
     } finally {
       db.close();
+    }
+    // 任务索引库才是侧栏列表的真数据源（~/.zcode/v2/tasks-index.sqlite）——只删
+    // 会话库会在索引里留 ghost（实测「New session」残留）。同步删任务行。
+    const tasksDb = new builtin.DatabaseSync(TASKS_INDEX_DB, { timeout: 5_000 });
+    try {
+      tasksDb.exec("begin immediate");
+      try {
+        tasksDb.prepare("delete from task_group_members where task_id = ?").run(sessionId);
+        tasksDb.prepare("delete from tasks where task_id = ?").run(sessionId);
+        tasksDb.exec("commit");
+      } catch (transactionError) {
+        try {
+          tasksDb.exec("rollback");
+        } catch {
+          /* 尽力而为 */
+        }
+        throw transactionError;
+      }
+    } finally {
+      tasksDb.close();
     }
   } catch (error) {
     log(`清理空会话失败（放行）: ${error instanceof Error ? error.message : String(error)}`);

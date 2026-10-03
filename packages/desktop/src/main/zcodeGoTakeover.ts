@@ -263,5 +263,10 @@ export function initZCodeGoTakeover(options: TakeoverContext): void {
   });
   // 编排可能在 watcher 就绪前已触碰 SHOW
   if (existsSync(SHOW_FILE)) handleShowSignal();
+  // 接管意图即启动即退官方：不依赖 hook 的 SHOW 定时器（hook 在 emit 结果后可能
+  // 提前退出，定时器等不到——实测 SHOW 路径漏触发）。稍缓 800ms 让主窗先上屏。
+  setTimeout(() => {
+    if (!switching) void enterZCodeGo();
+  }, 800);
   options.logger.info("[zcode-go] takeover 模式就绪", { pid: process.pid });
 }

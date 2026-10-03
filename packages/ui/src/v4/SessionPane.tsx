@@ -134,6 +134,7 @@ import { SessionSubscriptionErrorPanel } from "@/v4/SessionSubscriptionErrorPane
 import { ConversationTimeline } from "@/v4/ConversationTimeline.js";
 import { filterZcodeGoGoalVerifyRows } from "@/v4/zcodeGoGoalVerifyRows.js";
 import { consumeZcodeGoForkIntent, peekZcodeGoForkIntent } from "@/v4/zcodeGoForkIntent.js";
+import { invalidateTaskQueryCacheByScopes } from "@/store/taskQueryCacheStore.js";
 import { ConversationShareImportNotice } from "@/v4/ConversationShareImportNotice.js";
 import { ConversationShareConfirmationDock } from "@/v4/ConversationShareConfirmationDock.js";
 import { ConversationShareSuccessDock } from "@/v4/ConversationShareSuccessDock.js";
@@ -3079,6 +3080,11 @@ export function SessionPane({
                   trimError instanceof Error ? trimError.message : String(trimError)
                 }`,
               );
+            }
+            // 分叉任务行由 CLI 侧 syncer 实时写入任务索引库，但 UI 任务缓存不
+            // 会被动失效（实测分叉后侧栏不出现、重启才见）——主动失效本工作区。
+            if (workspacePath) {
+              invalidateTaskQueryCacheByScopes([{ workspacePath }]);
             }
             // 原地切到 child session（与新建会话同一选择路径）。
             onSessionCreated?.(childSessionId);

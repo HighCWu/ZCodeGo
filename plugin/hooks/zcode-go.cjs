@@ -33,6 +33,7 @@ var PID_FILE = (0, import_node_path.join)(STATE_DIR, "desktop.pid");
 var SHOW_FILE = (0, import_node_path.join)(STATE_DIR, "SHOW");
 var DISABLE_FILE = (0, import_node_path.join)(STATE_DIR, "DISABLE");
 var SESSION_DB = (0, import_node_path.join)((0, import_node_os.homedir)(), ".zcode", "cli", "db", "db.sqlite");
+var TASKS_INDEX_DB = (0, import_node_path.join)((0, import_node_os.homedir)(), ".zcode", "v2", "tasks-index.sqlite");
 function deleteEmptyJunkSession(event) {
   try {
     const sessionId = String(event.session_id ?? event.sessionId ?? "");
@@ -59,6 +60,23 @@ function deleteEmptyJunkSession(event) {
       }
     } finally {
       db.close();
+    }
+    const tasksDb = new builtin.DatabaseSync(TASKS_INDEX_DB, { timeout: 5e3 });
+    try {
+      tasksDb.exec("begin immediate");
+      try {
+        tasksDb.prepare("delete from task_group_members where task_id = ?").run(sessionId);
+        tasksDb.prepare("delete from tasks where task_id = ?").run(sessionId);
+        tasksDb.exec("commit");
+      } catch (transactionError) {
+        try {
+          tasksDb.exec("rollback");
+        } catch {
+        }
+        throw transactionError;
+      }
+    } finally {
+      tasksDb.close();
     }
   } catch (error) {
     log(`\u6E05\u7406\u7A7A\u4F1A\u8BDD\u5931\u8D25\uFF08\u653E\u884C\uFF09: ${error instanceof Error ? error.message : String(error)}`);
