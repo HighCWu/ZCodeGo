@@ -6498,6 +6498,7 @@ const zhCN: Record<string, string> = {
   "zcodeGo.oversizedBanner.action": "分叉压缩历史会话",
   "zcodeGo.oversizedBanner.dismiss": "本会话不再提醒",
   "zcodeGo.forkIntent.noForkableTurn": "当前会话没有可分叉的完成轮（需要最近一轮回复已成功完成）",
+  "zcodeGo.fork.inProgress": "正在分叉 {count} 条历史（官方分叉完整复制需较长时间；模型上下文从压缩摘要处继续），完成后自动切换…",
   "taskList.forkCompactHistory": "分叉压缩历史会话",
 };
 

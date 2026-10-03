@@ -3026,6 +3026,14 @@ export function SessionPane({
     (target: ConversationRowTarget) => {
       const current = snapshotRef.current;
       if (!sessionId || current === null) return;
+      // 官方 forkAssistant 是全量 transcript 落库事务，大历史会话（数万行）可能
+      // 耗时数十秒——立即给进度反馈，避免被误读为"没有反应"。
+      const totalCount = current.rows.totalCount ?? 0;
+      if (totalCount >= 5000) {
+        toast(
+          intl.formatMessage({ id: "zcodeGo.fork.inProgress" }, { count: totalCount.toLocaleString() }),
+        );
+      }
       // forkAssistant 是 CAS 命令：baseRevision 取当前投影 revision。
       void dispatchCommand(
         "forkAssistant",
