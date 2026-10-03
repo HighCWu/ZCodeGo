@@ -5058,12 +5058,20 @@ export function createZCodeAgentService(
       // 账号 Provider 配置推送不能只在 createSession 做：接管场景下恢复的旧会话
       // （模型选择引用 account:* Provider）首次发送时运行时注册表里没有它，报
       // 「Provider Registry 中不存在 Provider」。推送幂等（revision 门控，同版本
-      // 直接跳过），挂在发送路径最前对新建会话也是零开销。
-      await ensureAccountProviderConfigSynced({
-        client,
-        reason: "v4_command_send",
-        workspace: params,
-      });
+      // 直接跳过），挂在发送路径最前对新建会话也是零开销；推送失败不阻塞发送
+      // （best-effort，与 createSession 路径的强一致语义不同——发送必须放行）。
+      try {
+        await ensureAccountProviderConfigSynced({
+          client,
+          reason: "v4_command_send",
+          workspace: params,
+        });
+      } catch (error) {
+        logger.warn(undefined, "account provider config 推送失败（放行发送）", {
+          error: error instanceof Error ? error.message : String(error),
+          workspaceKey: resolveWorkspaceKey(params),
+        });
+      }
       const planPayload = params.envelope.payload as {
         planEnabled?: boolean;
         config?: { planEnabled?: boolean };

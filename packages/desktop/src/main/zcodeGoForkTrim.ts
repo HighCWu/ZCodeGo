@@ -178,15 +178,20 @@ export function trimForkedSessionHistory(input: {
       const keptParams = keptIds.length > 0 ? keptIds : [];
       db.exec("begin immediate");
       try {
+        // temp 表收集待删 id：两条集合式 DELETE 经它驱动，4 万消息/14 万 part
+        // 实测 ~5.7s（逐行循环十几秒且与 CLI 的 syncer/标题生成竞态）。
+        db.exec("create temp table doomed(id text primary key)");
         db.prepare(
-          "delete from part where session_id = ? and message_id in " +
-            "(select id from message where session_id = ? and sequence < ?" +
-            keptExclusion +
-            ")",
-        ).run(childSessionId, childSessionId, boundarySeq, ...keptParams);
-        db.prepare(
-          "delete from message where session_id = ? and sequence < ?" + keptExclusion,
+          "insert into doomed(id) select id from message where session_id = ? and sequence < ?" +
+            keptExclusion,
         ).run(childSessionId, boundarySeq, ...keptParams);
+        db.prepare("delete from part where session_id = ? and message_id in (select id from doomed)").run(
+          childSessionId,
+        );
+        db.prepare("delete from message where session_id = ? and id in (select id from doomed)").run(
+          childSessionId,
+        );
+        db.exec("drop table doomed");
         db.prepare("delete from session_target where session_id = ?").run(childSessionId);
         db.prepare("delete from session_entry where session_id = ? and type = ?").run(
           childSessionId,
