@@ -13,6 +13,7 @@ import {
 } from "./zcodeGoGoalVerify.js";
 import { observeZcodeGoGoalKeepAliveFrame } from "./zcodeGoGoalKeepAlive.js";
 import { observeZcodeGoQueueDrainFrame } from "./zcodeGoQueueDrain.js";
+import { observeZcodeGoSubagentRecoveryFrame } from "./zcodeGoSubagentRecovery.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -2106,6 +2107,7 @@ export function createZCodeAgentService(
           if (parsed.success) {
             getConversationFrameEmitter(workspace).fire(parsed.data);
             observeZcodeGoConversationFrame(workspace, parsed.data);
+            observeZcodeGoSubagentRecoveryFrame(workspace, parsed.data);
           } else {
             logger.warn(undefined, "丢弃无效 v4 conversation frame", {
               issues: parsed.error.issues.map((issue) => ({

@@ -346,6 +346,7 @@ import { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
 import { initZCodeGoGoalVerify } from "./zcode-agent/zcodeGoGoalVerify.js";
 import { initZCodeGoGoalKeepAlive } from "./zcode-agent/zcodeGoGoalKeepAlive.js";
 import { initZCodeGoQueueDrain } from "./zcode-agent/zcodeGoQueueDrain.js";
+import { initZCodeGoSubagentRecovery } from "./zcode-agent/zcodeGoSubagentRecovery.js";
 import type { ZCodeAgentCommandResolver } from "./zcode-agent/zcodeAgentProcessManager.js";
 import { buildAgentTelemetrySpawnEnv } from "./zcode-agent/agentTelemetryEnv.js";
 import { resolveZCodeAgentPresentationSurface } from "./zcode-agent/zcodeAgentPresentationSurface.js";
@@ -2281,6 +2282,9 @@ export function createLocalServices(options: {
   });
   initZCodeGoQueueDrain(zcodeAgentService, {
     logger: createServiceLogger("zcode-go-queue-drain"),
+  });
+  initZCodeGoSubagentRecovery(zcodeAgentService, {
+    logger: createServiceLogger("zcode-go-subagent-recovery"),
   });
   // Helper health probe 短暂超时不应在 Computer Use turn 中途回收 Agent。resolver 会把 restart
   // 推迟到下一个 request/turn 边界；若 broker 确实已失效，当前 turn 会自然失败并由下一次请求恢复。
