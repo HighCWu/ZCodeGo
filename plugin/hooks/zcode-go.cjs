@@ -32,6 +32,39 @@ var CONFIG_JSON = (0, import_node_path.join)(STATE_DIR, "config.json");
 var PID_FILE = (0, import_node_path.join)(STATE_DIR, "desktop.pid");
 var SHOW_FILE = (0, import_node_path.join)(STATE_DIR, "SHOW");
 var DISABLE_FILE = (0, import_node_path.join)(STATE_DIR, "DISABLE");
+var RETURN_WORKSPACE_FILE = (0, import_node_path.join)(STATE_DIR, "return-workspace");
+var SESSION_DB = (0, import_node_path.join)((0, import_node_os.homedir)(), ".zcode", "cli", "db", "db.sqlite");
+function deleteEmptyJunkSession(event) {
+  try {
+    const sessionId = String(event.session_id ?? event.sessionId ?? "");
+    if (!sessionId.startsWith("sess_")) return;
+    const builtin = process.getBuiltinModule?.("node:sqlite");
+    if (!builtin) return;
+    const db = new builtin.DatabaseSync(SESSION_DB, { timeout: 5e3 });
+    try {
+      const row = db.prepare("select count(*) as n from message where session_id = ?").get(sessionId);
+      if (!row || row.n !== 0) return;
+      db.exec("begin immediate");
+      try {
+        db.prepare("delete from input_history where session_id = ?").run(sessionId);
+        db.prepare("delete from session_input where session_id = ?").run(sessionId);
+        db.prepare("delete from session where id = ?").run(sessionId);
+        db.exec("commit");
+        log(`\u5DF2\u6E05\u7406 /zcode-go \u7A7A\u4F1A\u8BDD: ${sessionId}`);
+      } catch (transactionError) {
+        try {
+          db.exec("rollback");
+        } catch {
+        }
+        throw transactionError;
+      }
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    log(`\u6E05\u7406\u7A7A\u4F1A\u8BDD\u5931\u8D25\uFF08\u653E\u884C\uFF09: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 var PLUGIN_LOG = (0, import_node_path.join)(STATE_DIR, "plugin.log");
 function log(message) {
   try {
@@ -219,6 +252,12 @@ function runHook() {
       return;
     }
     const { command, args } = selfExecArgs("takeover");
+    deleteEmptyJunkSession(event);
+    const workspacePath = String(event.cwd ?? "").trim();
+    try {
+      if (workspacePath) (0, import_node_fs.writeFileSync)(RETURN_WORKSPACE_FILE, workspacePath, "utf8");
+    } catch {
+    }
     try {
       const child = (0, import_node_child_process.spawn)(command, args, {
         detached: true,

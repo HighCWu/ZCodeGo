@@ -20,6 +20,53 @@ const CONFIG_JSON = join(STATE_DIR, "config.json");
 const PID_FILE = join(STATE_DIR, "desktop.pid");
 const SHOW_FILE = join(STATE_DIR, "SHOW");
 const DISABLE_FILE = join(STATE_DIR, "DISABLE");
+const RETURN_WORKSPACE_FILE = join(STATE_DIR, "return-workspace");
+const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+
+/**
+ * 清理 /zcode-go 空会话：提交动作先于 hook 把草稿会话持久化，continue:false 拦得住
+ * 消息拦不住会话行——每次在全新聊天里输 /zcode-go 都留一个标题为 /zcode-go 的
+ * 0 消息会话。判定即「message 计数 = 0」，直删 session/session_input/input_history
+ * 三行（空会话无任何级联面）。限制（如实）：官方桌面只听自己 CLI 的通道，直删不会
+ * 触发它的 session.removed——官方侧栏 ghost 与停留视图保留到官方重启；已尽量以
+ * return-workspace 深链让返回时导航到工作区而非停在已删会话。
+ */
+function deleteEmptyJunkSession(event: Record<string, unknown>): void {
+  try {
+    const sessionId = String(event.session_id ?? event.sessionId ?? "");
+    if (!sessionId.startsWith("sess_")) return;
+    const builtin = (
+      process as unknown as { getBuiltinModule?: (id: string) => { DatabaseSync: new (path: string, options?: { timeout?: number }) => any } | undefined }
+    ).getBuiltinModule?.("node:sqlite");
+    if (!builtin) return;
+    const db = new builtin.DatabaseSync(SESSION_DB, { timeout: 5_000 });
+    try {
+      const row = db.prepare("select count(*) as n from message where session_id = ?").get(sessionId) as
+        | { n: number }
+        | undefined;
+      if (!row || row.n !== 0) return;
+      db.exec("begin immediate");
+      try {
+        db.prepare("delete from input_history where session_id = ?").run(sessionId);
+        db.prepare("delete from session_input where session_id = ?").run(sessionId);
+        db.prepare("delete from session where id = ?").run(sessionId);
+        db.exec("commit");
+        log(`已清理 /zcode-go 空会话: ${sessionId}`);
+      } catch (transactionError) {
+        try {
+          db.exec("rollback");
+        } catch {
+          /* 尽力而为 */
+        }
+        throw transactionError;
+      }
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    log(`清理空会话失败（放行）: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 const PLUGIN_LOG = join(STATE_DIR, "plugin.log");
 
 function log(message: string): void {
@@ -246,6 +293,13 @@ function runHook(): void {
       return;
     }
     const { command, args } = selfExecArgs("takeover");
+    deleteEmptyJunkSession(event);
+    const workspacePath = String(event.cwd ?? "").trim();
+    try {
+      if (workspacePath) writeFileSync(RETURN_WORKSPACE_FILE, workspacePath, "utf8");
+    } catch {
+      /* 尽力而为 */
+    }
     try {
       const child = spawn(command, args, {
         detached: true,

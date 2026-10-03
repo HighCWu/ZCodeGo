@@ -254,7 +254,19 @@ export async function returnToOfficial(): Promise<void> {
       writeState({ unmappedWindowIds: [] });
     }
     // 官方单实例锁保证已运行时只唤回窗口；未运行则冷启动。
-    const child = spawn(officialBin, [], {
+    // zcode-go：带上 /zcode-go 来源工作区的 --open-workspace 深链——唤回后激活该
+    // 工作区而非停留在已裁剪/已删除的空会话视图（hook 写 return-workspace）。
+    // 部分缓解：若该工作区标签本就开着且停在原会话上，深链只聚焦不导航。
+    const spawnArgs: string[] = [];
+    try {
+      const returnWorkspace = readFileSync(join(ZCODE_GO_DIR, "return-workspace"), "utf8").trim();
+      if (returnWorkspace && returnWorkspace.startsWith("/") && !returnWorkspace.includes("..")) {
+        spawnArgs.push("--open-workspace", returnWorkspace);
+      }
+    } catch {
+      /* 无记录：普通唤回 */
+    }
+    const child = spawn(officialBin, spawnArgs, {
       detached: true,
       stdio: "ignore",
     });
