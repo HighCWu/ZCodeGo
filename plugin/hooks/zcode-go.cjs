@@ -32,7 +32,6 @@ var CONFIG_JSON = (0, import_node_path.join)(STATE_DIR, "config.json");
 var PID_FILE = (0, import_node_path.join)(STATE_DIR, "desktop.pid");
 var SHOW_FILE = (0, import_node_path.join)(STATE_DIR, "SHOW");
 var DISABLE_FILE = (0, import_node_path.join)(STATE_DIR, "DISABLE");
-var RETURN_WORKSPACE_FILE = (0, import_node_path.join)(STATE_DIR, "return-workspace");
 var SESSION_DB = (0, import_node_path.join)((0, import_node_os.homedir)(), ".zcode", "cli", "db", "db.sqlite");
 function deleteEmptyJunkSession(event) {
   try {
@@ -253,11 +252,6 @@ function runHook() {
     }
     const { command, args } = selfExecArgs("takeover");
     deleteEmptyJunkSession(event);
-    const workspacePath = String(event.cwd ?? "").trim();
-    try {
-      if (workspacePath) (0, import_node_fs.writeFileSync)(RETURN_WORKSPACE_FILE, workspacePath, "utf8");
-    } catch {
-    }
     try {
       const child = (0, import_node_child_process.spawn)(command, args, {
         detached: true,

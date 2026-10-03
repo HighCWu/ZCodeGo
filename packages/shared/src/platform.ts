@@ -491,7 +491,6 @@ export const DesktopCommandIds = {
   ExportLogs: "exportLogs",
   ToggleDevTools: "toggleDevTools",
   OpenResourceManager: "openResourceManager",
-  ReturnToOfficialZCode: "returnToOfficialZCode",
   ToggleZCodeStdioTapDevProxy: "toggleZCodeStdioTapDevProxy",
   SetZCodeEndpointProduction: "setZCodeEndpointProduction",
   SetZCodeEndpointTest: "setZCodeEndpointTest",

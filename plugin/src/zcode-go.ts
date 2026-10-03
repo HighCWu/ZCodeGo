@@ -20,7 +20,6 @@ const CONFIG_JSON = join(STATE_DIR, "config.json");
 const PID_FILE = join(STATE_DIR, "desktop.pid");
 const SHOW_FILE = join(STATE_DIR, "SHOW");
 const DISABLE_FILE = join(STATE_DIR, "DISABLE");
-const RETURN_WORKSPACE_FILE = join(STATE_DIR, "return-workspace");
 const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
 
 /**
@@ -28,8 +27,8 @@ const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
  * 消息拦不住会话行——每次在全新聊天里输 /zcode-go 都留一个标题为 /zcode-go 的
  * 0 消息会话。判定即「message 计数 = 0」，直删 session/session_input/input_history
  * 三行（空会话无任何级联面）。限制（如实）：官方桌面只听自己 CLI 的通道，直删不会
- * 触发它的 session.removed——官方侧栏 ghost 与停留视图保留到官方重启；已尽量以
- * return-workspace 深链让返回时导航到工作区而非停在已删会话。
+ * 触发它的 session.removed——官方侧栏 ghost 与停留视图保留到官方重启。
+
  */
 function deleteEmptyJunkSession(event: Record<string, unknown>): void {
   try {
@@ -294,12 +293,6 @@ function runHook(): void {
     }
     const { command, args } = selfExecArgs("takeover");
     deleteEmptyJunkSession(event);
-    const workspacePath = String(event.cwd ?? "").trim();
-    try {
-      if (workspacePath) writeFileSync(RETURN_WORKSPACE_FILE, workspacePath, "utf8");
-    } catch {
-      /* 尽力而为 */
-    }
     try {
       const child = spawn(command, args, {
         detached: true,

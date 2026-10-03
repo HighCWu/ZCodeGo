@@ -376,17 +376,7 @@ export function handleDesktopWindowCloseRequest(options: {
   confirmQuit: () => boolean;
   requestQuit: () => void;
   hideWindow?: () => void;
-  /** zcode-go 接管模式：关闭主窗 = 返回官方（官方窗口唤回 + 气泡常驻）。 */
-  zcodeGoTakeover?: { returnToOfficial: () => void } | null;
 }) {
-  if (options.zcodeGoTakeover && !options.forceQuit && !options.explicitQuitRequested) {
-    options.logger.info(
-      `[createWindow] window close returns to official ZCode (${options.label})`,
-    );
-    options.zcodeGoTakeover.returnToOfficial();
-    return true;
-  }
-
   if (
     options.platform === "win32" &&
     options.closeToTrayOnWindows &&

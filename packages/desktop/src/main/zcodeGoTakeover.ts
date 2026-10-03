@@ -8,12 +8,11 @@
  *     以 run-as-node 跑），父进程是本应用；
  *   - 会话存储是磁盘共享（~/.zcode/cli/db/db.sqlite）。
  * 原版退出不影响以上任何一环，额度签名链路在官方 bundle 内同样不受影响。
- * 回官方 = 「返回官方」按钮（拉起官方 + 本应用退出）或直接退出后手动打开。
+ * 回官方 = 用户直接退出本应用后自行启动官方（无内建返回入口）。
  *
  * 生命周期：
  * - 就绪标记（desktop.pid）供插件编排探活
  * - 监听 ~/.zcode-go/SHOW（编排就绪信号）→ 显示自己 + 退出原版（enterZCodeGo）
- * - returnToOfficial()：detached 启动官方二进制（带 return-workspace 深链）→ 本应用退出
  * - 官方路径解析链：official.json（插件探测）→ config.json 覆盖 → 平台默认
  */
 import { app, BrowserWindow } from "electron";
@@ -28,7 +27,6 @@ const CONFIG_JSON = join(ZCODE_GO_DIR, "config.json");
 const STATE_JSON = join(ZCODE_GO_DIR, "takeover-state.json");
 const PID_FILE = join(ZCODE_GO_DIR, "desktop.pid");
 const SHOW_FILE = join(ZCODE_GO_DIR, "SHOW");
-const RETURN_WORKSPACE_FILE = join(ZCODE_GO_DIR, "return-workspace");
 
 const OFFICIAL_BIN_DEFAULTS: Record<NodeJS.Platform, string[]> = {
   linux: ["/opt/ZCode/zcode", "/usr/lib/zcode/zcode", "/usr/local/zcode/zcode"],
@@ -225,45 +223,6 @@ export async function enterZCodeGo(): Promise<void> {
   } finally {
     switching = false;
   }
-}
-
-/** 返回官方：拉起官方（带来源工作区深链）→ 本应用退出。 */
-export async function returnToOfficial(): Promise<void> {
-  if (!context || switching) return;
-  switching = true;
-  try {
-    const officialBin = resolveOfficialBin();
-    if (!officialBin) {
-      context.logger.warn("[zcode-go] 未找到官方安装（official.json / config.json / 平台默认均未命中）");
-      writeState({ lastError: "official-bin-not-found", at: Date.now() });
-      return;
-    }
-    // 带上 /zcode-go 来源工作区的 --open-workspace 深链（hook 写 return-workspace）。
-    const spawnArgs: string[] = [];
-    try {
-      const returnWorkspace = readFileSync(RETURN_WORKSPACE_FILE, "utf8").trim();
-      if (returnWorkspace && returnWorkspace.startsWith("/") && !returnWorkspace.includes("..")) {
-        spawnArgs.push("--open-workspace", returnWorkspace);
-      }
-    } catch {
-      /* 无记录：普通冷启动 */
-    }
-    const child = spawn(officialBin, spawnArgs, {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-    writeState({ officialBin, returnedAt: Date.now() });
-    context.logger.info("[zcode-go] returnToOfficial：官方已拉起，本应用退出");
-    app.quit();
-  } finally {
-    switching = false;
-  }
-}
-
-/** renderer 侧"返回官方版"按钮（executeDesktopCommand）。 */
-export function getZCodeGoTakeoverHandler(): { returnToOfficial: () => void } | null {
-  return isZCodeGoTakeoverEnabled() ? { returnToOfficial: () => void returnToOfficial() } : null;
 }
 
 function handleShowSignal(): void {
