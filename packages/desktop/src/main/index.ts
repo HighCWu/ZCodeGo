@@ -2316,7 +2316,10 @@ app.whenReady().then(async () => {
     if (typeof request?.parentSessionId !== "string") {
       return { ok: false, childSessionId: "", copiedMessages: 0, error: "invalid payload" };
     }
-    return forkCompactSessionDirect({ parentSessionId: request.parentSessionId });
+    return forkCompactSessionDirect({
+      parentSessionId: request.parentSessionId,
+      log: (message, meta) => logger.info("[zcode-go-direct-fork]", message, meta),
+    });
   });
 
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];

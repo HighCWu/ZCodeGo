@@ -485,7 +485,6 @@ function resolveZcodeGoOfficialRuntimeCommand(
     const overridePath = join(homedir(), ".zcode-go", "official.json");
     const parsed = JSON.parse(readFileSync(overridePath, "utf8")) as {
       runtimeBundle?: unknown;
-      resourcesDir?: unknown;
     };
     const runtimeBundle = typeof parsed.runtimeBundle === "string" ? parsed.runtimeBundle.trim() : "";
     if (!runtimeBundle || runtimeBundle.includes("..")) {
@@ -495,28 +494,22 @@ function resolveZcodeGoOfficialRuntimeCommand(
     if (!existsSync(bundlePath)) {
       return null;
     }
-    // bundle 入口相对定位在官方安装布局下必失败（resources/glm/ 邻域无 provider/，
-    // 真身在 resources/config/provider/）→ app-server 启动即 exit=1「无法定位 CLI
-    // ZCode Built-in Provider Config」→ 桌面 storage prep 报 transport_closed。官方
-    // 生产态子进程实际携带全量桌面环境，这里同构：继承全量 env（PATH/HOME 等供
-    // CLI 再拉起 hook/git 使用）+ 显式钉死纯 Node 模式 + 指向官方安装内的 builtin 配置。
+    // 官方生产态子进程实际携带全量桌面环境，这里同构：继承全量 env（PATH/HOME 供 CLI
+    // 再拉起 hook/git）+ 显式钉死纯 Node 模式。
+    //
+    // 不设置 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE：host 的 spawnEnv（node.ts
+    // resolveZCodeBuiltinActiveFilePath）会在 spawn 时传入与桌面 Provider Registry
+    // 完全同源的 Active 物化路径，且 command.env 优先级最高——一旦在这里指向官方
+    // 安装包里的另一份 builtin（内容 hash 不同），CLI 侧 registryService.refresh 会
+    // 因 basedOnZCodeBuiltinRevision 与 config 侧不匹配而静默跳过注册，Agent 的
+    // Provider Registry 就永远没有账号 Provider（发消息报 provider_not_found、
+    // 官方 fork 报 childStartFailed）。早期 spawn 即退出的 exit=1 场景由继承全量
+    // env 解决，无需也不应在这里钉死配置路径。
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) env[key] = value;
     }
     env.ELECTRON_RUN_AS_NODE = "1";
-    const builtinCandidates = [
-      typeof parsed.resourcesDir === "string" && parsed.resourcesDir.trim()
-        ? join(resolve(parsed.resourcesDir.trim()), "config", "provider", "zcode-builtin.json")
-        : null,
-      resolve(dirname(bundlePath), "..", "config", "provider", "zcode-builtin.json"),
-    ];
-    for (const candidate of builtinCandidates) {
-      if (candidate && existsSync(candidate)) {
-        env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = candidate;
-        break;
-      }
-    }
     // 与 resolveElectronRuntimeZCodeAgentCommand 同款构造：ELECTRON_RUN_AS_NODE 下
     // 由本应用的 Electron Node 执行官方 bundle；storage preparation 也走官方入口。
     return {

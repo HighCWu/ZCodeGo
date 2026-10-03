@@ -55,6 +55,12 @@ export async function forkCompactSessionViaHost(
         m.invalidateTaskQueryCacheByScopes([{ workspacePath: outcome.workspacePath! }]),
       );
     }
+    if (!outcome.ok) {
+      // 分叉失败必须可见（此前静默：用户只看到菜单项恢复可点、什么都没发生）。
+      void import("@/components/ui/toast.js").then((m) =>
+        m.toast(`分叉压缩历史会话失败：${outcome.error ?? "未知错误"}`, { variant: "warning" }),
+      );
+    }
     return outcome;
   } catch (error) {
     return {

@@ -292,47 +292,49 @@ export function trimForkedSessionHistory(input: {
           const now = Date.now();
           const childTitle = `Fork of ${parentSession.title}`;
           const parentTask = tasksDb
-            .prepare("select provider, mode, task_status, model, meta_json from tasks where task_id = ?")
+            .prepare(
+              "select workspace_key, workspace_path, workspace_identity, provider, mode, task_status, model, meta_json from tasks where task_id = ?",
+            )
             .get(parentSessionId) as
-            | { provider: string | null; mode: string | null; task_status: string | null; model: string | null; meta_json: string | null }
+            | { workspace_key: string; workspace_path: string; workspace_identity: string | null; provider: string | null; mode: string | null; task_status: string | null; model: string | null; meta_json: string | null }
             | undefined;
+          // mode 必须落在任务索引读取侧枚举内（yolo|plan|edit|auto|autoEdit|build）；
+          // CLI 值 "default" 会被 zod 判非法 → 行从侧栏消失。
+          const mode =
+            parentTask?.mode && ["yolo", "plan", "edit", "auto", "autoEdit", "build"].includes(parentTask.mode)
+              ? parentTask.mode
+              : "build";
           const meta = {
             taskId: childSessionId,
             title: childTitle,
             titleOverridden: false,
-            workspacePath: parentSession.directory,
+            workspacePath: parentTask?.workspace_path ?? parentSession.directory,
             createdAt: now,
             updatedAt: now,
-            ...(parentTask?.mode ? { mode: parentTask.mode } : {}),
+            mode,
             ...(parentTask?.provider ? { provider: parentTask.provider } : {}),
             forkedFromTaskId: parentSessionId,
             ...(parentTask?.task_status ? { status: parentTask.task_status } : {}),
           };
-          // tasks 表没有 task_id 唯一约束（on conflict(task_id) 非法，实测 ERR 会
-          // 连带回滚整个裁剪事务）——先查后插。
-          if (tasksDb.prepare("select task_id from tasks where task_id = ?").get(childSessionId)) {
-            return {
-              ok: true,
-              childSessionId,
-              removedMessages: toDelete.length,
-              keptMessages: messages.length - toDelete.length,
-            };
-          }
+          // tasks 以 (workspace_key, task_id) 唯一（官方 writeRecord 同款）。
+          // workspace 键沿用父任务行，避免与 syncer 并行写出两行。
           tasksDb.exec("begin immediate");
           try {
             tasksDb
               .prepare(
-                "insert into tasks (workspace_key, workspace_path, task_id, title, task_status, provider, mode, model, forked_from_task_id, created_at, updated_at, unread_at, last_unread_at, pinned, archived, deleted, title_overridden, meta_json, searchable_text) " +
-                  "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, 0, 0, 0, 0, ?, '') ",
+                "insert into tasks (workspace_key, workspace_path, workspace_identity, task_id, title, task_status, provider, mode, model, forked_from_task_id, created_at, updated_at, unread_at, last_unread_at, pinned, archived, deleted, title_overridden, meta_json, searchable_text) " +
+                  "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, 0, 0, 0, 0, ?, '') " +
+                  "on conflict(workspace_key, task_id) do nothing",
               )
               .run(
-                parentSession.directory,
-                parentSession.directory,
+                parentTask?.workspace_key ?? parentSession.directory,
+                parentTask?.workspace_path ?? parentSession.directory,
+                parentTask?.workspace_identity ?? null,
                 childSessionId,
                 childTitle,
                 parentTask?.task_status ?? "completed",
                 parentTask?.provider ?? null,
-                parentTask?.mode ?? null,
+                mode,
                 parentTask?.model ?? null,
                 parentSessionId,
                 now,

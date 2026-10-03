@@ -14,7 +14,8 @@
  *     载荷内的结构化引用（summaryMessageId/preservedSegment.*——仅当被引用 id 在
  *     复制集内；越界引用保留原值，起始处悬空引用经裁剪实测被 hydrator 容忍）。
  *   - 不复制 goal/验证历史（分叉是全新续接）；复制父会话最新 runtime/model_selection
- *     条目（思考强度随模型选择继承）。
+ *     （思考强度随模型选择继承）与 runtime/execution_state（mode 继承——缺失时 CLI
+ *     水合上报 mode="default"，会被任务索引读取侧判非法而隐藏子会话）。
  *   - 父会话未被打开（菜单前置条件）→ CLI 对父子均无内存态，直写存储无竞态对象；
  *     子会话在首次订阅时由 CLI 从存储水合。
  *   - 任务索引行同步 upsert（侧栏唯一数据源），fork 完成即可见。
@@ -51,6 +52,13 @@ function loadSqlite(): {
 const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
 const TASKS_INDEX_DB = join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
 
+/** 任务索引读取侧 zod 枚举（zcodeTaskMetaSchema.mode）；CLI 内部值 "default" 不在其中。 */
+const TASK_INDEX_MODES = new Set(["yolo", "plan", "edit", "auto", "autoEdit", "build"]);
+
+function normalizeTaskIndexMode(mode: string | null | undefined): string {
+  return mode && TASK_INDEX_MODES.has(mode) ? mode : "build";
+}
+
 export interface DirectForkResult {
   ok: boolean;
   childSessionId: string;
@@ -65,14 +73,9 @@ function isActiveCompactionBoundaryPayload(payload: Record<string, unknown>): bo
   return payload.compactBoundary !== undefined || payload.timelineStatus === undefined;
 }
 
-function sessionDbPath(): string {
-  return join(homedir(), ".zcode", "cli", "db", "db.sqlite");
-}
-
 interface KeptRow {
-  oldId: string;
-  newId: string;
-  oldSequence: number;
+  id: string;
+  sequence: number;
   data: string;
 }
 
@@ -120,7 +123,10 @@ function remapCompactionPayloadIds(payload: Record<string, unknown>, map: Map<st
 
 export function forkCompactSessionDirect(input: {
   parentSessionId: string;
+  log?: (message: string, meta?: unknown) => void;
 }): DirectForkResult {
+  const log = input.log ?? (() => {});
+  const startedAt = Date.now();
   const parentSessionId = input.parentSessionId;
   const childSessionId = `sess_${randomUUID()}`;
   const base: DirectForkResult = { ok: false, childSessionId, copiedMessages: 0 };
@@ -147,7 +153,8 @@ export function forkCompactSessionDirect(input: {
 
     // ── 1. 保留集：最后一个活跃压缩边界的摘要 + preservedSegment + 边界后 ──
     // 两段式加载（43k 行会话不整表带 data 入内存）：先 id+sequence 定保留集，
-    // 再经 temp 表仅取保留行的 data。
+    // 再经 temp 表仅取保留行的 data。temp 表 kept_ids 的生命周期覆盖消息与 part
+    // 两次查询，全部取完再 drop。
     const allMessages = sessionDb
       .prepare("select id, sequence from message where session_id = ? order by sequence")
       .all(parentSessionId) as unknown as Array<{ id: string; sequence: number }>;
@@ -182,7 +189,7 @@ export function forkCompactSessionDirect(input: {
     let headSeq = Number.MAX_SAFE_INTEGER;
     let tailSeq = -1;
     if (boundarySeq >= 0) {
-      for (const message of messages) {
+      for (const message of allMessages) {
         if (message.id === preservedHead) headSeq = Math.min(headSeq, message.sequence);
         if (message.id === preservedTail) tailSeq = Math.max(tailSeq, message.sequence);
       }
@@ -200,7 +207,6 @@ export function forkCompactSessionDirect(input: {
             .map((message) => message.id)
         : allMessages.map((message) => message.id);
     if (keptIds.length === 0) return { ...base, error: "no messages to copy" };
-    const keptSet = new Set(keptIds);
 
     sessionDb.exec("create temp table kept_ids(id text primary key)");
     const insertKept = sessionDb.prepare("insert into kept_ids(id) values (?)");
@@ -210,7 +216,21 @@ export function forkCompactSessionDirect(input: {
         "select m.id, m.sequence, m.data from message m join kept_ids k on k.id = m.id " +
           "where m.session_id = ? order by m.sequence",
       )
-      .all(parentSessionId) as unknown as Array<{ id: string; sequence: number; data: string }>;
+      .all(parentSessionId) as unknown as KeptRow[];
+    const childParts = sessionDb
+      .prepare(
+        "select p.id, p.message_id, p.data, p.sequence, p.time_created, p.time_updated " +
+          "from part p join kept_ids k on k.id = p.message_id " +
+          "where p.session_id = ? order by p.sequence",
+      )
+      .all(parentSessionId) as unknown as Array<{
+      id: string;
+      message_id: string;
+      data: string;
+      sequence: number;
+      time_created: number;
+      time_updated: number;
+    }>;
     sessionDb.exec("drop table kept_ids");
 
     // ── 2. identity map（新 id 一律生成；part id 在写入时生成）──
@@ -247,20 +267,6 @@ export function forkCompactSessionDirect(input: {
         "insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
           "values (?, ?, ?, ?, ?, ?, ?)",
       );
-      const childParts = sessionDb
-        .prepare(
-          "select p.id, p.message_id, p.data, p.sequence, p.time_created, p.time_updated " +
-            "from part p join kept_ids k on k.id = p.message_id " +
-            "where p.session_id = ? order by p.sequence",
-        )
-        .all(parentSessionId) as unknown as Array<{
-        id: string;
-        message_id: string;
-        data: string;
-        sequence: number;
-        time_created: number;
-        time_updated: number;
-      }>;
       const partsByOldMessageId = new Map<string, typeof childParts>();
       for (const part of childParts) {
         const list = partsByOldMessageId.get(part.message_id) ?? [];
@@ -270,7 +276,8 @@ export function forkCompactSessionDirect(input: {
 
       const now = Date.now();
       let messageSeq = 0;
-      for (const message of kept) {
+      let copiedParts = 0;
+      for (const message of messages) {
         const newId = idMap.get(message.id)!;
         let data = message.data;
         try {
@@ -289,11 +296,9 @@ export function forkCompactSessionDirect(input: {
         let partSeq = 0;
         for (const part of oldParts) {
           let partData = part.data;
-          let isCompaction = false;
           try {
             const parsed = JSON.parse(partData) as Record<string, unknown>;
             if (parsed.type === "compaction") {
-              isCompaction = true;
               remapCompactionPayloadIds(parsed, idMap);
               partData = JSON.stringify(parsed);
             }
@@ -311,24 +316,69 @@ export function forkCompactSessionDirect(input: {
             partSeq,
           );
         }
+        copiedParts += oldParts.length;
       }
 
-      // ── 5. runtime/model_selection 条目复制（思考强度随模型选择继承）──
-      const parentEntry = sessionDb
+      // ── 5. runtime 条目复制（model_selection：思考强度；execution_state：mode）──
+      const copyEntry = sessionDb.prepare(
+        "insert into session_entry (id, session_id, type, time_created, time_updated, data) " +
+          "values (?, ?, ?, ?, ?, ?)",
+      );
+      const parentModelSelection = sessionDb
         .prepare(
           "select data from session_entry where session_id = ? and type = 'runtime/model_selection' " +
             "order by time_updated desc limit 1",
         )
         .get(parentSessionId) as { data: string } | undefined;
-      if (parentEntry) {
-        sessionDb
-          .prepare(
-            "insert into session_entry (id, session_id, type, time_created, time_updated, data) " +
-              "values (?, ?, 'runtime/model_selection', ?, ?, ?)",
-          )
-          .run(`entry_zgk_${randomUUID()}`, childSessionId, now, now, parentEntry.data);
+      if (parentModelSelection) {
+        copyEntry.run(
+          `entry_zgk_${randomUUID()}`,
+          childSessionId,
+          "runtime/model_selection",
+          now,
+          now,
+          parentModelSelection.data,
+        );
       }
+      const parentExecutionState = sessionDb
+        .prepare(
+          "select data from session_entry where session_id = ? and type = 'runtime/execution_state' " +
+            "order by time_updated desc limit 1",
+        )
+        .get(parentSessionId) as { data: string } | undefined;
+      // 父会话（非 fork 产物）通常没有 execution_state entry；水合兜底链是
+      // 事件流 reduce > permission 列 > execution_state 覆盖。显式落一条合法 mode
+      // 的 execution_state，保证 CLI 水合后上报的任务 mode 不会是 "default"
+      // （该值会被任务索引读取侧判非法而从侧栏隐藏子会话）。
+      let executionStateData = parentExecutionState?.data;
+      if (!executionStateData) {
+        let permissionMode: string | undefined;
+        try {
+          const permission = JSON.parse((parent.permission as string) ?? "{}") as { mode?: unknown };
+          if (typeof permission.mode === "string") permissionMode = permission.mode;
+        } catch {
+          /* permission 列非 JSON：走默认 */
+        }
+        executionStateData = JSON.stringify({
+          mode: TASK_INDEX_MODES.has(permissionMode ?? "") ? permissionMode : "build",
+          planEnabled: false,
+        });
+      }
+      copyEntry.run(
+        `entry_zgk_${randomUUID()}`,
+        childSessionId,
+        "runtime/execution_state",
+        now,
+        now,
+        executionStateData,
+      );
       sessionDb.exec("commit");
+      log("直连 fork 会话库写入完成", {
+        childSessionId,
+        copiedMessages: messages.length,
+        copiedParts,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (transactionError) {
       try {
         sessionDb.exec("rollback");
@@ -339,6 +389,9 @@ export function forkCompactSessionDirect(input: {
     }
 
     // ── 6. 任务索引行 upsert（侧栏唯一数据源；行就位后 bump 即可见）──
+    // 官方 schema：tasks 以 (workspace_key, task_id) 唯一，on conflict 同键整行更新；
+    // workspace 键直接沿用父任务行（与 syncer 写入保持同一身份，避免并行两行）。
+    // mode 必须落在读取侧枚举内——CLI 值 "default" 会让行被 zod 判非法而从侧栏消失。
     const parentSession = sessionDb
       .prepare("select directory, title from session where id = ?")
       .get(parentSessionId) as { directory: string; title: string } | undefined;
@@ -346,47 +399,56 @@ export function forkCompactSessionDirect(input: {
       const now = Date.now();
       const childTitle = `Fork of ${(parentSession?.title ?? "")}`;
       const parentTask = tasksDb
-        .prepare("select provider, mode, task_status, model from tasks where task_id = ?")
+        .prepare(
+          "select workspace_key, workspace_path, workspace_identity, provider, mode, task_status, model " +
+            "from tasks where task_id = ?",
+        )
         .get(parentSessionId) as
-        | { provider: string | null; mode: string | null; task_status: string | null; model: string | null }
+        | {
+            workspace_key: string;
+            workspace_path: string;
+            workspace_identity: string | null;
+            provider: string | null;
+            mode: string | null;
+            task_status: string | null;
+            model: string | null;
+          }
         | undefined;
+      const workspaceKey = parentTask?.workspace_key ?? parentSession?.directory ?? "";
+      const workspacePath = parentTask?.workspace_path ?? parentSession?.directory ?? "";
+      const mode = normalizeTaskIndexMode(parentTask?.mode);
       const meta = {
         taskId: childSessionId,
         title: childTitle,
         titleOverridden: false,
-        workspacePath: parentSession?.directory ?? "",
+        workspacePath,
         createdAt: now,
         updatedAt: now,
-        ...(parentTask?.mode ? { mode: parentTask.mode } : {}),
+        mode,
         ...(parentTask?.provider ? { provider: parentTask.provider } : {}),
         forkedFromTaskId: parentSessionId,
         ...(parentTask?.task_status ? { status: parentTask.task_status } : {}),
       };
-      // tasks 表没有 task_id 唯一约束（on conflict(task_id) 非法，实测 ERR），
-      // 先查后插。
-      if (tasksDb.prepare("select task_id from tasks where task_id = ?").get(childSessionId)) {
-        return {
-          ok: true,
-          childSessionId,
-          copiedMessages: kept.length,
-          ...(parentSession?.directory ? { workspacePath: parentSession.directory } : {}),
-        };
-      }
       tasksDb.exec("begin immediate");
       try {
         tasksDb
           .prepare(
-            "insert into tasks (workspace_key, workspace_path, task_id, title, task_status, provider, mode, model, forked_from_task_id, created_at, updated_at, last_unread_at, pinned, archived, deleted, title_overridden, meta_json, searchable_text) " +
-              "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, '')",
+            "insert into tasks (workspace_key, workspace_path, workspace_identity, task_id, title, task_status, provider, mode, model, forked_from_task_id, created_at, updated_at, unread_at, last_unread_at, pinned, archived, deleted, title_overridden, meta_json, searchable_text) " +
+              "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, ?, '') " +
+              "on conflict(workspace_key, task_id) do update set " +
+              "title = excluded.title, task_status = excluded.task_status, provider = excluded.provider, " +
+              "mode = excluded.mode, model = excluded.model, forked_from_task_id = excluded.forked_from_task_id, " +
+              "updated_at = excluded.updated_at, meta_json = excluded.meta_json",
           )
           .run(
-            parentSession?.directory ?? "",
-            parentSession?.directory ?? "",
+            workspaceKey,
+            workspacePath,
+            parentTask?.workspace_identity ?? null,
             childSessionId,
             childTitle,
             parentTask?.task_status ?? "completed",
             parentTask?.provider ?? null,
-            parentTask?.mode ?? null,
+            mode,
             parentTask?.model ?? null,
             parentSessionId,
             now,
@@ -402,18 +464,25 @@ export function forkCompactSessionDirect(input: {
         }
         throw transactionError;
       }
-    } catch {
+      log("直连 fork 任务索引行写入完成", { childSessionId, mode, workspaceKey });
+    } catch (error) {
       /* 任务行失败不回滚子会话（会话本体已就位；任务行可由 syncer/重启补建） */
+      log("直连 fork 任务索引行写入失败（不回滚会话）", {
+        childSessionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return {
       ok: true,
       childSessionId,
-      copiedMessages: kept.length,
+      copiedMessages: messages.length,
       ...(parentSession?.directory ? { workspacePath: parentSession.directory } : {}),
     };
   } catch (error) {
-    return { ...base, error: error instanceof Error ? error.message : String(error) };
+    const message = error instanceof Error ? error.message : String(error);
+    log("直连 fork 失败", { parentSessionId, message, durationMs: Date.now() - startedAt });
+    return { ...base, error: message };
   } finally {
     try {
       sessionDb.close();
