@@ -419,6 +419,7 @@ export function forkCompactSessionDirect(input: {
       const mode = normalizeTaskIndexMode(parentTask?.mode);
       const meta = {
         taskId: childSessionId,
+        traceId: randomUUID(),
         title: childTitle,
         titleOverridden: false,
         workspacePath,

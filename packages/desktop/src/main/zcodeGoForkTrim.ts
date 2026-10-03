@@ -23,6 +23,7 @@
  *
  * 库路径与官方 getDefaultSessionDbPath 同源：~/.zcode/cli/db/db.sqlite（node:sqlite）。
  */
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -306,6 +307,7 @@ export function trimForkedSessionHistory(input: {
               : "build";
           const meta = {
             taskId: childSessionId,
+            traceId: randomUUID(),
             title: childTitle,
             titleOverridden: false,
             workspacePath: parentTask?.workspace_path ?? parentSession.directory,
