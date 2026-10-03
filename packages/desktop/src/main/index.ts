@@ -144,7 +144,6 @@ import {
   handleDesktopWindowCloseRequest,
 } from "./desktopWindowLifecycle.js";
 import {
-  getZCodeGoTakeoverHandler,
   initZCodeGoTakeover,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
@@ -1687,7 +1686,9 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         platform: process.platform,
         forceQuit: forceQuitRef.current,
         explicitQuitRequested: explicitQuitRef.current,
-        zcodeGoTakeover: getZCodeGoTakeoverHandler(),
+        // zcode-go 定版：不做气泡返回，关闭主窗 = 正常退出（回官方用「返回官方」
+        // 按钮或手动冷启动，见 returnToOfficial）。
+        zcodeGoTakeover: null,
         closeToTrayOnWindows,
         isLastWindow: getMainApplicationWindows().length === 1,
         label,
