@@ -14,7 +14,7 @@ import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { buildWorkspaceServiceLookup } from "@/lib/workspaceServiceResolver.js";
 import { logger } from "@/logger.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
-import { isZcodeGoForking, markZcodeGoForking, unmarkZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
+import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskListRemoteSyncHint } from "@/TaskListRemoteSyncHint.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
@@ -743,17 +743,8 @@ export function WorkspaceTimelineTasksSection({
               contextMenuItem.taskId === activeTaskId || isZcodeGoForking(contextMenuItem.taskId)
             }
             onDeriveCompactSession={() => {
-              // zcode-go：菜单点击 → 打开该任务会话；SessionPane 挂载后消费
-              // 派生意图自动 fork（单次点击直达派生新会话）。
-              markZcodeGoForking(contextMenuItem.taskId);
-              onSelectTaskRef.current(
-                contextMenuItem.workspacePath,
-                contextMenuItem.taskId,
-                contextMenuItem.workspaceIdentity,
-                contextMenuItem.unreadAt,
-              );
-              const taskId = contextMenuItem.taskId;
-              setTimeout(() => unmarkZcodeGoForking(taskId), 120_000);
+              // zcode-go：直连 fork（不打开父会话）；完成后侧栏立即出现子任务。
+              void forkCompactSessionViaHost(contextMenuItem.taskId);
             }}
             onTogglePinTask={(_taskId, pinned) => {
               // timeline 现在本地和远端分属两套缓存，pin 时需要同时维护成员关系。

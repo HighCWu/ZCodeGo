@@ -11,6 +11,7 @@ import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { NewTaskButtonGroup } from "@/NewTaskButtonGroup.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
+import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
@@ -457,9 +458,10 @@ export const TaskList = memo(function TaskList({
                   isPinned={pinnedTaskIdSet.has(contextMenuTask.taskId)}
                   intl={intl}
                   onDeriveCompactSession={() => {
-                    // zcode-go：菜单点击 → 打开会话；SessionPane 消费派生意图自动 fork。
-                    onSelectTaskRef.current(contextMenuTask.taskId);
+                    // zcode-go：直连 fork（不打开父会话）。
+                    void forkCompactSessionViaHost(contextMenuTask.taskId);
                   }}
+                  zcodeGoForkDisabled={isZcodeGoForking(contextMenuTask.taskId)}
                   onTogglePinTask={handleTogglePinTask}
                   onStartRenameTask={handleStartRenameTask}
                   onArchiveTask={handleArchiveTask}

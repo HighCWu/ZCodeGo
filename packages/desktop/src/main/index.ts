@@ -147,6 +147,7 @@ import {
   initZCodeGoTakeover,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
+import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
   getCredentialsDir,
@@ -2309,6 +2310,13 @@ app.whenReady().then(async () => {
       childSessionId: request.childSessionId,
       parentSessionId: request.parentSessionId,
     });
+  });
+  ipcMain.handle(PlatformChannels.ZcodeGoForkCompactSession, (_event, payload: unknown) => {
+    const request = payload as { parentSessionId?: unknown };
+    if (typeof request?.parentSessionId !== "string") {
+      return { ok: false, childSessionId: "", copiedMessages: 0, error: "invalid payload" };
+    }
+    return forkCompactSessionDirect({ parentSessionId: request.parentSessionId });
   });
 
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];

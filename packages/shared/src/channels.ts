@@ -420,6 +420,8 @@ export const PlatformChannels = {
   ExecuteDesktopCommand: "zcode:execute-desktop-command",
   /** Renderer → Main：分叉 ack 后裁剪子会话存储（剔除最后压缩边界前的惰性历史） */
   ZcodeGoTrimForkedSessionHistory: "zcode:zcode-go-trim-forked-history",
+  /** Renderer → Main：直连分叉压缩历史会话（主进程建子会话，不打开父会话） */
+  ZcodeGoForkCompactSession: "zcode:zcode-go-fork-compact-session",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -1170,6 +1172,10 @@ export interface PlatformChannelMap {
       keptMessages: number;
       error?: string;
     };
+  };
+  [PlatformChannels.ZcodeGoForkCompactSession]: {
+    request: { parentSessionId: string };
+    response: { ok: boolean; childSessionId: string; copiedMessages: number; workspacePath?: string; error?: string };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

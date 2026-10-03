@@ -1,5 +1,4 @@
 import { TID_V4_TASK_OPEN_IN_SPLIT } from "@zcode/shared";
-import { setZcodeGoForkIntent } from "@/v4/zcodeGoForkIntent.js";
 
 interface TaskActionMenuItemProps {
   children: React.ReactNode;
@@ -209,8 +208,6 @@ export function TaskActionMenuContent({
             disabled={taskTargetActionsDisabled || zcodeGoForkDisabled === true}
             title={zcodeGoForkDisabled === true ? intl.formatMessage({ id: "taskList.forkCompactHistoryDisabled" }) : taskTargetActionsDisabled ? disabledReason : undefined}
             onSelect={() => {
-              // 记录派生意图；用户随后打开该会话时 SessionPane 自动分叉精简历史新会话
-              setZcodeGoForkIntent(activeSessionId);
               onDeriveCompactSession?.();
             }}
           >

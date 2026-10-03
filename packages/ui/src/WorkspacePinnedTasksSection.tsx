@@ -12,6 +12,7 @@ import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { resolveTaskFileTreeTargetFromTabs } from "@/lib/taskFileTreeTarget.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
+import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import type { WorkspaceTabState } from "@/store/tabStore.js";
@@ -588,14 +589,10 @@ export function WorkspacePinnedTasksSection({
             isPinned
             intl={intl}
             onDeriveCompactSession={() => {
-              // zcode-go：菜单点击 → 打开会话；SessionPane 消费派生意图自动 fork。
-              onSelectTaskRef.current(
-                contextMenuItem.workspacePath,
-                contextMenuItem.taskId,
-                contextMenuItem.workspaceIdentity,
-                contextMenuItem.unreadAt,
-              );
+              // zcode-go：直连 fork（不打开父会话）。
+              void forkCompactSessionViaHost(contextMenuItem.taskId);
             }}
+            zcodeGoForkDisabled={isZcodeGoForking(contextMenuItem.taskId)}
             onTogglePinTask={(_taskId, pinned) => {
               if (contextMenuItem.workspaceIdentity) {
                 useRemotePinnedTaskStore

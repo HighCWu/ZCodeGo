@@ -246,6 +246,10 @@ window.addEventListener("DOMContentLoaded", updateRendererProcessTitle, {
  */
 contextBridge.exposeInMainWorld("zcode", {
   /** zcode-go：分叉 ack 后裁剪子会话存储（剔除最后压缩边界前的惰性历史）。 */
+  zcodeGoForkCompactSession: (payload: {
+    parentSessionId: string;
+  }): Promise<{ ok: boolean; childSessionId: string; copiedMessages: number; workspacePath?: string; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoForkCompactSession, payload),
   zcodeGoTrimForkedSessionHistory: (
     payload: { childSessionId: string; parentSessionId: string },
   ): Promise<{
