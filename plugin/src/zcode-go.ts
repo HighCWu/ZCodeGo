@@ -339,18 +339,28 @@ function runTakeover(): void {
     // Windows 无法直接 exec .sh（spawn EFTYPE），须经 bash（hooks.json 的
     // sh 同源——Git bash 在 PATH 上）
     const isWin = process.platform === "win32";
+    // 官方进程树 env 带 ELECTRON_RUN_AS_NODE=1（官方 runtime 即官方 Electron 的
+    // run-as-node 形态）——启动器内的官方 Electron 二进制不能带着它启动，否则被
+    // 当纯 Node 执行，死于 "bad option: --no-sandbox"（launcher 内亦同源 unset 兜底）。
+    const desktopEnv = (() => {
+      const env = { ...process.env };
+      delete env.ELECTRON_RUN_AS_NODE;
+      return env;
+    })();
     const child = isWin
       ? spawn(process.env.SHELL?.trim() || "bash", [launcher], {
           detached: true,
           stdio: "ignore",
           cwd: homedir(),
           shell: false,
+          env: desktopEnv,
         })
       : spawn(launcher, [], {
           detached: true,
           stdio: "ignore",
           cwd: homedir(),
           shell: false,
+          env: desktopEnv,
         });
     child.unref();
     log(`拉起 zcode-go：${launcher}`);

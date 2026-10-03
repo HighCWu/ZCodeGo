@@ -483,17 +483,39 @@ function resolveZcodeGoOfficialRuntimeCommand(
   }
   try {
     const overridePath = join(homedir(), ".zcode-go", "official.json");
-    const raw = readFileSync(overridePath, "utf8");
-    const runtimeBundle =
-      typeof JSON.parse(raw)?.runtimeBundle === "string"
-        ? (JSON.parse(raw) as { runtimeBundle: string }).runtimeBundle.trim()
-        : "";
+    const parsed = JSON.parse(readFileSync(overridePath, "utf8")) as {
+      runtimeBundle?: unknown;
+      resourcesDir?: unknown;
+    };
+    const runtimeBundle = typeof parsed.runtimeBundle === "string" ? parsed.runtimeBundle.trim() : "";
     if (!runtimeBundle || runtimeBundle.includes("..")) {
       return null;
     }
     const bundlePath = resolve(runtimeBundle);
     if (!existsSync(bundlePath)) {
       return null;
+    }
+    // bundle 入口相对定位在官方安装布局下必失败（resources/glm/ 邻域无 provider/，
+    // 真身在 resources/config/provider/）→ app-server 启动即 exit=1「无法定位 CLI
+    // ZCode Built-in Provider Config」→ 桌面 storage prep 报 transport_closed。官方
+    // 生产态子进程实际携带全量桌面环境，这里同构：继承全量 env（PATH/HOME 等供
+    // CLI 再拉起 hook/git 使用）+ 显式钉死纯 Node 模式 + 指向官方安装内的 builtin 配置。
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) env[key] = value;
+    }
+    env.ELECTRON_RUN_AS_NODE = "1";
+    const builtinCandidates = [
+      typeof parsed.resourcesDir === "string" && parsed.resourcesDir.trim()
+        ? join(resolve(parsed.resourcesDir.trim()), "config", "provider", "zcode-builtin.json")
+        : null,
+      resolve(dirname(bundlePath), "..", "config", "provider", "zcode-builtin.json"),
+    ];
+    for (const candidate of builtinCandidates) {
+      if (candidate && existsSync(candidate)) {
+        env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = candidate;
+        break;
+      }
     }
     // 与 resolveElectronRuntimeZCodeAgentCommand 同款构造：ELECTRON_RUN_AS_NODE 下
     // 由本应用的 Electron Node 执行官方 bundle；storage preparation 也走官方入口。
@@ -502,7 +524,7 @@ function resolveZcodeGoOfficialRuntimeCommand(
       args: [bundlePath, ...ZCODE_AGENT_RUNTIME.spawnArgs],
       storagePreparationEntry: bundlePath,
       cwd: context.workspacePath,
-      env: { ELECTRON_RUN_AS_NODE: "1" },
+      env,
     };
   } catch {
     return null;

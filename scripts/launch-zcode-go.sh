@@ -65,6 +65,11 @@ if [ -z "${ZCODE_OFFICIAL_BIN:-}" ] && [ -f "$STATE_DIR/official.json" ]; then
 fi
 node "$REPO_ROOT/scripts/ensure-official-electron.mjs" >>"$STATE_DIR/desktop-launch.log" 2>&1
 
+# 根修复：本脚本多经插件 hook 拉起，而 hook 从官方进程树继承 ELECTRON_RUN_AS_NODE=1
+# （官方 runtime 即官方 Electron 的 run-as-node 形态）。不清掉它，下面的官方 Electron
+# 会被当纯 Node 启动，死于 "bad option: --no-sandbox"（见 desktop-launch.log 尾部）。
+unset ELECTRON_RUN_AS_NODE
+
 cd "$APP_DIR"
 # Windows（Git bash）下可执行文件必须带 .exe 后缀；
 # mac 克隆 bundle 内二进制保留官方原名（CFBundleExecutable 必须一致），
