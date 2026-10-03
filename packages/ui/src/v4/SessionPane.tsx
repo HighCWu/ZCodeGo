@@ -721,6 +721,20 @@ export function SessionPane({
     supportedArtifactTypes: [],
   });
   const [sharePreflightVersion, setSharePreflightVersion] = useState(0);
+  // zcode-go：超大历史横幅的按会话忽略（localStorage 持久化）。显隐必须走 React
+  // state——直接 remove() 掉 React 管理的 DOM 节点会让后续 commit 的 DOM 操作与
+  // 虚拟树错位（节点已被摘除），流式 delta 触发重渲染时抛异常导致整个会话 pane
+  // 被 error boundary 卸载（侧边栏另一棵树不受影响）。
+  const [oversizedDismissed, setOversizedDismissed] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}") as Record<
+        string,
+        number
+      >;
+    } catch {
+      return {};
+    }
+  });
   const selectedShareTurnFingerprints = useMemo(
     () =>
       new Map(
@@ -4674,11 +4688,7 @@ export function SessionPane({
         const totalRows = timelineSnapshot?.rows.totalCount ?? 0;
         if (!forkActionsEnabled || totalRows < 5000 || !sessionId) return null;
         // 按会话持久化忽略（localStorage；重载后仍生效）
-        let dismissedMap: Record<string, number> = {};
-        try {
-          dismissedMap = JSON.parse(localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}");
-        } catch { /* 忽略坏数据 */ }
-        if (dismissedMap[sessionId]) return null;
+        if (oversizedDismissed[sessionId]) return null;
         const windowRows = timelineSnapshot?.rows.window ?? [];
         let latestForkTarget: { rowId: number; entityId: string } | null = null;
         for (let i = windowRows.length - 1; i >= 0; i -= 1) {
@@ -4715,14 +4725,14 @@ export function SessionPane({
               <button
                 type="button"
                 className="rounded-md px-2 py-1 text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200"
-                onClick={(event) => {
+                onClick={() => {
+                  setOversizedDismissed((current) => ({ ...current, [sessionId]: Date.now() }));
                   try {
                     const raw = localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}";
                     const map = JSON.parse(raw) as Record<string, number>;
                     map[sessionId] = Date.now();
                     localStorage.setItem("zcodeGoOversizedDismissed", JSON.stringify(map));
                   } catch { /* 尽力而为 */ }
-                  (event.currentTarget.closest("[data-testid=zcode-go-oversized-banner]") ?? null)?.remove();
                 }}
               >
                 {intl.formatMessage({ id: "zcodeGo.oversizedBanner.dismiss" })}
