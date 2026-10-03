@@ -713,7 +713,7 @@ export function createWindowHostControllerRuntime(options: {
         // 这里只物化已按完整 remoteSessionId + identity 验证的 source，继续保持 fail-closed。
         await refreshSource(resolved);
       }
-      const matches = projection
+      let matches = projection
         .getTasks()
         .filter(
           (row) =>
@@ -723,6 +723,27 @@ export function createWindowHostControllerRuntime(options: {
             (!remoteAttachmentScope ||
               row.address.remoteSessionId === remoteAttachmentScope.remoteSessionId),
         );
+      if (matches.length !== 1 && resolved) {
+        // 投影快照按 source 缓存（refreshSource 短路），只会在首次读取时重建；
+        // 不经过 CLI 的直写库任务行（zcode-go 直连 fork）不会有 sessions index
+        // 事件把行带进 live overlay，快照永远停在启动时刻。mutation 匹配失败时
+        // 强制重建一次快照再判，直写行立即可归档/pin，官方路径语义不变。
+        try {
+          await refreshSource(resolved, true);
+        } catch (error) {
+          options.onSourceError?.(resolved.scope, "refresh", error);
+        }
+        matches = projection
+          .getTasks()
+          .filter(
+            (row) =>
+              row.address.taskId === params.taskId &&
+              row.address.workspacePath === params.workspacePath &&
+              row.address.workspaceIdentity === params.workspaceIdentity &&
+              (!remoteAttachmentScope ||
+                row.address.remoteSessionId === remoteAttachmentScope.remoteSessionId),
+          );
+      }
       if (matches.length !== 1) {
         if (matches.length === 0 && params.allowMissingTask && resolved) {
           // 条件删除允许已被其它客户端删除的目标到 Repo 幂等跳过；source 身份仍须完整验证。
