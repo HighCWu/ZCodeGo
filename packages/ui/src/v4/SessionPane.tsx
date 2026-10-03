@@ -3081,12 +3081,22 @@ export function SessionPane({
                 }`,
               );
             }
-            // 分叉任务行由 CLI 侧 syncer 实时写入任务索引库，但 UI 任务缓存不
-            // 会被动失效（实测分叉后侧栏不出现、重启才见）——主动失效本工作区，
-            // 并在 1s 后补一次（防 syncer 写行与本次重读的竞态漏显示）。
+            // 分叉任务行由 CLI 侧 syncer 实时写入任务索引库，但侧栏不订阅该库的
+            // 变化——应用内标准的整表重查入口是 bumpTaskListVersion（Claude 导入、
+            // Bot 广播同款），经 useGlobalTaskList 的 taskListVersion 签名触发
+            // reload；1s 后补一次（防 syncer 写行与重查的竞态）。query-cache 层
+            // 同步失效兜底 header 等消费方。
             if (workspacePath) {
+              useZCodeSessionStore
+                .getState()
+                .bumpTaskListVersion(workspacePath, workspaceIdentity);
               invalidateTaskQueryCacheByScopes([{ workspacePath }]);
-              setTimeout(() => invalidateTaskQueryCacheByScopes([{ workspacePath }]), 1_000);
+              setTimeout(() => {
+                useZCodeSessionStore
+                  .getState()
+                  .bumpTaskListVersion(workspacePath, workspaceIdentity);
+                invalidateTaskQueryCacheByScopes([{ workspacePath }]);
+              }, 1_000);
             }
             // 原地切到 child session（与新建会话同一选择路径）。
             onSessionCreated?.(childSessionId);
