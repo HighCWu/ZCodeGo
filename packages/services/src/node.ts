@@ -345,6 +345,7 @@ import { createBroadcastService } from "./broadcast/broadcastService.js";
 import { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
 import { initZCodeGoGoalVerify } from "./zcode-agent/zcodeGoGoalVerify.js";
 import { initZCodeGoGoalKeepAlive } from "./zcode-agent/zcodeGoGoalKeepAlive.js";
+import { initZCodeGoSubagentRecovery } from "./zcode-agent/zcodeGoSubagentRecovery.js";
 import { initZCodeGoQueueDrain } from "./zcode-agent/zcodeGoQueueDrain.js";
 import type { ZCodeAgentCommandResolver } from "./zcode-agent/zcodeAgentProcessManager.js";
 import { buildAgentTelemetrySpawnEnv } from "./zcode-agent/agentTelemetryEnv.js";
@@ -2278,6 +2279,9 @@ export function createLocalServices(options: {
   });
   initZCodeGoGoalKeepAlive(zcodeAgentService, {
     logger: createServiceLogger("zcode-go-goal-keepalive"),
+  });
+  initZCodeGoSubagentRecovery(zcodeAgentService, {
+    logger: createServiceLogger("zcode-go-subagent-recovery"),
   });
   initZCodeGoQueueDrain(zcodeAgentService, {
     logger: createServiceLogger("zcode-go-queue-drain"),
