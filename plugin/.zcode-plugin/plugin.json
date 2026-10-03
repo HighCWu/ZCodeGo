@@ -1,6 +1,6 @@
 {
   "name": "zcode-go",
-  "version": "3.14.3-go.3",
+  "version": "3.14.3+zcode-go-v0.1.0",
   "description": "ZCode Go desktop takeover: hide the official ZCode window and let the zcode-go desktop take over (official native runtime, quota preserved). Type /zcode-go in any session to switch; a floating bubble switches back.",
   "author": {
     "name": "whc"
