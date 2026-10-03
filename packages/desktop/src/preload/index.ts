@@ -245,6 +245,16 @@ window.addEventListener("DOMContentLoaded", updateRendererProcessTitle, {
  * 通过 MessagePort RPC 访问，不再经过此 bridge。
  */
 contextBridge.exposeInMainWorld("zcode", {
+  /** zcode-go：分叉 ack 后裁剪子会话存储（剔除最后压缩边界前的惰性历史）。 */
+  zcodeGoTrimForkedSessionHistory: (
+    payload: { childSessionId: string; parentSessionId: string },
+  ): Promise<{
+    ok: boolean;
+    childSessionId: string;
+    removedMessages: number;
+    keptMessages: number;
+    error?: string;
+  }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoTrimForkedSessionHistory, payload),
   connectRemote: (
     options: RemoteTarget,
     requestId?: string,

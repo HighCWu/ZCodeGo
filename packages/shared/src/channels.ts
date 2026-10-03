@@ -418,6 +418,8 @@ export const PlatformChannels = {
   OpenInEditor: "zcode:open-in-editor",
   /** Renderer → Main：执行桌面窗口级命令 */
   ExecuteDesktopCommand: "zcode:execute-desktop-command",
+  /** Renderer → Main：分叉 ack 后裁剪子会话存储（剔除最后压缩边界前的惰性历史） */
+  ZcodeGoTrimForkedSessionHistory: "zcode:zcode-go-trim-forked-history",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -1158,6 +1160,16 @@ export interface PlatformChannelMap {
     // 返回值直通 main 进程 handler 的 return（GetCuaOsSupport 返回 CuaOsSupport），
     // 与 renderer 侧 IPlatformService.executeDesktopCommand 的 Promise<unknown> 对齐。
     response: unknown;
+  };
+  [PlatformChannels.ZcodeGoTrimForkedSessionHistory]: {
+    request: { childSessionId: string; parentSessionId: string };
+    response: {
+      ok: boolean;
+      childSessionId: string;
+      removedMessages: number;
+      keptMessages: number;
+      error?: string;
+    };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

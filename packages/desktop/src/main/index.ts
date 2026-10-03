@@ -147,6 +147,7 @@ import {
   getZCodeGoTakeoverHandler,
   initZCodeGoTakeover,
 } from "./zcodeGoTakeover.js";
+import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { isZCodeGoBubbleWindow } from "./zcodeGoBubble.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
@@ -2292,6 +2293,27 @@ app.whenReady().then(async () => {
         (win) => !isZCodeGoBubbleWindow(win) && win !== updateStatusWindow,
       ) ?? null,
     logger,
+  });
+
+  // zcode-go 分叉裁剪：fork ack 后对子会话存储剔除压缩前惰性历史（不依赖接管模式）。
+  ipcMain.handle(PlatformChannels.ZcodeGoTrimForkedSessionHistory, (_event, payload: unknown) => {
+    const request = payload as { childSessionId?: unknown; parentSessionId?: unknown };
+    if (
+      typeof request?.childSessionId !== "string" ||
+      typeof request?.parentSessionId !== "string"
+    ) {
+      return {
+        ok: false,
+        childSessionId: "",
+        removedMessages: 0,
+        keptMessages: 0,
+        error: "invalid payload",
+      };
+    }
+    return trimForkedSessionHistory({
+      childSessionId: request.childSessionId,
+      parentSessionId: request.parentSessionId,
+    });
   });
 
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];

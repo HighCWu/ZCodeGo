@@ -3041,18 +3041,51 @@ export function SessionPane({
         sessionId,
         current.revision,
         current.logEpoch,
-      ).then((ack) => {
-        if (ack.status !== "accepted" && ack.status !== "duplicate") {
-          logger.warn(`[v4-pane] fork 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
-          return;
-        }
-        if (ack.result?.type === "forkAssistant") {
-          // 原地切到 child session（与新建会话同一选择路径）。
-          onSessionCreated?.(ack.result.sessionId);
-        }
-      });
+      )
+        .then(async (ack) => {
+          if (ack.status !== "accepted" && ack.status !== "duplicate") {
+            logger.warn(`[v4-pane] fork 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
+            return;
+          }
+          if (ack.result?.type === "forkAssistant") {
+            const childSessionId = ack.result.sessionId;
+            // zcode-go fork-then-trim：官方 fork 全量复制子会话（模型前缀在压缩边界
+            // 截断，缓存不受影响）；切换前由桌面主进程把边界前的惰性历史从子会话存
+            // 储剔除（唯一写入方是 CLI，协议面无删消息入口，只能存储层直裁）。裁剪
+            // 失败不阻塞——子会话保持官方全量形态照常可用。
+            try {
+              const bridge = (
+                window as {
+                  zcode?: {
+                    zcodeGoTrimForkedSessionHistory?: (payload: {
+                      childSessionId: string;
+                      parentSessionId: string;
+                    }) => Promise<{ ok: boolean; removedMessages: number; error?: string }>;
+                  };
+                }
+              ).zcode;
+              const result = await bridge?.zcodeGoTrimForkedSessionHistory?.({
+                childSessionId,
+                parentSessionId: sessionId,
+              });
+              if (result?.ok) {
+                logger.info(`[v4-pane] fork 子会话已裁剪压缩前历史: -${result.removedMessages}`);
+              } else if (result && !result.ok) {
+                logger.warn(`[v4-pane] fork 子会话裁剪未执行: ${result.error ?? "unknown"}`);
+              }
+            } catch (trimError) {
+              logger.warn(
+                `[v4-pane] fork 子会话裁剪异常（保持官方全量形态）: ${
+                  trimError instanceof Error ? trimError.message : String(trimError)
+                }`,
+              );
+            }
+            // 原地切到 child session（与新建会话同一选择路径）。
+            onSessionCreated?.(childSessionId);
+          }
+        });
     },
-    [dispatchCommand, onSessionCreated, sessionId],
+    [dispatchCommand, logger, onSessionCreated, sessionId],
   );
 
   const handleEdit = useCallback(
