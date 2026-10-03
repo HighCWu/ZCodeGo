@@ -734,6 +734,16 @@ export function WorkspaceTimelineTasksSection({
             task={contextMenuItem}
             isPinned={false}
             intl={intl}
+            onDeriveCompactSession={() => {
+              // zcode-go：菜单点击 → 打开该任务会话；SessionPane 挂载后消费
+              // 派生意图自动 fork（单次点击直达派生新会话）。
+              onSelectTaskRef.current(
+                contextMenuItem.workspacePath,
+                contextMenuItem.taskId,
+                contextMenuItem.workspaceIdentity,
+                contextMenuItem.unreadAt,
+              );
+            }}
             onTogglePinTask={(_taskId, pinned) => {
               // timeline 现在本地和远端分属两套缓存，pin 时需要同时维护成员关系。
               // 否则远端任务会进入 pinned 后仍残留在 timeline 缓存里。

@@ -133,7 +133,7 @@ import { ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
 import { SessionSubscriptionErrorPanel } from "@/v4/SessionSubscriptionErrorPanel.js";
 import { ConversationTimeline } from "@/v4/ConversationTimeline.js";
 import { filterZcodeGoGoalVerifyRows } from "@/v4/zcodeGoGoalVerifyRows.js";
-import { consumeZcodeGoForkIntent } from "@/v4/zcodeGoForkIntent.js";
+import { consumeZcodeGoForkIntent, peekZcodeGoForkIntent } from "@/v4/zcodeGoForkIntent.js";
 import { ConversationShareImportNotice } from "@/v4/ConversationShareImportNotice.js";
 import { ConversationShareConfirmationDock } from "@/v4/ConversationShareConfirmationDock.js";
 import { ConversationShareSuccessDock } from "@/v4/ConversationShareSuccessDock.js";
@@ -3702,6 +3702,42 @@ export function SessionPane({
     !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
       ? snapshot
       : null;
+  // zcode-go：侧栏「分叉压缩历史会话」意图的消费点。必须在 effect 里消费（渲染期
+  // 副作用会双触发/丢触发）；fork 目标行未就绪（快照加载中）时保留意图等下一轮。
+  // 触发路径一：会话打开/切换/快照更新；路径二：intent 设置时的 window 广播
+  // （覆盖菜单作用于当前已打开会话的场景）。
+  const zcodeGoForkTriggerRef = useRef<() => void>(() => {});
+  zcodeGoForkTriggerRef.current = () => {
+    if (!sessionId || !forkActionsEnabled || !timelineSnapshot) return;
+    if (!peekZcodeGoForkIntent(sessionId)) return;
+    const rowsWindow = timelineSnapshot.rows.window;
+    for (let i = rowsWindow.length - 1; i >= 0; i -= 1) {
+      const row = rowsWindow[i]!;
+      // 与官方 fork 按钮同源：完全读取 row.actions.canFork；entityId 是
+      // ConversationRowTarget 必需项，旧转录行可能缺省。
+      if (
+        row.kind === "assistantText" &&
+        row.actions?.canFork === true &&
+        typeof row.entityId === "string"
+      ) {
+        consumeZcodeGoForkIntent(sessionId);
+        handleFork({ rowId: row.rowId, entityId: row.entityId });
+        return;
+      }
+    }
+  };
+  useEffect(() => {
+    zcodeGoForkTriggerRef.current();
+  }, [sessionId, timelineSnapshot, forkActionsEnabled]);
+  useEffect(() => {
+    if (!sessionId) return;
+    const handler = (event: Event): void => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+      if (detail?.sessionId === sessionId) zcodeGoForkTriggerRef.current();
+    };
+    window.addEventListener("zcode-go:fork-intent", handler);
+    return () => window.removeEventListener("zcode-go:fork-intent", handler);
+  }, [sessionId]);
   const shareHandoverContext =
     snapshot?.sharedContextImport && "contextId" in snapshot.sharedContextImport
       ? snapshot.sharedContextImport
@@ -4554,9 +4590,13 @@ export function SessionPane({
         />
       ) : null}
       {(() => {
-        // zcode-go：超大历史会话引导派生。forkAssistant 物理复制含 compaction
-        // part 的完整前缀，子会话 hydrator 切出与父逐字节一致的 post-compact
-        // 模型前缀 → provider 缓存命中，推理成本连续。
+        // zcode-go：超大历史会话引导派生。forkAssistant（官方 v4 fork）逐字复制
+        // active transcript（含 compaction 摘要消息及其 compactBoundary part，官方
+        // 明确不做 compact provider-scope 裁剪）；子会话 hydrator 在同一压缩边界
+        // 截断 → 送模型的 post-compact 前缀（摘要 + 边界后消息 + 保留段）与父逐
+        // 字节一致 → provider 前缀缓存命中。压缩前的行随官方语义一并落库，但
+        // 永不进入模型上下文（协议面没有「只复制压缩后」的 fork 入口，host 层
+        // 无法在不动官方运行时的前提下裁剪落库内容）。
         const totalRows = timelineSnapshot?.rows.totalCount ?? 0;
         if (!forkActionsEnabled || totalRows < 5000 || !sessionId) return null;
         // 按会话持久化忽略（localStorage；重载后仍生效）
@@ -4565,22 +4605,15 @@ export function SessionPane({
           dismissedMap = JSON.parse(localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}");
         } catch { /* 忽略坏数据 */ }
         if (dismissedMap[sessionId]) return null;
-        if (consumeZcodeGoForkIntent(sessionId ?? "")) {
-          const rowsWindow = timelineSnapshot?.rows.window ?? [];
-          for (let i = rowsWindow.length - 1; i >= 0; i -= 1) {
-            const row = rowsWindow[i]!;
-            if (row.kind === "assistantText" && row.actions?.canFork === true) {
-              handleFork({ rowId: row.rowId, entityId: row.entityId });
-              break;
-            }
-          }
-          return null;
-        }
         const windowRows = timelineSnapshot?.rows.window ?? [];
         let latestForkTarget: { rowId: number; entityId: string } | null = null;
         for (let i = windowRows.length - 1; i >= 0; i -= 1) {
           const row = windowRows[i]!;
-          if (row.kind === "assistantText" && row.actions?.canFork === true) {
+          if (
+            row.kind === "assistantText" &&
+            row.actions?.canFork === true &&
+            typeof row.entityId === "string"
+          ) {
             latestForkTarget = { rowId: row.rowId, entityId: row.entityId };
             break;
           }
