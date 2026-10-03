@@ -14,6 +14,7 @@ import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { buildWorkspaceServiceLookup } from "@/lib/workspaceServiceResolver.js";
 import { logger } from "@/logger.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
+import { isZcodeGoForking, markZcodeGoForking, unmarkZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskListRemoteSyncHint } from "@/TaskListRemoteSyncHint.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
@@ -361,6 +362,10 @@ export function WorkspaceTimelineTasksSection({
   const selectTimelineItem = useCallback((itemKey: string) => {
     const item = itemByKeyRef.current.get(itemKey);
     if (!item) {
+      return;
+    }
+    // zcode-go：分叉进行中的会话禁止打开（与分叉/裁剪竞态）。
+    if (isZcodeGoForking(item.taskId)) {
       return;
     }
     onSelectTaskRef.current(item.workspacePath, item.taskId, item.workspaceIdentity, item.unreadAt);
@@ -734,15 +739,21 @@ export function WorkspaceTimelineTasksSection({
             task={contextMenuItem}
             isPinned={false}
             intl={intl}
+            zcodeGoForkDisabled={
+              contextMenuItem.taskId === activeTaskId || isZcodeGoForking(contextMenuItem.taskId)
+            }
             onDeriveCompactSession={() => {
               // zcode-go：菜单点击 → 打开该任务会话；SessionPane 挂载后消费
               // 派生意图自动 fork（单次点击直达派生新会话）。
+              markZcodeGoForking(contextMenuItem.taskId);
               onSelectTaskRef.current(
                 contextMenuItem.workspacePath,
                 contextMenuItem.taskId,
                 contextMenuItem.workspaceIdentity,
                 contextMenuItem.unreadAt,
               );
+              const taskId = contextMenuItem.taskId;
+              setTimeout(() => unmarkZcodeGoForking(taskId), 120_000);
             }}
             onTogglePinTask={(_taskId, pinned) => {
               // timeline 现在本地和远端分属两套缓存，pin 时需要同时维护成员关系。

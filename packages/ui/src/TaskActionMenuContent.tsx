@@ -41,6 +41,7 @@ export function TaskActionMenuContent({
   onCopySessionId,
   onDeriveCompactSession,
   onViewModelTrajectory,
+  zcodeGoForkDisabled,
 }: {
   intl: {
     formatMessage: (desc: { id: string }, values?: Record<string, string>) => string;
@@ -77,6 +78,8 @@ export function TaskActionMenuContent({
   onCopySessionId?: () => void;
   onDeriveCompactSession?: () => void;
   onViewModelTrajectory?: () => void;
+  /** zcode-go：会话已打开显示（fork 走会话内横幅）或分叉进行中时禁用菜单项。 */
+  zcodeGoForkDisabled?: boolean;
 }) {
   const taskTargetActionsDisabled = disableTaskActions || disableTaskTargetActions;
 
@@ -203,8 +206,8 @@ export function TaskActionMenuContent({
         <>
           <Separator />
           <Item
-            disabled={taskTargetActionsDisabled}
-            title={taskTargetActionsDisabled ? disabledReason : undefined}
+            disabled={taskTargetActionsDisabled || zcodeGoForkDisabled === true}
+            title={zcodeGoForkDisabled === true ? intl.formatMessage({ id: "taskList.forkCompactHistoryDisabled" }) : taskTargetActionsDisabled ? disabledReason : undefined}
             onSelect={() => {
               // 记录派生意图；用户随后打开该会话时 SessionPane 自动分叉精简历史新会话
               setZcodeGoForkIntent(activeSessionId);
