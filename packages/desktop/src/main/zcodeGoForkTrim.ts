@@ -141,49 +141,135 @@ export function trimForkedSessionHistory(input: {
       break;
     }
 
-    let toDelete: MessageRow[] = [];
+    // preservedSegment 区间按 sequence 圈定（与 CLI compactPreservedSegmentMessages 同构）。
+    let headSeq = Number.MAX_SAFE_INTEGER;
+    let tailSeq = -1;
     if (boundarySeq >= 0) {
-      // preservedSegment 区间按 sequence 圈定（与 CLI compactPreservedSegmentMessages 同构）。
-      let headSeq = Number.MAX_SAFE_INTEGER;
-      let tailSeq = -1;
       for (const message of messages) {
         if (message.id === preservedHead) headSeq = Math.min(headSeq, message.sequence);
         if (message.id === preservedTail) tailSeq = Math.max(tailSeq, message.sequence);
       }
-      const inPreservedSegment =
-        headSeq <= tailSeq
-          ? (message: MessageRow) => message.sequence >= headSeq && message.sequence <= tailSeq
-          : () => false;
-
-      toDelete = messages.filter(
-        (message) => message.sequence < boundarySeq && !inPreservedSegment(message),
-      );
     }
+    const inPreservedSegment =
+      headSeq <= tailSeq
+        ? (message: MessageRow) => message.sequence >= headSeq && message.sequence <= tailSeq
+        : () => false;
+
+    const toDelete: MessageRow[] =
+      boundarySeq >= 0
+        ? messages.filter(
+            (message) => message.sequence < boundarySeq && !inPreservedSegment(message),
+          )
+        : [];
 
     // node:sqlite 无 transaction 辅助，手动事务（与官方 store 的 begin immediate 同款）。
     // goal 清理始终执行（与消息裁剪解耦）：分叉是全新续接会话，不继承父会话的
     // 目标迭代史。runtime/model_selection、runtime/execution_state 保留。
-    db.exec("begin immediate");
-    try {
-      const deletePart = db.prepare("delete from part where session_id = ? and message_id = ?");
-      const deleteMessage = db.prepare("delete from message where session_id = ? and id = ?");
-      for (const row of toDelete) {
-        deletePart.run(childSessionId, row.id);
-        deleteMessage.run(childSessionId, row.id);
-      }
-      db.prepare("delete from session_target where session_id = ?").run(childSessionId);
-      db.prepare("delete from session_entry where session_id = ? and type = ?").run(
-        childSessionId,
-        "target_completion_verification",
-      );
-      db.exec("commit");
-    } catch (transactionError) {
+    //
+    // 消息/part 删除用集合式两条语句（sequence 上界 + 保留段 id 例外表），逐行
+    // 循环在数万行会话上要跑十几秒且与 CLI 的 syncer/标题生成竞态——集合式毫秒级。
+    // 无压缩边界（boundarySeq<0）时 toDelete 为空，消息删除整体跳过。
+    if (toDelete.length > 0) {
+      const keptIds = messages
+        .filter((message) => inPreservedSegment(message))
+        .map((message) => message.id);
+      const keptExclusion =
+        keptIds.length > 0 ? ` and id not in (${keptIds.map(() => "?").join(",")})` : "";
+      const keptParams = keptIds.length > 0 ? keptIds : [];
+      db.exec("begin immediate");
       try {
-        db.exec("rollback");
-      } catch {
-        /* 尽力而为 */
+        db.prepare(
+          "delete from part where session_id = ? and message_id in " +
+            "(select id from message where session_id = ? and sequence < ?" +
+            keptExclusion +
+            ")",
+        ).run(childSessionId, childSessionId, boundarySeq, ...keptParams);
+        db.prepare(
+          "delete from message where session_id = ? and sequence < ?" + keptExclusion,
+        ).run(childSessionId, boundarySeq, ...keptParams);
+        db.prepare("delete from session_target where session_id = ?").run(childSessionId);
+        db.prepare("delete from session_entry where session_id = ? and type = ?").run(
+          childSessionId,
+          "target_completion_verification",
+        );
+        db.exec("commit");
+      } catch (transactionError) {
+        try {
+          db.exec("rollback");
+        } catch {
+          /* 尽力而为 */
+        }
+        throw transactionError;
       }
-      throw transactionError;
+    } else {
+      db.exec("begin immediate");
+      try {
+        db.prepare("delete from session_target where session_id = ?").run(childSessionId);
+        db.prepare("delete from session_entry where session_id = ? and type = ?").run(
+          childSessionId,
+          "target_completion_verification",
+        );
+        db.exec("commit");
+      } catch (transactionError) {
+        try {
+          db.exec("rollback");
+        } catch {
+          /* 尽力而为 */
+        }
+        throw transactionError;
+      }
+    }
+
+    // 思考强度继承：fork 的 modelSelection fallback 用的是本 CLI 的默认会话选择
+    // （接管场景下恢复的记录没有账号模型配置），子会话的 runtime/model_selection
+    // 条目会丢掉父会话的 thoughtLevel / options.reasoningLevel（db 实证）。此处
+    // 以父条目为源补齐——裁剪发生在子会话首次订阅前，CLI 以修好的条目构建配置。
+    // 条目权威在 CLI，这里只补缺失字段，不覆盖已有值。
+    try {
+      const parentEntry = db
+        .prepare(
+          "select data from session_entry where session_id = ? and type = 'runtime/model_selection' " +
+            "order by time_updated desc limit 1",
+        )
+        .get(parentSessionId) as { data: string } | undefined;
+      const childEntry = db
+        .prepare(
+          "select id, data from session_entry where session_id = ? and type = 'runtime/model_selection' " +
+            "order by time_updated desc limit 1",
+        )
+        .get(childSessionId) as { id: string; data: string } | undefined;
+      if (parentEntry && childEntry) {
+        const parentState = JSON.parse(parentEntry.data) as {
+          thoughtLevel?: string;
+          modelSelection?: { options?: Record<string, unknown> };
+        };
+        const childState = JSON.parse(childEntry.data) as {
+          thoughtLevel?: string;
+          modelSelection?: { options?: Record<string, unknown> };
+        };
+        let changed = false;
+        if (parentState.thoughtLevel && !childState.thoughtLevel) {
+          childState.thoughtLevel = parentState.thoughtLevel;
+          changed = true;
+        }
+        if (
+          parentState.modelSelection?.options &&
+          childState.modelSelection &&
+          !childState.modelSelection.options
+        ) {
+          childState.modelSelection.options = parentState.modelSelection.options;
+          changed = true;
+        }
+        if (changed) {
+          db.prepare("update session_entry set data = ?, time_updated = ? where id = ?").run(
+            JSON.stringify(childState),
+            Date.now(),
+            childEntry.id,
+          );
+        }
+      }
+    } catch {
+      /* 思考强度继承失败不阻塞裁剪 */
     }
 
     return {
