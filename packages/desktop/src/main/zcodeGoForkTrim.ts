@@ -20,10 +20,31 @@
  *
  * 库路径与官方 getDefaultSessionDbPath 同源：~/.zcode/cli/db/db.sqlite（node:sqlite）。
  */
-import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+// 不能静态 import "node:sqlite"：tsup 会把 node: 前缀剥成裸包名（产物实测
+// `from "sqlite"`），主进程启动即 ERR_MODULE_NOT_FOUND。getBuiltinModule 是
+// 运行时同步取内建模块，打包器无法触碰（官方 CLI 对 node:sea 同款用法）。
+type NodeSqlite = {
+  DatabaseSync: new (
+    path: string,
+    options?: { timeout?: number },
+  ) => {
+    prepare: (sql: string) => { get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[]; run: (...args: unknown[]) => unknown };
+    exec: (sql: string) => void;
+    close: () => void;
+  };
+};
+
+function loadSqlite(): NodeSqlite {
+  const builtin = (
+    process as unknown as { getBuiltinModule?: (id: string) => NodeSqlite | undefined }
+  ).getBuiltinModule?.("node:sqlite");
+  if (builtin) return builtin;
+  throw new Error("node:sqlite unavailable in this runtime");
+}
 
 export interface TrimForkedSessionResult {
   ok: boolean;
@@ -65,9 +86,9 @@ export function trimForkedSessionHistory(input: {
     return { ...base, error: "invalid session id" };
   }
 
-  let db: DatabaseSync;
+  let db: InstanceType<NodeSqlite["DatabaseSync"]>;
   try {
-    db = new DatabaseSync(dbPath, { timeout: 10_000 });
+    db = new (loadSqlite().DatabaseSync)(dbPath, { timeout: 10_000 });
   } catch (error) {
     return { ...base, error: `open failed: ${error instanceof Error ? error.message : String(error)}` };
   }

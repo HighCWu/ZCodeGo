@@ -50,9 +50,10 @@ interface TakeoverContext {
 }
 
 let context: TakeoverContext | null = null;
-let bubble: ZCodeGoBubbleController | null = null;
+let bubble: ZcodeGoBubbleController | null = null;
 let showWatcher: ReturnType<typeof watch> | null = null;
 let switching = false;
+let officialWatchTimer: ReturnType<typeof setInterval> | null = null;
 
 export function isZCodeGoTakeoverEnabled(): boolean {
   const value = process.env.ZCODE_GO_TAKEOVER;
@@ -353,6 +354,10 @@ export function initZCodeGoTakeover(options: TakeoverContext): void {
     } catch {
       /* 忽略 */
     }
+    if (officialWatchTimer) {
+      clearInterval(officialWatchTimer);
+      officialWatchTimer = null;
+    }
     showWatcher?.close();
     bubble?.destroy();
   });
@@ -372,5 +377,46 @@ export function initZCodeGoTakeover(options: TakeoverContext): void {
   }
   // 编排可能在 watcher 就绪前已触碰 SHOW
   if (existsSync(SHOW_FILE)) handleShowSignal();
+  startOfficialExitWatch();
   options.logger.info("[zcode-go] takeover 模式就绪", { pid: process.pid });
+}
+
+/**
+ * 官方退出联动（用户要求）：官方 zcode 全部进程消失后，zcode-go 桌面与气泡跟随
+ * 退出。仅当启动时官方在运行才武装（独立冷启动的 zcode-go 不受影响）。检测用
+ * pgrep -f 官方 bin 路径：主进程 cmdline 虽被改写，但 zygote/子进程仍带路径，主
+ * 进程退出时它们一并消失 → 计数归零即官方已退出。连续两轮为空才退出（防抖）。
+ */
+function startOfficialExitWatch(): void {
+  if (officialWatchTimer) return;
+  const officialBin = resolveOfficialBin();
+  if (!officialBin) return;
+  let armed = false;
+  let emptyStreak = 0;
+  officialWatchTimer = setInterval(() => {
+    void (async () => {
+      try {
+        const pgrep = await runCommand("pgrep", ["-f", officialBin]);
+        const alive = (pgrep?.stdout ?? "").split("\n").some((line) => /^\d+$/.test(line.trim()));
+        if (alive) {
+          armed = true;
+          emptyStreak = 0;
+          return;
+        }
+        if (!armed) return;
+        emptyStreak += 1;
+        if (emptyStreak >= 2) {
+          context?.logger.info("[zcode-go] 官方已退出，zcode-go 跟随退出");
+          if (officialWatchTimer) {
+            clearInterval(officialWatchTimer);
+            officialWatchTimer = null;
+          }
+          app.quit();
+        }
+      } catch {
+        /* 单轮检测异常不影响下一轮 */
+      }
+    })();
+  }, 5_000);
+  officialWatchTimer.unref?.();
 }

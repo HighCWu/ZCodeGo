@@ -310,7 +310,7 @@ try {
     ensureBinary();
     ensureDistAssets();
     ensureIcons();
-    ensureLinuxDesktopEntry();
+  // 桌面入口不再静默安装（用户反馈开始菜单莫名多出 ZCode Go）。如需启动器入口，手动运行本脚本后自行创建，或恢复此调用。
     ensureApp();
   }
   const out = { electronRoot, appDir, officialBin };
