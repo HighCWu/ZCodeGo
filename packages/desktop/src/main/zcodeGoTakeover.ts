@@ -18,6 +18,7 @@
 import { app, BrowserWindow } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { scheduleOrphanTaskSweeps } from "./zcodeGoTaskSweep.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -268,5 +269,10 @@ export function initZCodeGoTakeover(options: TakeoverContext): void {
   setTimeout(() => {
     if (!switching) void enterZCodeGo();
   }, 800);
+  // 孤儿任务清扫（/zcode-go 空会话删除与 syncer 插行的时序竞态收敛）。
+  scheduleOrphanTaskSweeps({
+    info: (message, extra) => options.logger.info(message, extra),
+    warn: (message, extra) => options.logger.warn(message, extra),
+  });
   options.logger.info("[zcode-go] takeover 模式就绪", { pid: process.pid });
 }
