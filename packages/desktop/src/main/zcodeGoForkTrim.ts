@@ -308,13 +308,22 @@ export function trimForkedSessionHistory(input: {
             forkedFromTaskId: parentSessionId,
             ...(parentTask?.task_status ? { status: parentTask.task_status } : {}),
           };
+          // tasks 表没有 task_id 唯一约束（on conflict(task_id) 非法，实测 ERR 会
+          // 连带回滚整个裁剪事务）——先查后插。
+          if (tasksDb.prepare("select task_id from tasks where task_id = ?").get(childSessionId)) {
+            return {
+              ok: true,
+              childSessionId,
+              removedMessages: toDelete.length,
+              keptMessages: messages.length - toDelete.length,
+            };
+          }
           tasksDb.exec("begin immediate");
           try {
             tasksDb
               .prepare(
                 "insert into tasks (workspace_key, workspace_path, task_id, title, task_status, provider, mode, model, forked_from_task_id, created_at, updated_at, unread_at, last_unread_at, pinned, archived, deleted, title_overridden, meta_json, searchable_text) " +
-                  "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, 0, 0, 0, 0, ?, '') " +
-                  "on conflict(task_id) do nothing",
+                  "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, 0, 0, 0, 0, 0, ?, '') ",
               )
               .run(
                 parentSession.directory,
