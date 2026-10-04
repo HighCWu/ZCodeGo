@@ -20,6 +20,7 @@
  *   { "goalVerify": { "enabled": true, "maxRounds": 3 } }
  */
 import { existsSync, readFileSync } from "node:fs";
+import { extractLogicalFramePayload } from "./zcodeGoWireFrame.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";

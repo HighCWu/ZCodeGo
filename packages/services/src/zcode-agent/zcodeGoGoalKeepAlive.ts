@@ -28,6 +28,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
 
 const STATE_DIR = join(homedir(), ".zcode-go");
 const SCAN_INTERVAL_MS = 60_000;
@@ -105,6 +106,8 @@ interface TrackedGoal {
   registeredAtMs: number;
   /** 初始 snapshot 里已 active（历史状态）：首次停滞直接走慢通道。 */
   fromSnapshot: boolean;
+  /** 模型追溯（路径 5）已尝试过：一次性救济，恢复复位后再次停滞不再触发。 */
+  modelTraceTried: boolean;
   /** 快通道连续无效 resume 计数（maxAutoResumes 保护）。 */
   fastResumes: number;
   /** 慢通道：下次探测时刻 + 当前退避间隔。 */
@@ -176,32 +179,23 @@ interface IndexSessionEntry {
 }
 
 function extractEntries(wire: unknown): Array<IndexSessionEntry> {
-  if (typeof wire !== "object" || wire === null) return [];
-  const w = wire as { payload?: unknown };
-  const payload = w.payload as
-    | {
-        kind?: string;
-        snapshot?: { sessions?: unknown };
-        deltas?: Array<{ op?: unknown; session?: unknown }>;
-      }
-    | undefined;
+  const payload = extractLogicalFramePayload(wire);
+  if (!payload) return [];
   const out: Array<IndexSessionEntry> = [];
   const push = (session: unknown): void => {
     if (typeof session === "object" && session !== null) out.push(session as IndexSessionEntry);
   };
-  if (payload?.kind === "deltas" && Array.isArray(payload.deltas)) {
-    for (const d of payload.deltas) if (d.op === "session.upserted") push(d.session);
-  } else if (payload?.kind === "snapshot" && payload.snapshot !== null && typeof payload.snapshot === "object") {
+  if (payload.kind === "deltas") {
+    for (const d of payload.deltas ?? []) {
+      if ((d as { op?: unknown })?.op === "session.upserted") {
+        push((d as { session?: unknown }).session);
+      }
+    }
+  } else if (payload.snapshot !== null && typeof payload.snapshot === "object") {
     const snap = payload.snapshot as { sessions?: unknown };
     if (Array.isArray(snap.sessions)) for (const s of snap.sessions) push(s);
   }
   return out;
-}
-
-function payloadKind(wire: unknown): string | null {
-  if (typeof wire !== "object" || wire === null) return null;
-  const payload = (wire as { payload?: { kind?: unknown } }).payload;
-  return typeof payload?.kind === "string" ? payload.kind : null;
 }
 
 /** sessions-index 帧观察入口（zcodeAgentService 帧分发点调用）。 */
@@ -212,7 +206,9 @@ export function observeZcodeGoGoalKeepAliveFrame(workspace: {
   if (!agent || disposed) return;
   const config = readConfig();
   if (!config.enabled) return;
-  const fromSnapshot = payloadKind(wire) === "snapshot";
+  const logical = extractLogicalFramePayload(wire);
+  if (!logical) return;
+  const fromSnapshot = logical.kind === "snapshot";
   for (const entry of extractEntries(wire)) {
     if (typeof entry.sessionId !== "string" || !entry.sessionId) continue;
     const sessionId = entry.sessionId;
@@ -250,6 +246,7 @@ export function observeZcodeGoGoalKeepAliveFrame(workspace: {
         lastActivityAtMs: frameActivity,
         registeredAtMs: Date.now(),
         fromSnapshot,
+        modelTraceTried: false,
         fastResumes: 0,
         nextProbeAtMs: 0,
         probeBackoffMs: SLOW_PROBE_BASE_MS,
@@ -305,40 +302,31 @@ export function observeZcodeGoGoalKeepAliveConversationFrame(workspace: {
   if (!agent || disposed) return;
   const config = readConfig();
   if (!config.enabled) return;
-  if (typeof wire !== "object" || wire === null) return;
-  const frame = wire as {
-    topic?: unknown;
-    payload?: {
-      kind?: unknown;
-      snapshot?: { goal?: unknown } | null;
-      deltas?: Array<{ op?: unknown; patch?: { goal?: unknown } }>;
-    };
-  };
-  // topic = conversation/<sessionId>；订阅 snapshot 前的兜底（sessionId 缺失时无法归因）。
-  const topic = typeof frame.topic === "string" ? frame.topic : "";
-  if (!topic.startsWith("conversation/")) return;
+  // topic = conversation/<sessionId>（complete/fragment 均携带；缺 topic 无法归因）。
+  const topic = wireFrameTopic(wire);
+  if (!topic || !topic.startsWith("conversation/")) return;
   const sessionId = topic.slice("conversation/".length);
   if (!sessionId) return;
 
-  if (frame.payload?.kind === "snapshot" && frame.payload.snapshot) {
+  const logical = extractLogicalFramePayload(wire);
+  if (!logical) return;
+  if (logical.kind === "snapshot") {
     // 快照帧到达：会话在活动（订阅建立/重对齐）；goal 在场则套用状态规则。
     bumpActivity(sessionId);
-    applyGoalStatus(workspace, sessionId, frame.payload.snapshot.goal);
+    applyGoalStatus(workspace, sessionId, (logical.snapshot as { goal?: unknown } | null)?.goal);
     return;
   }
-  if (frame.payload?.kind === "deltas" && Array.isArray(frame.payload.deltas)) {
-    let sawGoal = false;
-    for (const delta of frame.payload.deltas) {
-      if (delta?.op !== "state.updated") continue;
-      const goal = delta.patch?.goal;
-      if (goal === undefined) continue;
-      sawGoal = true;
-      applyGoalStatus(workspace, sessionId, goal);
-    }
-    // 无 goal 键的 state 更新（usage/queue 等）仍是活动信号，但只有已追踪的
-    // 会话才刷新——不注册新 goal（无 goal 键不代表 goal 状态）。
-    if (!sawGoal) bumpActivity(sessionId);
+  let sawGoal = false;
+  for (const delta of logical.deltas ?? []) {
+    if ((delta as { op?: unknown })?.op !== "state.updated") continue;
+    const goal = (delta as { patch?: { goal?: unknown } }).patch?.goal;
+    if (goal === undefined) continue;
+    sawGoal = true;
+    applyGoalStatus(workspace, sessionId, goal);
   }
+  // 无 goal 键的 state 更新（usage/queue 等）仍是活动信号，但只有已追踪的
+  // 会话才刷新——不注册新 goal（无 goal 键不代表 goal 状态）。
+  if (!sawGoal) bumpActivity(sessionId);
 }
 
 function bumpActivity(sessionId: string): void {
@@ -362,7 +350,25 @@ function applyGoalStatus(
   if (status === "active") {
     const existing = tracked.get(sessionId);
     if (existing) {
-      if (now > existing.lastActivityAtMs) existing.lastActivityAtMs = now;
+      if (now > existing.lastActivityAtMs) {
+        // 上一轮 resume 之后产生了真实活动——恢复成功，全部复位（与 sessions-index
+        // 入口的 active 分支同款；conversation 帧是主力源，漏复位会让恢复后的
+        // goal 永远停留在慢通道状态）。
+        if (existing.lastResumeAtMs > 0 && now >= existing.lastResumeAtMs) {
+          if (existing.fastResumes > 0 || existing.probeBackoffMs > SLOW_PROBE_BASE_MS || existing.budgetWaiting) {
+            logger?.info(trace(), "[zcode-go goal 看门狗] goal 恢复推进，重置重试状态", {
+              sessionId,
+            });
+          }
+          existing.fastResumes = 0;
+          existing.probeBackoffMs = SLOW_PROBE_BASE_MS;
+          existing.nextProbeAtMs = 0;
+          existing.lastResumeAtMs = 0;
+          existing.budgetWaiting = false;
+          existing.lastBudgetRetryMs = undefined;
+        }
+        existing.lastActivityAtMs = now;
+      }
       return;
     }
     tracked.set(sessionId, {
@@ -372,6 +378,7 @@ function applyGoalStatus(
       lastActivityAtMs: now,
       registeredAtMs: now,
       fromSnapshot: false,
+      modelTraceTried: false,
       fastResumes: 0,
       nextProbeAtMs: 0,
       probeBackoffMs: SLOW_PROBE_BASE_MS,
@@ -457,10 +464,11 @@ async function scanAndRecover(): Promise<void> {
     // 其「从未活动」只是观察起点问题）。
     if (
       !g.fromSnapshot &&
-      g.fastResumes === 0 &&
-      g.lastResumeAtMs === 0 &&
+      !g.modelTraceTried &&
+      g.lastActivityAtMs <= g.registeredAtMs &&
       now - g.registeredAtMs >= config.modelWaitSeconds * 1000
     ) {
+      g.modelTraceTried = true;
       logger?.info(trace(), "[zcode-go goal 看门狗] 疑似路径 5（模型未就绪），追溯模型列表恢复", {
         sessionId: g.sessionId,
       });
@@ -491,21 +499,15 @@ async function scanAndRecover(): Promise<void> {
     if (g.lastResumeAtMs > 0 && now - g.lastResumeAtMs < RESUME_EFFECT_WINDOW_MS) continue;
 
     // 上轮 resume 已出观察窗且活动仍未前进 = 无效 resume（典型：账号额度未恢复，
-    // resume 重启的 turn 立即失败）。快通道计数；超出保护上限转慢通道（指数退避、
-    // 不限次——额度恢复可能在数小时后，一旦某次 resume 后活动前进即全部复位）。
+    // resume 重启的 turn 立即失败）。快通道计数；超出保护上限转慢通道（退避只在
+    // 真实探测后翻倍——若每轮 scan 都翻会几分钟内冲到封顶，失去 15/30/60 的梯度）。
     if (g.lastResumeAtMs > 0 && !resumeTookEffect(g)) {
       g.fastResumes += 1;
-      if (g.fastResumes > config.maxAutoResumes) {
-        // 进入/维持慢通道：调整退避并打点（退避变化时才打，避免每分钟刷日志）。
-        const nextBackoff = Math.min(g.probeBackoffMs * 2, SLOW_PROBE_MAX_MS);
-        const firstSlow = g.probeBackoffMs === SLOW_PROBE_BASE_MS;
-        g.probeBackoffMs = nextBackoff;
-        if (firstSlow) {
-          logger?.info(trace(), "[zcode-go goal 看门狗] 连续无效 resume，转入慢通道退避（等待额度/环境恢复）", {
-            sessionId: g.sessionId,
-            nextBackoffMinutes: Math.round(nextBackoff / 60_000),
-          });
-        }
+      if (g.fastResumes === config.maxAutoResumes + 1) {
+        logger?.info(trace(), "[zcode-go goal 看门狗] 连续无效 resume，转入慢通道退避（等待额度/环境恢复）", {
+          sessionId: g.sessionId,
+          firstBackoffMinutes: Math.round(SLOW_PROBE_BASE_MS / 60_000),
+        });
       }
     }
 
@@ -521,11 +523,14 @@ async function scanAndRecover(): Promise<void> {
     }
     if (g.nextProbeAtMs === 0) g.nextProbeAtMs = g.lastResumeAtMs + g.probeBackoffMs;
     if (now < g.nextProbeAtMs) continue;
-    g.nextProbeAtMs = now + g.probeBackoffMs;
     logger?.info(trace(), "[zcode-go goal 看门狗] 慢通道探测 resume（等待额度恢复中）", {
       sessionId: g.sessionId,
       backoffMinutes: Math.round(g.probeBackoffMs / 60_000),
     });
+    // 探测发生：本次用当前退避，探测后翻倍（若恢复成功，观察函数的 active 分支
+    // 会整体复位回 SLOW_PROBE_BASE_MS）。
+    g.nextProbeAtMs = now + g.probeBackoffMs;
+    g.probeBackoffMs = Math.min(g.probeBackoffMs * 2, SLOW_PROBE_MAX_MS);
     await resumeTrackedGoal(g, "慢通道探测");
   }
 }

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -175,18 +176,14 @@ interface FrameRowShape {
   state?: string;
 }
 
+/**
+ * wire 层帧形态（zcodeAgentService 帧分发点传入 topicWireFrameCandidate 的产物）。
+ * 逻辑载荷经 extractLogicalFramePayload 提取（complete 直接取、fragment 重组）；
+ * 早期直接读 wire 顶层 payload 键（永不存在）导致本模块整体静默失效。
+ */
 interface FrameShape {
   topic?: string;
   sentAt?: number;
-  payload?: {
-    kind?: string;
-    snapshot?: {
-      sessionId?: unknown;
-      control?: { phase?: unknown };
-      rows?: { window?: unknown };
-    };
-    deltas?: Array<{ op?: string; row?: unknown; patch?: { control?: { phase?: unknown } } }>;
-  };
 }
 
 function topicSessionId(frame: FrameShape): string | undefined {
@@ -197,7 +194,7 @@ function topicSessionId(frame: FrameShape): string | undefined {
 }
 
 function extractFailedSubagentRows(frame: FrameShape): FrameRowShape[] {
-  const payload = frame.payload;
+  const payload = extractLogicalFramePayload(frame);
   if (!payload) return [];
   const rows: FrameRowShape[] = [];
   const consider = (row: unknown): void => {
@@ -208,16 +205,19 @@ function extractFailedSubagentRows(frame: FrameShape): FrameRowShape[] {
     rows.push(r);
   };
   if (payload.kind === "snapshot" && payload.snapshot) {
-    const window = payload.snapshot.rows?.window;
+    const window = (payload.snapshot as { rows?: { window?: unknown } }).rows?.window;
     if (Array.isArray(window)) for (const row of window) consider(row);
-  } else if (payload.kind === "deltas" && Array.isArray(payload.deltas)) {
-    for (const d of payload.deltas) if (d.op === "row.appended" || d.op === "row.upserted") consider(d.row);
+  } else {
+    for (const d of payload.deltas ?? []) {
+      const delta = d as { op?: string; row?: unknown };
+      if (delta.op === "row.appended" || delta.op === "row.upserted") consider(delta.row);
+    }
   }
   return rows;
 }
 
 function trackPhase(frame: FrameShape): void {
-  const payload = frame.payload;
+  const payload = extractLogicalFramePayload(frame);
   if (!payload) return;
   const apply = (sessionId: unknown, phase: unknown): void => {
     if (typeof sessionId === "string" && sessionId && typeof phase === "string" && phase) {
@@ -225,14 +225,16 @@ function trackPhase(frame: FrameShape): void {
     }
   };
   if (payload.kind === "snapshot" && payload.snapshot) {
-    apply(payload.snapshot.sessionId, payload.snapshot.control?.phase);
+    const snap = payload.snapshot as {
+      sessionId?: unknown;
+      control?: { phase?: unknown };
+    };
+    apply(snap.sessionId, snap.control?.phase);
     return;
   }
-  if (payload.kind === "deltas" && Array.isArray(payload.deltas)) {
-    const sessionId = topicSessionId(frame);
-    for (const d of payload.deltas) {
-      if (d.patch?.control?.phase !== undefined) apply(sessionId, d.patch.control.phase);
-    }
+  for (const d of payload.deltas ?? []) {
+    const phase = (d as { patch?: { control?: { phase?: unknown } } }).patch?.control?.phase;
+    if (phase !== undefined) apply(topicSessionId(frame), phase);
   }
 }
 
@@ -248,9 +250,13 @@ export function observeZcodeGoSubagentRecoveryFrame(workspace: WorkspaceRef, wir
   trackPhase(frame);
 
   const frameSessionId = topicSessionId(frame);
-  if (frameSessionId && childObservers.size > 0 && frame.payload?.kind === "snapshot" && frame.payload.snapshot) {
+  const logicalPayload = extractLogicalFramePayload(frame);
+  if (frameSessionId && childObservers.size > 0 && logicalPayload?.kind === "snapshot" && logicalPayload.snapshot) {
     const observer = childObservers.get(frameSessionId);
-    const snap = frame.payload.snapshot;
+    const snap = logicalPayload.snapshot as {
+      control?: { phase?: unknown };
+      rows?: { window?: unknown };
+    };
     if (observer) {
       observer.phase = typeof snap.control?.phase === "string" ? snap.control.phase : undefined;
       const window = snap.rows?.window;
