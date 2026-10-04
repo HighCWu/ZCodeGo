@@ -11,7 +11,7 @@ import {
   observeZcodeGoConversationFrame,
   observeZcodeGoSessionsIndexFrame,
 } from "./zcodeGoGoalVerify.js";
-import { observeZcodeGoGoalKeepAliveFrame } from "./zcodeGoGoalKeepAlive.js";
+import { observeZcodeGoGoalKeepAliveFrame, observeZcodeGoGoalKeepAliveConversationFrame } from "./zcodeGoGoalKeepAlive.js";
 import { observeZcodeGoQueueDrainFrame } from "./zcodeGoQueueDrain.js";
 import { observeZcodeGoSubagentRecoveryFrame } from "./zcodeGoSubagentRecovery.js";
 import { mkdirSync } from "node:fs";
@@ -2108,6 +2108,9 @@ export function createZCodeAgentService(
             getConversationFrameEmitter(workspace).fire(parsed.data);
             observeZcodeGoConversationFrame(workspace, parsed.data);
             observeZcodeGoSubagentRecoveryFrame(workspace, parsed.data);
+            // goal 状态的权威实时源是 conversation 帧的 state.goal（sessions-index
+            // 的 goalStatus 是列表投影、可选字段，CLI 不保证每次 goal 变化都带）。
+            observeZcodeGoGoalKeepAliveConversationFrame(workspace, parsed.data);
           } else {
             logger.warn(undefined, "丢弃无效 v4 conversation frame", {
               issues: parsed.error.issues.map((issue) => ({

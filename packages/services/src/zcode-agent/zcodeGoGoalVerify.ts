@@ -46,21 +46,21 @@ export interface ZcodeGoGoalVerifyLogger {
 export interface ZcodeGoGoalVerifyAgent {
   subscribeConversationV4(params: {
     sessionId: string;
-    workspacePath?: string;
+    workspacePath: string;
     workspaceIdentity?: string;
     subscriberScope?: string;
     visibility?: "foreground" | "background";
   }): Promise<{ ack: { subscriptionId: string } }>;
   unsubscribeConversationV4(params: {
     sessionId: string;
-    workspacePath?: string;
+    workspacePath: string;
     workspaceIdentity?: string;
     subscriptionId: string;
     subscriberScope?: string;
   }): Promise<unknown>;
   sendConversationCommandV4(params: {
     sessionId: string;
-    workspacePath?: string;
+    workspacePath: string;
     workspaceIdentity?: string;
     subscriberScope?: string;
     envelope: {
@@ -69,10 +69,10 @@ export interface ZcodeGoGoalVerifyAgent {
       sessionId: string | null;
       type: "sendText" | "sendGoalCommand";
       payload: unknown;
-      issuedAt: string;
+      issuedAt: number;
     };
   }): Promise<unknown>;
-  readSessionState(params: {
+  readSession(params: {
     sessionId: string;
     workspacePath?: string;
     workspaceIdentity?: string;
@@ -198,7 +198,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function sendAndCollectVerdict(
-  workspace: { sessionId?: string; workspacePath?: string; workspaceIdentity?: string },
+  workspace: { sessionId?: string; workspacePath: string; workspaceIdentity?: string },
   sessionId: string,
   text: string,
   traceId: string,
@@ -308,7 +308,7 @@ function doubleCheckPrompt(objective: string): string {
 }
 
 async function retriggerGoal(
-  workspace: { sessionId?: string; workspacePath?: string; workspaceIdentity?: string },
+  workspace: { sessionId?: string; workspacePath: string; workspaceIdentity?: string },
   sessionId: string,
   objective: string,
   traceId: string,
@@ -346,13 +346,13 @@ async function retriggerGoal(
 }
 
 async function handleVerified(
-  workspace: { sessionId?: string; workspacePath?: string; workspaceIdentity?: string },
+  workspace: { sessionId?: string; workspacePath: string; workspaceIdentity?: string },
   sessionId: string,
   config: GoalVerifyConfig,
   traceId: string,
 ): Promise<void> {
   if (!agent) return;
-  const snapshot = (await agent.readSessionState({
+  const snapshot = (await agent.readSession({
     sessionId,
     workspacePath: workspace.workspacePath,
     workspaceIdentity: workspace.workspaceIdentity,
@@ -434,7 +434,7 @@ async function handleVerified(
 
 /** sessions-index 帧观察入口（goalStatus → "verified" 边沿）。 */
 export function observeZcodeGoSessionsIndexFrame(
-  workspace: { sessionId?: string; workspacePath?: string; workspaceIdentity?: string },
+  workspace: { sessionId?: string; workspacePath: string; workspaceIdentity?: string },
   wire: unknown,
 ): void {
   if (!agent || disposed) return;

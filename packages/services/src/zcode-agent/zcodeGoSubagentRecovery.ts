@@ -62,7 +62,7 @@ export interface ZcodeGoSubagentRecoveryLogger {
 /** 会话寻址公共参数（workspace 透传自父会话帧观察点）。 */
 type SessionTarget = {
   sessionId: string;
-  workspacePath?: string;
+  workspacePath: string;
   workspaceIdentity?: string;
   subscriberScope?: string;
 };
@@ -92,7 +92,7 @@ interface SubagentRecoveryConfig {
 
 interface WorkspaceRef {
   sessionId?: string;
-  workspacePath?: string;
+  workspacePath: string;
   workspaceIdentity?: string;
 }
 

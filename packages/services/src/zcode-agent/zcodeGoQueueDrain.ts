@@ -33,7 +33,7 @@ export interface ZcodeGoQueueDrainLogger {
 export interface ZcodeGoQueueDrainAgent {
   sendConversationCommandV4(params: {
     sessionId: string;
-    workspacePath?: string;
+    workspacePath: string;
     workspaceIdentity?: string;
     subscriberScope?: string;
     envelope: {
@@ -45,7 +45,7 @@ export interface ZcodeGoQueueDrainAgent {
       issuedAt: number;
     };
   }): Promise<unknown>;
-  readSessionState(params: {
+  readSession(params: {
     sessionId: string;
     workspacePath?: string;
     workspaceIdentity?: string;
@@ -131,7 +131,7 @@ interface QueueFrameShape {
 
 /** conversation 帧观察入口（zcodeAgentService 帧分发点调用）。 */
 export function observeZcodeGoQueueDrainFrame(
-  workspace: { sessionId?: string; workspacePath?: string; workspaceIdentity?: string },
+  workspace: { sessionId?: string; workspacePath: string; workspaceIdentity?: string },
   wire: unknown,
 ): void {
   if (!agent || disposed) return;
@@ -199,7 +199,7 @@ export function observeZcodeGoQueueDrainFrame(
     logger?.info(traceId, "[zcode-go 队列看门狗] 检测到非用户暂停的滞留队列，恢复排空", {
       sessionId,
       queued: queued.length,
-      pauseReason: q.pauseReason ?? null,
+      pauseReason: (q as { pauseReason?: string }).pauseReason ?? null,
       attempt: restores + 1,
     });
     void agent
