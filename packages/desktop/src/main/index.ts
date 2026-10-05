@@ -2,12 +2,15 @@ import { createLocalTtftExporter } from "./localTtftExporter.js";
 /* eslint-disable max-lines */
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
-import { powerMonitor, powerSaveBlocker } from "electron";
+import { powerMonitor, powerSaveBlocker, MessageChannelMain } from "electron";
+import { randomUUID } from "node:crypto";
 import { crashCapturePaths } from "./appCrashCaptureBootstrap.js";
 import { armsInitPromise } from "./appARMSBootstrap.js";
 import {
   onLocalDatabaseStartupReady,
   configureDatabaseStartupQuit,
+  bindDatabaseStartupRelay,
+  getDatabaseStartupPortPayload,
 } from "./databaseStartupRelay.js";
 import armsRum from "@arms/rum-electron";
 import { createArmsUserIdentitySync } from "./armsUserIdentity.js";
@@ -80,6 +83,9 @@ import {
   type UpdateStatePayload,
   type TelemetryEventPayload,
   HostMessageTypes,
+  InternalChannels,
+  HostResponseTypes,
+  hostResponseMessageSchema,
 } from "@zcode/shared";
 import { logger } from "./logger.js";
 import { markMainLaunchAppReady } from "./desktopLaunchMarks.js";
@@ -2406,8 +2412,50 @@ app.whenReady().then(async () => {
       }
     }
   };
+  // zcode-go：移动端远程控制（WebRTC P2P 桥）。host 挂接——给桥窗口补上
+  // ServicePort（复用 renderer reload 重连同款的 AttachServicePort 通道，向
+  // 现有 host 再挂一条 RPC MessagePort）与 startup relay（状态事件 + snapshot
+  // 自举），远端 UI 的 boot 门禁才走得通。
+  // startupId 缓存：relay 的 dispose（桥窗口关闭）会把 hostStartupIds 里的
+  // id 一并删掉，而 child 仍存活——重复配对时凭缓存恢复绑定。
+  let bridgeHostStartupId: { child: ElectronUtilityProcess; id: string } | null = null;
+  const attachHostToBridgeWindow = (win: Electron.BrowserWindow): boolean => {
+    const child = windowHostProcessMap.values().next().value;
+    if (!child) return false;
+    const startupPayload =
+      getDatabaseStartupPortPayload(child) ??
+      (bridgeHostStartupId && bridgeHostStartupId.child === child
+        ? { databaseStartupId: bridgeHostStartupId.id }
+        : undefined);
+    if (!startupPayload) return false;
+    bridgeHostStartupId = { child, id: startupPayload.databaseStartupId };
+    const { port1, port2 } = new MessageChannelMain();
+    child.postMessage(
+      {
+        type: HostMessageTypes.AttachServicePort,
+        requestId: randomUUID(),
+        attachmentId: randomUUID(),
+        clientMode: "desktop-continuous",
+        scope: { kind: "local" },
+      },
+      [port2],
+    );
+    win.webContents.postMessage(InternalChannels.ServicePort, startupPayload, [port1]);
+    const relay = bindDatabaseStartupRelay(win, child, startupPayload.databaseStartupId);
+    // relay.receive 需要主动接 child 广播（spawn 点在 desktopHostProcess 内做了
+    // 同样的路由；桥窗口的绑定也必须接，否则状态事件永远不到）。
+    const onChildMessage = (message: unknown): void => {
+      const parsed = hostResponseMessageSchema.safeParse(message);
+      if (parsed.success && parsed.data.type === HostResponseTypes.DatabaseStartupState) {
+        relay.receive(parsed.data.state);
+      }
+    };
+    child.on("message", onChildMessage);
+    win.once("closed", () => child.removeListener("message", onChildMessage));
+    return true;
+  };
   ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStart, () =>
-    startMobileBridgePairing(logger, broadcastMobileBridgeStatus),
+    startMobileBridgePairing(logger, broadcastMobileBridgeStatus, attachHostToBridgeWindow),
   );
   ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStop, () => {
     stopMobileBridgePairing();

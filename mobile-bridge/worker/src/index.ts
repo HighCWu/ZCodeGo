@@ -216,19 +216,37 @@ function containerPage(origin: string): string {
 
   // rpc DataChannel → window.__zcodeGoRpc：iframe 里的 shim 经此透传
   // invoke/事件订阅到桌面（同源 window.parent 访问）。
+  // 消费前缓冲：桌面侧在 rpc 打开瞬间冲刷出站缓冲（ServicePort 等），
+  // 而 shim 要等 iframe 挂载后才注册回调——先到的消息排队等待消费者。
+  var rpcBuffer = [];
+  var rpcConsumer = null;
   function exposeRpc() {
     window.__zcodeGoRpc = {
       post: function (text) {
         if (rpcDc && rpcDc.readyState === "open") rpcDc.send(text);
       },
       onMessage: function (cb) {
-        rpcCallbacks.push(cb);
+        if (rpcConsumer) {
+          rpcCallbacks.push(cb);
+          return;
+        }
+        rpcConsumer = function (text) {
+          for (var i = 0; i < rpcCallbacks.length; i += 1) rpcCallbacks[i](text);
+          cb(text);
+        };
+        rpcDc.onmessage = function (e) {
+          rpcConsumer(e.data);
+        };
+        if (rpcBuffer.length) {
+          var queued = rpcBuffer;
+          rpcBuffer = [];
+          for (var j = 0; j < queued.length; j += 1) rpcConsumer(queued[j]);
+        }
       },
     };
     rpcDc.onmessage = function (e) {
-      for (var i = 0; i < rpcCallbacks.length; i += 1) {
-        try { rpcCallbacks[i](e.data); } catch (err) {}
-      }
+      if (rpcConsumer) rpcConsumer(e.data);
+      else if (rpcBuffer.length < 2000) rpcBuffer.push(e.data);
     };
   }
 
@@ -562,6 +580,44 @@ const SHIM_JS = String.raw`
   var subSeq = 0;
   var pending = new Map();
   var subs = new Map();
+  var streams = new Map();
+
+  var WIN_CHANNELS = {
+    DatabaseStartupState: "zcode:database-startup-state",
+    DatabaseStartupControl: "zcode:database-startup-control",
+    ServicePort: "zcode:service-port",
+    ScopedServicePort: "zcode:scoped-service-port",
+    ScopedServicePortReady: "zcode:scoped-service-port-ready",
+  };
+
+  function bytesToB64(u8) {
+    var out = "";
+    var CHUNK = 0x8000;
+    for (var i = 0; i < u8.length; i += CHUNK) {
+      out += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+    }
+    return btoa(out);
+  }
+  function b64ToBytes(b64) {
+    var s = atob(b64);
+    var u8 = new Uint8Array(s.length);
+    for (var j = 0; j < s.length; j += 1) u8[j] = s.charCodeAt(j);
+    return u8;
+  }
+  function encodePortData(data) {
+    try {
+      if (data instanceof Uint8Array) return { bin: 1, b64: bytesToB64(data) };
+      if (data instanceof ArrayBuffer) return { bin: 1, b64: bytesToB64(new Uint8Array(data)) };
+    } catch (e) {
+      return { bin: 0, value: null };
+    }
+    return { bin: 0, value: data };
+  }
+  function decodePortData(envelope) {
+    if (!envelope || typeof envelope !== "object") return undefined;
+    if (envelope.bin === 1 && typeof envelope.b64 === "string") return b64ToBytes(envelope.b64);
+    return envelope.value;
+  }
 
   function wire() {
     rpc.onMessage(function (raw) {
@@ -580,6 +636,30 @@ const SHIM_JS = String.raw`
           for (var i = 0; i < list.length; i += 1) {
             try { list[i](msg.payload); } catch (e2) {}
           }
+        }
+      } else if (msg.kind === "win-msg" && msg.winType === "DatabaseStartupState") {
+        window.postMessage({ type: WIN_CHANNELS.DatabaseStartupState, state: msg.data }, "*");
+      } else if (msg.kind === "port-open") {
+        var channelPair = new MessageChannel();
+        streams.set(msg.streamId, channelPair.port2);
+        channelPair.port2.onmessage = function (e) {
+          rpcSend({ kind: "port-msg", streamId: msg.streamId, data: encodePortData(e.data) });
+        };
+        channelPair.port2.start();
+        var portMessage =
+          msg.portType === "service"
+            ? { type: WIN_CHANNELS.ServicePort, databaseStartupId: msg.payload.databaseStartupId }
+            : {
+                type: WIN_CHANNELS.ScopedServicePort,
+                attachmentId: msg.payload.attachmentId,
+                sessionId: msg.payload.sessionId,
+                target: msg.payload.target,
+              };
+        window.postMessage(portMessage, "*", [channelPair.port1]);
+      } else if (msg.kind === "port-msg") {
+        var streamPort = streams.get(msg.streamId);
+        if (streamPort) {
+          try { streamPort.postMessage(decodePortData(msg.data)); } catch (e3) {}
         }
       }
     });
@@ -616,6 +696,26 @@ const SHIM_JS = String.raw`
       if (meta && typeof meta.deviceId === "string") window.__ZCODE_DEVICE_ID__ = meta.deviceId;
     }).catch(function () {});
   }
+
+  // UI → main 方向的 window 消息截获（真桌面里由 preload 转发；这里经 rpc）：
+  // 启动控制（snapshot/retry/exit）与 scoped port 就绪 ACK。
+  window.addEventListener("message", function (event) {
+    if (event.source !== window || !event.data || typeof event.data !== "object") return;
+    if (!rpc) return;
+    if (event.data.type === WIN_CHANNELS.DatabaseStartupControl) {
+      rpcSend({ kind: "startup-control", control: event.data.control });
+    } else if (
+      event.data.type === WIN_CHANNELS.ScopedServicePortReady &&
+      typeof event.data.attachmentId === "string" &&
+      typeof event.data.sessionId === "string"
+    ) {
+      rpcSend({
+        kind: "scoped-ready",
+        attachmentId: event.data.attachmentId,
+        sessionId: event.data.sessionId,
+      });
+    }
+  });
 
   window.zcode = new Proxy({}, {
     get: function (_target, prop) {

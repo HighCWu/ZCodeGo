@@ -81,6 +81,9 @@ interface Session {
   bridgeWindow: BrowserWindow | null;
   status: MobileBridgeStatus;
   onStatus: (status: MobileBridgeStatus) => void;
+  /** host 挂接（ServicePort + startup relay）是否完成。 */
+  hostAttached: boolean;
+  hostAttachTimer: NodeJS.Timeout | null;
 }
 
 let activeSession: Session | null = null;
@@ -122,6 +125,7 @@ function emit(session: Session): void {
 function teardown(session: Session, reason: string): void {
   if (activeSession !== session) return;
   activeSession = null;
+  if (session.hostAttachTimer) clearTimeout(session.hostAttachTimer);
   try {
     session.ws?.close();
   } catch {
@@ -163,6 +167,9 @@ function makePeer(iceServers) {
     var dc = peer.createDataChannel("zcode-go-" + label, { ordered: true });
     channels[label] = dc;
     dc.onopen = function () {
+      // rpc 打开时冲刷缓冲：host 挂接（ServicePort/启动状态）发生在配对开始，
+      // 早于手机连接——那时的 rpcReply 会因通道未开而入队等待。
+      if (label === "rpc") flushRpcOutbox();
       ipcRenderer.send("zcode-go-bridge-event", { kind: "channel-open", label: label });
     };
     dc.onclose = function () {
@@ -291,15 +298,30 @@ try {
   var preloadSourceText = fs.readFileSync(realPreload, "utf8");
   var wrappedPreload = new Function("require", "module", "exports", preloadSourceText);
   var preloadModule = { exports: {} };
-  wrappedPreload(
-    function (id) {
-      return id === "electron" ? fakeElectron : require(id);
-    },
-    preloadModule,
-    preloadModule.exports,
-  );
+  // bundle 可能在暴露 zcode 之后、注册尾部 ipcRenderer 监听（ServicePort/
+  // 启动状态等）之前抛错——部分失败必须上报，否则远端 boot 门禁静默卡死。
+  var preloadEvalError = null;
+  try {
+    wrappedPreload(
+      function (id) {
+        return id === "electron" ? fakeElectron : require(id);
+      },
+      preloadModule,
+      preloadModule.exports,
+    );
+  } catch (evalError) {
+    preloadEvalError = String((evalError && evalError.stack) || evalError);
+  }
   capturedApi = capturedGlobals.zcode || null;
-  if (!capturedApi) throw new Error("preload 未暴露 zcode API");
+  if (preloadEvalError) {
+    ipcRenderer.send("zcode-go-bridge-event", {
+      kind: "preload-eval-warning",
+      error: preloadEvalError.slice(0, 600),
+    });
+  }
+  if (!capturedApi) {
+    throw new Error("preload 未暴露 zcode API: " + (preloadEvalError || "unknown"));
+  }
 } catch (error) {
   ipcRenderer.send("zcode-go-bridge-event", {
     kind: "preload-capture-failed",
@@ -307,17 +329,150 @@ try {
   });
 }
 
+// ── MessagePort 仿真：ServicePort/ScopedServicePort 端到端桥接 ──
+// 远端 UI 的服务层跑在 MessagePort 上（VSBuffer 二进制帧 + 流控对象，均不可
+// JSON 化）。真 preload 已把 main 的 ipcRenderer 端口事件转为本 window 的
+// postMessage——在 preload 世界截获，端口留在本地，消息经 rpc 通道转发，
+// 远端 shim 用自建 MessageChannel 仿出同形端口交给 UI。
+var WIN_CHANNELS = {
+  DatabaseStartupState: "zcode:database-startup-state",
+  DatabaseStartupControl: "zcode:database-startup-control",
+  ServicePort: "zcode:service-port",
+  ScopedServicePort: "zcode:scoped-service-port",
+  ScopedServicePortReady: "zcode:scoped-service-port-ready",
+};
+var portStreams = new Map();
+var rpcOutbox = [];
+var portSeq = 0;
+
+function bytesToB64(u8) {
+  var out = "";
+  var CHUNK = 0x8000;
+  for (var i = 0; i < u8.length; i += CHUNK) {
+    out += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+  }
+  return btoa(out);
+}
+function b64ToBytes(b64) {
+  var s = atob(b64);
+  var u8 = new Uint8Array(s.length);
+  for (var j = 0; j < s.length; j += 1) u8[j] = s.charCodeAt(j);
+  return u8;
+}
+function encodePortData(data) {
+  try {
+    if (data instanceof Uint8Array) return { bin: 1, b64: bytesToB64(data) };
+    if (data instanceof ArrayBuffer) return { bin: 1, b64: bytesToB64(new Uint8Array(data)) };
+  } catch (e) {
+    return { bin: 0, value: null };
+  }
+  return { bin: 0, value: data };
+}
+function decodePortData(envelope) {
+  if (!envelope || typeof envelope !== "object") return undefined;
+  if (envelope.bin === 1 && typeof envelope.b64 === "string") return b64ToBytes(envelope.b64);
+  return envelope.value;
+}
+
+var adoptedPorts = typeof WeakSet === "function" ? new WeakSet() : null;
+function adoptPort(port, payload, portType) {
+  // 直连 ipcRenderer 与 window 消息两条路可能对同一物理端口各触发一次：
+  // 首个收养者独占（onmessage 覆盖会撕裂数据流）。
+  if (adoptedPorts) {
+    if (adoptedPorts.has(port)) return;
+    adoptedPorts.add(port);
+  }
+  var streamId = ++portSeq;
+  portStreams.set(streamId, port);
+  port.onmessage = function (e) {
+    rpcReply({ kind: "port-msg", streamId: streamId, data: encodePortData(e.data) });
+  };
+  port.start();
+  rpcReply({ kind: "port-open", streamId: streamId, portType: portType, payload: payload });
+}
+
+window.addEventListener("message", function (event) {
+  if (event.source !== window || !event.data || typeof event.data !== "object") return;
+  var type = event.data.type;
+  if (type === WIN_CHANNELS.DatabaseStartupState) {
+    rpcReply({ kind: "win-msg", winType: "DatabaseStartupState", data: event.data.state });
+    return;
+  }
+  if (type === WIN_CHANNELS.ServicePort || type === WIN_CHANNELS.ScopedServicePort) {
+    var port = event.ports && event.ports[0];
+    if (!port) return;
+    if (type === WIN_CHANNELS.ServicePort) {
+      adoptPort(port, { databaseStartupId: event.data.databaseStartupId }, "service");
+    } else {
+      adoptPort(
+        port,
+        {
+          attachmentId: event.data.attachmentId,
+          sessionId: event.data.sessionId,
+          target: event.data.target,
+        },
+        "scoped",
+      );
+    }
+  }
+});
+
+// 直接订阅启动面（不经求值 bundle 的尾部注册——实测其 ipcRenderer 监听
+// 在本桥窗口不可靠，改为双保险直连）：main 经 webContents.send/postMessage
+// 投递的 DatabaseStartupState 与 ServicePort 端口在此直接接收。
+ipcRenderer.on(WIN_CHANNELS.DatabaseStartupState, function (_event, raw) {
+  rpcReply({ kind: "win-msg", winType: "DatabaseStartupState", data: raw });
+});
+ipcRenderer.on(WIN_CHANNELS.ServicePort, function (event, payload) {
+  var port = event.ports && event.ports[0];
+  if (!port) return;
+  var parsed = payload && typeof payload === "object" ? payload : {};
+  adoptPort(port, { databaseStartupId: parsed.databaseStartupId }, "service");
+});
+ipcRenderer.on(WIN_CHANNELS.ScopedServicePort, function (event, payload) {
+  var scopedPort = event.ports && event.ports[0];
+  if (!scopedPort) return;
+  var scopedPayload = payload && typeof payload === "object" ? payload : {};
+  adoptPort(
+    scopedPort,
+    {
+      attachmentId: scopedPayload.attachmentId,
+      sessionId: scopedPayload.sessionId,
+      target: scopedPayload.target,
+    },
+    "scoped",
+  );
+});
+
 // ── rpc 通道：远端 shim 按方法名透传 invoke/事件订阅 ──
 function rpcReply(payload) {
-  var dc = channels.rpc;
-  if (!dc || dc.readyState !== "open") return;
   var text;
   try {
     text = JSON.stringify(payload);
   } catch (e) {
     return;
   }
+  var dc = channels.rpc;
+  if (!dc || dc.readyState !== "open") {
+    // 手机尚未连接：缓冲（上限防泄漏），rpc 通道 open 时冲刷。
+    if (rpcOutbox.length < 2000) rpcOutbox.push(text);
+    return;
+  }
   dc.send(text);
+}
+
+function flushRpcOutbox() {
+  var dc = channels.rpc;
+  if (!dc || dc.readyState !== "open" || rpcOutbox.length === 0) return;
+  var queued = rpcOutbox;
+  rpcOutbox = [];
+  for (var i = 0; i < queued.length; i += 1) {
+    try {
+      dc.send(queued[i]);
+    } catch (e) {
+      /* 单条失败不阻断后续 */
+    }
+  }
 }
 
 async function handleRpcMessage(raw) {
@@ -375,6 +530,29 @@ async function handleRpcMessage(raw) {
     } catch (error2) {
       rpcReply({ kind: "sub-error", id: msg.id, error: String((error2 && error2.message) || error2) });
     }
+    return;
+  }
+  if (msg.kind === "port-msg") {
+    var stream = portStreams.get(msg.streamId);
+    if (stream) {
+      try {
+        stream.postMessage(decodePortData(msg.data));
+      } catch (e) {
+        /* 端口已关闭等，忽略 */
+      }
+    }
+    return;
+  }
+  if (msg.kind === "startup-control") {
+    ipcRenderer.send(WIN_CHANNELS.DatabaseStartupControl, msg.control);
+    return;
+  }
+  if (msg.kind === "scoped-ready") {
+    ipcRenderer.send(WIN_CHANNELS.ScopedServicePortReady, {
+      attachmentId: msg.attachmentId,
+      sessionId: msg.sessionId,
+    });
+    return;
   }
 }
 
@@ -466,6 +644,8 @@ function writeBridgeWindowFiles(): { htmlPath: string; preloadPath: string } {
 export function startMobileBridgePairing(
   logger: MobileBridgeLogger,
   onStatus: (status: MobileBridgeStatus) => void,
+  /** 挂接现有 host（ServicePort + startup relay）到桥窗口，由 app 侧提供。 */
+  attachHost?: (win: BrowserWindow) => boolean,
 ): MobileBridgeStatus {
   if (activeSession) {
     return { ...activeSession.status };
@@ -485,6 +665,8 @@ export function startMobileBridgePairing(
     bridgeWindow: null,
     status: { state: "signaling", token },
     onStatus,
+    hostAttached: false,
+    hostAttachTimer: null,
   };
   activeSession = session;
 
@@ -504,6 +686,13 @@ export function startMobileBridgePairing(
     },
   });
   const bridgeWindow = session.bridgeWindow;
+  // 桥窗口 preload 的 console/异常唯一可见出口（隐藏窗口，否则静默）。
+  bridgeWindow.webContents.on("console-message", (_event, level, message) => {
+    if (level >= 2) logger.warn("[zcode-go-bridge-page]", { level, message: message.slice(0, 300) });
+  });
+  bridgeWindow.webContents.on("render-process-gone", (_event, details) => {
+    logger.warn("[zcode-go-mobile-bridge] 桥渲染进程异常退出", { token, reason: details.reason });
+  });
 
   const onBridgeEvent = (_event: unknown, payload: { kind: string; [key: string]: unknown }) => {
     if (activeSession !== session) return;
@@ -532,6 +721,11 @@ export function startMobileBridgePairing(
         sdpBytes: offer.sdp.length,
         compressedBytes: compressed ? compressed.length : null,
       });
+    } else if (payload.kind === "preload-eval-warning") {
+      logger.warn("[zcode-go-mobile-bridge] preload 求值部分失败（尾部监听器可能缺失）", {
+        token,
+        error: String(payload.error),
+      });
     } else if (payload.kind === "preload-capture-failed") {
       logger.warn("[zcode-go-mobile-bridge] preload API 捕获失败（rpc 通道不可用）", {
         token,
@@ -558,6 +752,13 @@ export function startMobileBridgePairing(
     } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
       session.status = { ...session.status, state: "connected" };
       emit(session);
+    } else {
+      // 未知桥事件统一记录（诊断透传：TEST 探针/未来新增事件不静默）。
+      logger.info("[zcode-go-mobile-bridge] 桥事件", {
+        token,
+        kind: payload.kind,
+        detail: JSON.stringify(payload).slice(0, 200),
+      });
     }
   };
   ipcMain.on("zcode-go-bridge-event", onBridgeEvent);
@@ -568,6 +769,38 @@ export function startMobileBridgePairing(
   };
 
   bridgeWindow.webContents.once("did-finish-load", () => {
+    // 挂接现有 host：远端 UI 的 boot 门禁需要 ServicePort（服务层数据通道）
+    // 与 DatabaseStartupState 事件——两者都只投递给走 createWindow 生命周期
+    // 的窗口，桥窗口须手动补挂（preload 的监听器已随页面加载就位）。
+    if (attachHost) {
+      let attempts = 0;
+      const tryAttach = (): void => {
+        if (activeSession !== session || session.hostAttached) return;
+        attempts += 1;
+        let attached = false;
+        try {
+          attached = attachHost(bridgeWindow);
+        } catch (error) {
+          logger.warn("[zcode-go-mobile-bridge] host 挂接异常", {
+            token,
+            error: String(error),
+          });
+        }
+        if (attached) {
+          session.hostAttached = true;
+          logger.info("[zcode-go-mobile-bridge] host 已挂接桥窗口", { token });
+          return;
+        }
+        if (attempts >= 30) {
+          logger.warn("[zcode-go-mobile-bridge] host 未就绪，远端界面将卡在启动门禁", {
+            token,
+          });
+          return;
+        }
+        session.hostAttachTimer = setTimeout(tryAttach, 1000);
+      };
+      tryAttach();
+    }
     void (async () => {
       try {
         const registerResponse = await fetch(`${origin}/api/rooms`, {
