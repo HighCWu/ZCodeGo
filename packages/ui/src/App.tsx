@@ -874,6 +874,27 @@ export function App({
     onNavigateToAutomations: handleNavigateToAutomationsMain,
     onNavigateToPluginStore: handleNavigateToPluginStoreMain,
   });
+  // zcode-go：跨窗口侧边栏同步。任务列表是拉模式（本窗口签名缓存 + 本窗口 host
+  // 投影），另一窗口创建/变更的任务对本窗口零信号——用户切回本窗口时看不到新任务。
+  // 组合修复（host 侧另有快照 15s 过期强制重建）：窗口聚焦立即 bump（「看的时刻
+  // 是新的」）+ 20s 兜底轮询（后台窗口也跟随，覆盖 CLI 自动化等非 UI 来源）。
+  useEffect(() => {
+    const bump = (): void => {
+      useZCodeSessionStore.getState().bumpTaskListVersion(workspaceAbsPath, workspaceIdentity);
+    };
+    const bumpOnVisible = (): void => {
+      if (document.visibilityState === "visible") bump();
+    };
+    window.addEventListener("focus", bump);
+    document.addEventListener("visibilitychange", bumpOnVisible);
+    const timer = window.setInterval(bump, 20_000);
+    return () => {
+      window.removeEventListener("focus", bump);
+      document.removeEventListener("visibilitychange", bumpOnVisible);
+      window.clearInterval(timer);
+    };
+  }, [workspaceAbsPath, workspaceIdentity]);
+
   // zcode-go：本窗口若是「在新窗口打开会话」创建的，启动时领取初始会话并打开。
   // 领取是一次性质询（main 侧领取即清除）；本 effect 仅在窗口挂载时执行一次。
   const handleSelectTaskRef = useRef(handleSelectTask);

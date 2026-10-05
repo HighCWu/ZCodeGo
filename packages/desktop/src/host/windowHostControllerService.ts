@@ -147,7 +147,13 @@ export function createWindowHostControllerRuntime(options: {
   const registeredScopes = new Map<string, WindowHostControllerSourceScope>();
   const sourceAvailability = new Map<string, "online" | "offline">();
   const sourceTaskServices = new Map<string, IZCodeTaskService>();
+  const SNAPSHOT_STALE_MS = 15_000;
   const sourceSnapshotTaskServices = new Map<string, IZCodeTaskService>();
+  // zcode-go：快照成功重建的时刻（sourceKey → 时间戳）。多窗口/外部写入方（另一
+  // 窗口的 host、CLI 自动化、直连工具）对本窗口 host 不可见——live overlay 只覆盖
+  // 本 host 自己订阅的 runtime 帧。快照超过 SNAPSHOT_STALE_MS 未重建时，下一次
+  // 列表查询强制重建（force 走 readSourceTaskIndex 全量重读 tasks-index）。
+  const sourceSnapshotRefreshedAtByKey = new Map<string, number>();
   const sourceEventSubscriptions = new Map<string, { dispose(): void }>();
   const sourceRefreshFlights = new Map<
     string,
@@ -167,6 +173,7 @@ export function createWindowHostControllerRuntime(options: {
     sourceAvailability.delete(key);
     sourceTaskServices.delete(key);
     sourceSnapshotTaskServices.delete(key);
+    sourceSnapshotRefreshedAtByKey.delete(key);
     sourceEventSubscriptions.get(key)?.dispose();
     sourceEventSubscriptions.delete(key);
     sourceSessionObservers.get(key)?.observer.dispose();
@@ -306,6 +313,7 @@ export function createWindowHostControllerRuntime(options: {
       sourceSnapshotTaskServices.get(key) !== resolved.taskService
     ) {
       sourceSnapshotTaskServices.delete(key);
+    sourceSnapshotRefreshedAtByKey.delete(key);
     }
     if (
       resolved.taskService &&
@@ -338,6 +346,7 @@ export function createWindowHostControllerRuntime(options: {
       sourceSessionObservers.get(key)?.observer.dispose();
       sourceSessionObservers.delete(key);
       sourceSnapshotTaskServices.delete(key);
+    sourceSnapshotRefreshedAtByKey.delete(key);
       projection.disconnectSource(resolved.scope);
     }
   }
@@ -398,7 +407,12 @@ export function createWindowHostControllerRuntime(options: {
     }
     const key = sourceKey(resolved.scope);
     await ensureSourceSessionObserver(resolved)?.start();
-    if (!force && sourceSnapshotTaskServices.get(key) === resolved.taskService) return;
+    const snapshotStale =
+      sourceSnapshotTaskServices.get(key) === resolved.taskService &&
+      Date.now() - (sourceSnapshotRefreshedAtByKey.get(key) ?? 0) > SNAPSHOT_STALE_MS;
+    if (!force && !snapshotStale && sourceSnapshotTaskServices.get(key) === resolved.taskService) {
+      return;
+    }
     const existing = sourceRefreshFlights.get(key);
     if (existing?.taskService === resolved.taskService) return existing.promise;
     const generation = (sourceRefreshGenerations.get(key) ?? 0) + 1;
@@ -422,6 +436,7 @@ export function createWindowHostControllerRuntime(options: {
       }
       sourceAvailability.set(key, "online");
       sourceSnapshotTaskServices.set(key, resolved.taskService!);
+      sourceSnapshotRefreshedAtByKey.set(key, Date.now());
     })();
     sourceRefreshFlights.set(key, { taskService: resolved.taskService, promise });
     try {
@@ -775,6 +790,7 @@ export function createWindowHostControllerRuntime(options: {
       sourceSessionObservers.get(key)?.observer.dispose();
       sourceSessionObservers.delete(key);
       sourceSnapshotTaskServices.delete(key);
+    sourceSnapshotRefreshedAtByKey.delete(key);
       projection.disconnectSource(scope);
     },
     removeSource(scope: WindowHostControllerSourceScope): void {
