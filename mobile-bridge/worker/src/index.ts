@@ -853,12 +853,17 @@ const SHIM_JS = String.raw`
           var payload = arguments[0] || {};
           // 新 tab 复用配对 URL（query 路由）+ 目标会话参数；新 tab 作为新
           // 客户端连入（多客户端并发），其 shim 凭 ot/ow/oi 领取会话。
+          // 兼容旧 hash 路由的容器页：hash 参数并入 query 再追加。
           var parent = window.parent;
-          var base = String(parent.location.href).split("#")[0];
-          var sep = base.indexOf("?") >= 0 ? "&" : "?";
-          var url =
-            base + sep + "ot=" + encodeURIComponent(payload.taskId || "") +
-            "&ow=" + encodeURIComponent(payload.workspacePath || "");
+          var base = String(parent.location.origin) + String(parent.location.pathname);
+          var merged = [];
+          var search = parent.location.search || "";
+          if (search.indexOf("?") === 0) merged.push(search.slice(1));
+          var hash = parent.location.hash || "";
+          if (hash.indexOf("#") === 0) merged.push(hash.slice(1));
+          merged.push("ot=" + encodeURIComponent(payload.taskId || ""));
+          merged.push("ow=" + encodeURIComponent(payload.workspacePath || ""));
+          var url = base + "?" + merged.join("&");
           if (payload.workspaceIdentity) {
             url += "&oi=" + encodeURIComponent(payload.workspaceIdentity);
           }

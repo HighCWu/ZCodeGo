@@ -102,6 +102,9 @@ interface Session {
 }
 
 let activeSession: Session | null = null;
+/** 刷新二维码后保留的 detached 窗口（连接自持）；超限回收最旧，防泄漏。 */
+const detachedEntries: BridgeWindowEntry[] = [];
+const MAX_DETACHED_ENTRIES = 8;
 
 /** [a-z2-9] 去 0/1/o/i 的防误读字母表。 */
 function generateToken(length = 8): string {
@@ -141,6 +144,8 @@ function destroyEntry(session: Session, entry: BridgeWindowEntry): void {
   if (session.windows.includes(entry)) {
     session.windows = session.windows.filter((w) => w !== entry);
   }
+  const detachedIndex = detachedEntries.indexOf(entry);
+  if (detachedIndex >= 0) detachedEntries.splice(detachedIndex, 1);
   if (entry.attachTimer) clearTimeout(entry.attachTimer);
   try {
     if (!entry.win.isDestroyed()) entry.win.destroy();
@@ -942,6 +947,7 @@ export function startMobileBridgePairing(
         teardown(session, `房间登记失败（${registerResponse.status}）`);
         return;
       }
+      let signalingReconnectAttempts = 0;
       /** 信令连接（可重入）：Worker 部署/DO 重启断开后自动重连。 */
       const connectSignaling = (): void => {
         if (activeSession !== session) return;
@@ -949,6 +955,7 @@ export function startMobileBridgePairing(
         session.ws = ws;
         ws.onopen = () => {
           if (activeSession !== session) return;
+          signalingReconnectAttempts = 0;
           // mailbox 注册 capability secret。
           ws.send(JSON.stringify({ t: "register", p: session.secret }));
           if (session.status.state !== "connected") {
@@ -1019,11 +1026,16 @@ export function startMobileBridgePairing(
         ws.onclose = () => {
           if (activeSession !== session) return;
           // Worker 部署/DO 重启会断信令；已建立的 P2P 连接不依赖信令——
-          // 保留既有连接并 3s 后重连信令（新客户端可继续加入）。
+          // 保留既有连接并按退避重连信令（新客户端可继续加入）。
           if (anyConnected(session)) {
-            logger.warn("[zcode-go-mobile-bridge] 信令断开（既有连接保留，重连信令）", { token });
+            const delay = Math.min(3000 * 2 ** signalingReconnectAttempts, 30000);
+            signalingReconnectAttempts += 1;
+            logger.warn("[zcode-go-mobile-bridge] 信令断开（既有连接保留，重连信令）", {
+              token,
+              retryInMs: delay,
+            });
             session.ws = null;
-            setTimeout(connectSignaling, 3000);
+            setTimeout(connectSignaling, delay);
             return;
           }
           teardown(session, "信令连接已断开，请刷新重试");
@@ -1056,7 +1068,15 @@ export function stopMobileBridgePairing(): void {
   // 刷新二维码：已连接客户端的桥窗口保留——preload 侧 rpc/resource 自持
   // （不依赖 main 会话状态），远端连接继续可用；仅回收未连接窗口与信令。
   for (const entry of [...session.windows]) {
-    if (!entry.connected) destroyEntry(session, entry);
+    if (!entry.connected) {
+      destroyEntry(session, entry);
+      continue;
+    }
+    detachedEntries.push(entry);
+  }
+  while (detachedEntries.length > MAX_DETACHED_ENTRIES) {
+    const oldest = detachedEntries.shift();
+    if (oldest) destroyEntry(session, oldest);
   }
   try {
     session.ws?.close();

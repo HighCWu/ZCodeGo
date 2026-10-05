@@ -1541,7 +1541,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
         {isMobileViewport && isSidebarPanelVisible ? (
           <button
             type="button"
-            aria-label="close sidebar"
+            aria-label={intl.formatMessage({ id: "workspaceSidebar.toggleSidebar" })}
             className="fixed inset-0 z-40 bg-black/50"
             onClick={handleToggleSidebar}
           />
@@ -1556,8 +1556,8 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
               ? cn(
                   "fixed inset-y-0 left-0 z-50 flex-none overflow-hidden shadow-2xl transition-transform duration-200 ease-out",
                   isSidebarPanelVisible
-                    ? "w-[85vw] max-w-320 translate-x-0"
-                    : "w-[85vw] max-w-320 -translate-x-full pointer-events-none",
+                    ? "w-[85vw] max-w-[320px] translate-x-0"
+                    : "w-[85vw] max-w-[320px] -translate-x-full pointer-events-none",
                 )
               : cn(
                   "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
