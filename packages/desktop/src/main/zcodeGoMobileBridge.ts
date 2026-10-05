@@ -73,7 +73,8 @@ function resolveSignalingOrigin(): string {
   } catch {
     /* 坏配置按未配置处理 */
   }
-  return "";
+  // 默认信令地址（用户自有 Worker 部署，aimon.win zone 托管在 CF）。
+  return "https://zcode-go.aimon.win";
 }
 
 function emit(session: Session): void {

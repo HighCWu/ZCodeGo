@@ -3,6 +3,11 @@ name = "zcode-go-mobile-bridge"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
+# 自定义域（CF 托管 aimon.win zone）：桌面端默认信令地址。
+routes = [
+  { pattern = "zcode-go.aimon.win", custom_domain = true }
+]
+
 # 信令房间：Durable Objects + WebSocket Hibernation。
 [[durable_objects.bindings]]
 name = "SIGNAL_ROOM"
@@ -14,7 +19,3 @@ new_sqlite_classes = ["SignalRoom"]
 
 [observability]
 enabled = true
-
-[vars]
-# 桌面端可覆盖（构建时注入或部署后改）；容器页在同源下提供。
-# SIGNAL_MAX_ROOM_AGE_SECONDS = "300"
