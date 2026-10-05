@@ -245,9 +245,32 @@ function ensureLinuxDesktopEntry() {
   log(`桌面入口：${entry}`);
 }
 
+/**
+ * 增量合并会累积历史 hash chunk；这里删除超过 30 天未更新的 renderer/assets
+ * 文件（全部为 hash 命名的不可变产物）。运行中的窗口按常理不会引用一个月前
+ * 的构建；真被清掉的极端场景重载窗口即可恢复。
+ */
+function cleanupStaleRendererAssets(assetsDir) {
+  if (!existsSync(assetsDir)) return;
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  for (const name of readdirSync(assetsDir)) {
+    const full = join(assetsDir, name);
+    try {
+      const info = statSync(full);
+      if (info.isFile() && info.mtimeMs < cutoff) {
+        rmSync(full);
+        removed += 1;
+      }
+    } catch {
+      /* 并发变动时忽略单个文件 */
+    }
+  }
+  if (removed > 0) log(`清理 ${removed} 个超过 30 天的旧 renderer chunk`);
+}
+
 function ensureApp() {
   mkdirSync(resourcesDir, { recursive: true });
-  // out/ 产物同步（mtime 检查，避免每次全量拷贝）
   const outSrc = join(desktopDir, "out");
   const outDst = join(appDir, "out");
   for (const rel of ["main/index.js", "renderer/index.html"]) {
@@ -265,10 +288,15 @@ function ensureApp() {
     return Math.abs(statSync(join(outSrc, rel)).mtimeMs - statSync(join(outDst, rel)).mtimeMs) > 5;
   });
   if (changed) {
-    if (existsSync(outDst)) rmSync(outDst, { recursive: true });
-    // preserveTimestamps：以产物 mtime 作为同步标记，避免每次全量重拷
+    // 只增不删地合并（cpSync 递归覆盖同名、保留目标端独有文件）。vite/rollup 的
+    // 懒加载 chunk 按 content-hash 命名，是不可变文件：整体删除重拷会让所有
+    // 运行中窗口（含多窗口）对旧 hash 的动态 import 404——实测「使用统计」
+    // 时间范围切换报 "Failed to fetch dynamically imported module"。入口文件
+    // （index.html/main/index.js 等非 hash 名）被覆盖，新窗口即用新产物；旧
+    // hash chunk 留给运行中的旧页面继续懒加载。
     cpSync(outSrc, outDst, { recursive: true, preserveTimestamps: true });
-    log(`app 产物已同步（out/）`);
+    cleanupStaleRendererAssets(join(outDst, "renderer", "assets"));
+    log(`app 产物已同步（out/，增量合并）`);
     syncedOut = true;
   }
   // package.json：main → out/main/index.js。
