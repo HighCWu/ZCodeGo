@@ -260,22 +260,23 @@ function containerPage(origin: string): string {
 
   // ── SW 注册 + /app 挂载 ──
   // 关键：本页持有 PC/DC，绝不能导航离场（location.href 会销毁连接）——
-  // 改为全屏 iframe 挂载 /app/；SW 激活并 claim 本页后才挂载，否则 /app/
-  // 请求直落 Worker 503（"界面资源代理未就绪"的历史根因之一）。
+  // 一律全屏 iframe 挂载 /app/；SW 激活并 claim 本页后挂载可避免 /app/ 请求
+  // 直落 Worker 503。无 SW 能力的内嵌浏览器（微信等）给出明确指引而非自杀。
   function goToApp() {
     setStage("loading");
     if (!("serviceWorker" in navigator)) {
-      mountAppFrame();
+      fail(LOCALE === "zh"
+        ? "当前浏览器缺少所需能力（Service Worker）。请用系统浏览器（Safari / Chrome）打开本页。"
+        : "This browser lacks required capabilities (Service Worker). Please open this page in Safari / Chrome.");
       return;
     }
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
-      .then(function () {
-        return navigator.serviceWorker.ready;
-      })
-      .then(function () {
-        return waitForController();
-      })
+      .then(
+        function () { return navigator.serviceWorker.ready; },
+        function () { return null; }, // 注册失败也继续（/app/ 会显示 503 文案，连接保留可诊断）
+      )
+      .then(function () { return waitForController(); })
       .then(mountAppFrame, mountAppFrame);
   }
   function waitForController() {
@@ -300,6 +301,29 @@ function containerPage(origin: string): string {
     frame.style.cssText =
       "position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#0b0e14;z-index:9999";
     document.body.appendChild(frame);
+    scheduleStallDiagnostics(frame);
+  }
+  // 停滞诊断（真机无控制台）：挂载 30s 后仍未过启动画面，把 shim 计数摘要
+  // 显示到状态行——手机上可直接看到卡在哪个环节（状态/端口/控制触发）。
+  function scheduleStallDiagnostics(frame) {
+    setTimeout(function () {
+      try {
+        var w = frame.contentWindow;
+        var d = frame.contentDocument;
+        if (!w || !d) return;
+        if (!d.querySelector("[data-testid=root-startup-loading]")) return;
+        var dbg = w.__zcodeShimDebug || {};
+        var text =
+          "界面加载停滞（诊断）：状态已送达 " + (dbg.statesDelivered || 0) +
+          "，端口 " + (dbg.portOpens || 0) +
+          "，控制触发 " + (dbg.controlSeen || 0);
+        var banner = document.createElement("div");
+        banner.textContent = text;
+        banner.style.cssText =
+          "position:fixed;left:0;right:0;bottom:0;z-index:10000;padding:10px 14px;background:#2a1f1f;color:#ffb4b4;font:12px/1.5 system-ui;border-top:1px solid #5a3030";
+        document.body.appendChild(banner);
+      } catch (e) {}
+    }, 30000);
   }
   // 页面把专用端口交给 SW：/app/* 资源请求经此发来。避免 clients.matchAll
   // 在 iframe 场景（多个 window client）选错接收方。
