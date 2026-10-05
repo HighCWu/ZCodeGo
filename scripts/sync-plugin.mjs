@@ -60,7 +60,7 @@ const entry = {
   displayName: "ZCode Go",
   displayName_i18n: { "zh-CN": "ZCode Go" },
   description_i18n: {
-    "zh-CN": "桌面接管：/zcode-go 隐藏官方窗口，ZCode Go 桌面接管；官方原生运行时保额度；气泡切回。",
+    "zh-CN": "桌面接管：/zcode-go 隐藏官方窗口，ZCode Go 桌面接管；官方原生运行时保额度；退出后重开官方 ZCode 即可切回。",
   },
   category: "productivity",
 };

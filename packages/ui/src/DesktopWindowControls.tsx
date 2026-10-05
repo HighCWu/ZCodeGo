@@ -7,6 +7,12 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 
+// Web 远程（移动端远程控制的浏览器 shim 环境）由浏览器提供窗口装饰，
+// 桌面窗控按钮无意义且不可用——shim 在应用模块加载前置位。
+const isWebRemote =
+  (globalThis as typeof globalThis & { __ZCODE_WEB_REMOTE__?: boolean })
+    .__ZCODE_WEB_REMOTE__ === true;
+
 export function DesktopWindowControls() {
   const platform = usePlatform();
   const { intl } = useZCodeIntl();
@@ -50,6 +56,7 @@ export function DesktopWindowControls() {
       Icon: XIcon,
     },
   ] as const;
+  if (isWebRemote) return null;
   return (
     <div
       data-testid="desktop-window-controls"

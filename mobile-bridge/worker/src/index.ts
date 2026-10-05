@@ -579,6 +579,18 @@ function containerPage(origin: string): string {
 const SHIM_JS = String.raw`
 (function () {
   if (window.zcode) return;
+  // Web 远程环境旗标：UI 据此隐藏窗口装饰（最小化/最大化/关闭按钮——
+  // 浏览器有自己的窗控，语义也不通）。
+  window.__ZCODE_WEB_REMOTE__ = true;
+  // 圆角外白边修复：应用根节点带圆角且圆角外透明（桌面 vibrancy 透窗背景），
+  // 浏览器默认白底会露出白边。应用 styles.css 对 html/body 有
+  // background:transparent!important，注入需同类名+!important 反超；颜色取
+  // 主题背景变量（亮暗自动切换，加载前深色兜底）。
+  document.documentElement.classList.add("__zcode_web_remote");
+  var bgStyle = document.createElement("style");
+  bgStyle.textContent =
+    "html.__zcode_web_remote,html.__zcode_web_remote body{background:var(--color-background,#0b0e14)!important}";
+  document.head.appendChild(bgStyle);
   window.__ZCODE_DEVICE_ID__ = "";
   var parentWindow = null;
   try { parentWindow = window.parent; } catch (e) {}

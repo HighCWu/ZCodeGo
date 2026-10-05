@@ -659,15 +659,20 @@ export function startMobileBridgePairing(
   const origin = resolveSignalingOrigin();
   const token = generateToken();
   const secret = randomBytes(16).toString("hex");
+  const offerId = randomBytes(6).toString("hex");
+  // 短码 URL 在配对开始即可定（token/secret/offerId 均本地生成）——链接与
+  // 二维码同时可用；早到的 req-offer 在 primary 窗口排队，offer 预生成完成
+  //（≤8s）后即应答。
+  const shortUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${offerId}`;
   const session: Session = {
     token,
     secret,
-    offerId: randomBytes(6).toString("hex"),
-    pairingUrl: "",
-    qrUrl: `${origin}/#v=1&t=${token}&p=${secret}`,
+    offerId,
+    pairingUrl: shortUrl,
+    qrUrl: shortUrl,
     ws: null,
     windows: [],
-    status: { state: "signaling", token },
+    status: { state: "signaling", token, pairingUrl: shortUrl, qrUrl: shortUrl },
     onStatus,
   };
   activeSession = session;

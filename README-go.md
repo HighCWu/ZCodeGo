@@ -7,8 +7,7 @@ ZCode 官方 fork 的伴生桌面：接管官方 ZCode 的桌面 UI，底层原�
 1. 在官方 ZCode 中安装本插件（`plugin/` 目录，本地市场）
 2. 重启官方 ZCode
 3. 在官方任意会话输入 `/zcode-go` → 官方窗口隐藏（任务栏消失、进程与会话全部存活），zcode-go 桌面接管
-4. zcode-go 内点"返回官方版"（或关闭窗口）→ 官方窗口回来，右下角出现圆形悬浮气泡
-5. 点气泡 → 随时回到 zcode-go
+4. 要回到官方版：退出 zcode-go，再正常打开官方 ZCode（官方进程一直在后台存活，重新打开会唤回其窗口）
 
 路径与开关（`~/.zcode-go/`）：
 - `official.json` — 插件探测到的官方安装位置（bin / resourcesDir / runtimeBundle），跨平台自动发现
