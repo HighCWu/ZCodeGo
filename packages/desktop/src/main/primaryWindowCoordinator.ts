@@ -31,30 +31,77 @@ export function createPrimaryWindowCoordinator(deps: PrimaryWindowCoordinatorDep
     return Boolean(window.isRendererCrashed?.() || window.webContents?.isCrashed?.());
   }
 
-  function revealExistingWindow(): boolean {
-    for (const existingWindow of deps.listWindows()) {
-      if (existingWindow.isDestroyed()) {
+  // 应用窗口按隐藏（关闭到托盘/dock 隐藏）先后顺序记录；重复 hide 幂等移到队尾。
+  const hiddenWindows: WindowLike[] = [];
+
+  /** 窗口隐藏时记录（index.ts 在应用窗口的 hide 事件上调用；销毁窗口惰性清理）。 */
+  function noteWindowHidden(window: WindowLike): void {
+    const index = hiddenWindows.indexOf(window);
+    if (index >= 0) hiddenWindows.splice(index, 1);
+    hiddenWindows.push(window);
+    while (hiddenWindows.length > 0 && hiddenWindows[0]!.isDestroyed()) {
+      hiddenWindows.shift();
+    }
+  }
+
+  function discardCrashedWindows(windows: WindowLike[]): WindowLike[] {
+    const alive: WindowLike[] = [];
+    for (const window of windows) {
+      if (window.isDestroyed()) {
         continue;
       }
-
-      if (isRendererCrashed(existingWindow)) {
+      if (isRendererCrashed(window)) {
         // renderer native crash 后 BrowserWindow 仍可能存活；继续复用会让 macOS 激活时只显示白屏空壳。
-        existingWindow.destroy?.();
+        window.destroy?.();
         deps.logger.info("[primary-window] discarded crashed renderer window");
         continue;
       }
+      alive.push(window);
+    }
+    return alive;
+  }
 
-      if (existingWindow.isMinimized?.()) {
-        existingWindow.restore?.();
+  function focusLatestVisible(windows: WindowLike[]): boolean {
+    let focusTarget: WindowLike | null = null;
+    for (const window of windows) {
+      if (window.isMinimized?.()) {
+        window.restore?.();
       }
-      if (!existingWindow.isVisible()) {
-        existingWindow.show();
+      focusTarget = window;
+    }
+    focusTarget?.focus?.();
+    return windows.length > 0;
+  }
+
+  function revealExistingWindow(): boolean {
+    const alive = discardCrashedWindows(deps.listWindows());
+    if (alive.length === 0) {
+      return false;
+    }
+    // 多窗口语义（zcode-go「在新窗口打开」）：还有开着的窗口就不恢复被隐藏的
+    // ——它们是用户主动关闭的，点托盘/dock 只把现有可见窗口带到前台；全部窗口
+    // 都被关闭时，恢复最后一个被关闭的那个（隐藏顺序记录）。
+    const visible = alive.filter((window) => window.isVisible());
+    if (visible.length > 0) {
+      return focusLatestVisible(visible);
+    }
+    for (let i = hiddenWindows.length - 1; i >= 0; i -= 1) {
+      const window = hiddenWindows[i]!;
+      if (window.isDestroyed()) {
+        hiddenWindows.splice(i, 1);
+        continue;
       }
-      existingWindow.focus?.();
+      if (isRendererCrashed(window)) {
+        window.destroy?.();
+        hiddenWindows.splice(i, 1);
+        continue;
+      }
+      window.show();
+      window.focus?.();
       return true;
     }
-
-    return false;
+    // 无隐藏记录（进程内从未走 hide 路径的兜底）：显示最早的存活窗口。
+    return focusLatestVisible([alive[0]!]);
   }
 
   async function ensurePrimaryWindow(reason: string) {
@@ -97,5 +144,6 @@ export function createPrimaryWindowCoordinator(deps: PrimaryWindowCoordinatorDep
 
   return {
     ensurePrimaryWindow,
+    noteWindowHidden,
   };
 }

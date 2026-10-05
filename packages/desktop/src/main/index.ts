@@ -927,6 +927,23 @@ const primaryWindowCoordinator = createPrimaryWindowCoordinator({
   logger,
 });
 
+// zcode-go：记录应用窗口隐藏顺序（点托盘/dock 激活时按「有可见窗口只聚焦、
+// 全部隐藏恢复最后关闭的」语义使用）。只记录主应用窗口集合内的窗口。
+app.on("browser-window-created", (_event, createdWindow) => {
+  createdWindow.on("hide", () => {
+    try {
+      if (
+        !createdWindow.isDestroyed() &&
+        getApplicationWindowsExcludingCuaIndicator().includes(createdWindow)
+      ) {
+        primaryWindowCoordinator.noteWindowHidden(createdWindow);
+      }
+    } catch {
+      /* 窗口销毁竞态时忽略 */
+    }
+  });
+});
+
 function markForceQuit(reason: string) {
   if (forceQuitRef.current) {
     return;
