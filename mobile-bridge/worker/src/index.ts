@@ -219,18 +219,63 @@ function containerPage(origin: string): string {
     if (pc) { try { pc.close(); } catch (e) {} }
   }
 
-  // ── SW 注册 + /app 导航 ──
+  // ── SW 注册 + /app 挂载 ──
+  // 关键：本页持有 PC/DC，绝不能导航离场（location.href 会销毁连接）——
+  // 改为全屏 iframe 挂载 /app/；SW 激活并 claim 本页后才挂载，否则 /app/
+  // 请求直落 Worker 503（"界面资源代理未就绪"的历史根因之一）。
   function goToApp() {
     setStage("loading");
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(
-        function () { location.href = "/app/"; },
-        function () { location.href = "/app/"; },
-      );
-    } else {
-      location.href = "/app/";
+    if (!("serviceWorker" in navigator)) {
+      mountAppFrame();
+      return;
     }
+    navigator.serviceWorker
+      .register("/sw.js", { scope: "/" })
+      .then(function () {
+        return navigator.serviceWorker.ready;
+      })
+      .then(function () {
+        return waitForController();
+      })
+      .then(mountAppFrame, mountAppFrame);
   }
+  function waitForController() {
+    return new Promise(function (resolve) {
+      if (navigator.serviceWorker.controller) return resolve();
+      var t = setTimeout(resolve, 3000);
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        function () {
+          clearTimeout(t);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+  }
+  function mountAppFrame() {
+    registerProxyPort();
+    var frame = document.createElement("iframe");
+    frame.src = "/app/";
+    frame.title = "ZCode Go";
+    frame.style.cssText =
+      "position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#0b0e14;z-index:9999";
+    document.body.appendChild(frame);
+  }
+  // 页面把专用端口交给 SW：/app/* 资源请求经此发来。避免 clients.matchAll
+  // 在 iframe 场景（多个 window client）选错接收方。
+  function registerProxyPort() {
+    var sw = navigator.serviceWorker.controller;
+    if (!sw) return;
+    var channel = new MessageChannel();
+    channel.port1.onmessage = function (event) {
+      handleProxyRequest(event.data, event.ports[0]);
+    };
+    sw.postMessage({ kind: "resource-proxy-ready" }, [channel.port2]);
+  }
+  // SW 空闲被终止后其内存里的 proxyPort 丢失（fetch 兜底路径可用但较慢）——
+  // 周期性重注册让 SW 冷重启后恢复快路径（幂等，旧端口上的在途请求不受影响）。
+  setInterval(registerProxyPort, 30000);
 
   // ── resource DataChannel：桌面产物拉取（SW miss 时经 message 到这里）──
   function handleResourceMessage(raw) {
@@ -262,24 +307,27 @@ function containerPage(origin: string): string {
     }
   }
 
-  // SW → 页面：/app/* 资源请求。
+  // SW → 页面：/app/* 资源请求（代理端口主路径；旧 matchAll 直发路径兜底）。
+  function handleProxyRequest(data, port) {
+    if (!data || data.kind !== "app-resource") return;
+    if (!resourceDc || resourceDc.readyState !== "open") {
+      if (port) port.postMessage({ error: "proxy-not-ready" });
+      return;
+    }
+    var id = ++resourceSeq;
+    var entry = { chunks: [] };
+    resourceRequests.set(id, entry);
+    entry.resolve = function (payload) {
+      if (port) port.postMessage(payload);
+    };
+    entry.reject = function (err) {
+      if (port) port.postMessage({ error: String(err) });
+    };
+    resourceDc.send(JSON.stringify({ id: id, path: data.url }));
+  }
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("message", function (event) {
-      var data = event.data;
-      if (!data || data.kind !== "app-resource" || !resourceDc || resourceDc.readyState !== "open") return;
-      var port = event.ports[0];
-      var id = ++resourceSeq;
-      resourceRequests.set(id, { chunks: [] });
-      var entry = resourceRequests.get(id);
-      entry.resolve = function (payload) {
-        if (port) port.postMessage(payload);
-        else navigator.serviceWorker.controller.postMessage(payload);
-      };
-      entry.reject = function (err) {
-        if (port) port.postMessage({ error: String(err) });
-        else navigator.serviceWorker.controller.postMessage({ error: String(err) });
-      };
-      resourceDc.send(JSON.stringify({ id: id, path: data.url }));
+      handleProxyRequest(event.data, event.ports[0]);
     });
   }
 
@@ -502,11 +550,17 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function serveAppResource(request) {
-  const cached = await caches.open(APP_CACHE).then((cache) => cache.match(request));
-  if (cached) return cached;
-  // miss：向主页面要（主页面经 resource DataChannel 向桌面取）。
+  const url = new URL(request.url);
+  // 文档请求（/app/ 导航、index.html）不读不写缓存：桌面产物迭代后缓存里
+  // 的旧 index.html 会引用已不存在的 hash 资源。hash 资源才走 cache-first。
+  const isDocument =
+    request.mode === "navigate" || url.pathname === "/app/" || url.pathname.endsWith("/index.html");
+  if (!isDocument) {
+    const cached = await caches.open(APP_CACHE).then((cache) => cache.match(request));
+    if (cached) return cached;
+  }
   const response = await requestFromPage(request);
-  if (response && response.ok !== false) {
+  if (response && response.ok && !isDocument) {
     const cache = await caches.open(APP_CACHE);
     // Response body 只能消费一次，clone 后入缓存。
     cache.put(request, response.clone()).catch(() => {});
@@ -514,10 +568,18 @@ async function serveAppResource(request) {
   return response ?? new Response("resource unavailable", { status: 502 });
 }
 
+// 容器页注册进来的资源代理端口（页面持有 resource DataChannel）。
+let proxyPort = null;
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.kind === "resource-proxy-ready" && event.ports && event.ports[0]) {
+    proxyPort = event.ports[0];
+  }
+});
+
 function requestFromPage(request) {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
-    const timeout = setTimeout(() => resolve(null), 30000);
+    const timeout = setTimeout(() => resolve(null), 10000);
     channel.port1.onmessage = (event) => {
       clearTimeout(timeout);
       const payload = event.data || {};
@@ -530,16 +592,19 @@ function requestFromPage(request) {
         headers: payload.mime ? { "content-type": payload.mime } : {},
       }));
     };
+    const url = new URL(request.url).pathname;
+    if (proxyPort) {
+      proxyPort.postMessage({ kind: "app-resource", url }, [channel.port2]);
+      return;
+    }
+    // 兜底：容器页尚未注册代理端口（时序窗口）——直接 postMessage 到窗口 client。
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       if (clients.length === 0) {
         clearTimeout(timeout);
         resolve(null);
         return;
       }
-      clients[0].postMessage(
-        { kind: "app-resource", url: new URL(request.url).pathname },
-        [channel.port2],
-      );
+      clients[0].postMessage({ kind: "app-resource", url }, [channel.port2]);
     });
   });
 }

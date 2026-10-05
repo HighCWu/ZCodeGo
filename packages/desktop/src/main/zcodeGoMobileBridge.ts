@@ -5,8 +5,8 @@
  * mailbox（+ QR 路径的 offer 取回）。配对两级：
  *   - 复制链接：#v=1&t=<token>&p=<secret>&o=<完整 offer（non-trickle，base64url）>
  *     ——手机本地解 offer 即刻协商，全程仅 answer 一条信令
- *   - 二维码：#v=1&t=<token>&p=<secret>&oc=<压缩 offer（过滤候选+deflate）>
- *     ——与链接同为 direct；压缩失败回退 i=<offer_id> 经 mailbox 取回
+ *   - 二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——短码经 mailbox 取回
+ *     （压缩 offer 进 QR 实测过密相机扫不出；oc= 通道容器页保留）
  * 旧 trickle 路径保留（容器页 URL 无 v= 参数时走 legacy），A/B 实测后移除。
  *
  * 桥窗口职责：持有 RTCPeerConnection（offer 侧预生成：等 ICE gathering
@@ -43,7 +43,7 @@ export interface MobileBridgeStatus {
   state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
   /** 复制链接（携带完整 offer，direct 最快路径）。 */
   pairingUrl?: string;
-  /** 二维码内容（压缩 offer 优先，体积小）。 */
+  /** 二维码内容（offer_id 短码，经 mailbox 取回；相机可靠扫描优先）。 */
   qrUrl?: string;
   token?: string;
   error?: string;
@@ -289,6 +289,7 @@ function handleResourceRequest(raw) {
   };
   // path 归一化：/app/<rel> → rendererRoot/<rel>；resolve 后必须仍在根内（禁穿越）。
   var rel = urlPath.replace(/^\/app\//, "").replace(/^\/+/, "");
+  if (!rel) rel = "index.html"; // /app/ 目录请求映射到入口文档
   var resolved = path.resolve(rendererRoot, rel);
   if (resolved !== rendererRoot && !resolved.startsWith(rendererRoot + path.sep)) {
     send({ id: id, type: "error", message: "forbidden" });
@@ -387,11 +388,11 @@ export function startMobileBridgePairing(
       // 链接形态（direct 最快路径）：完整 offer base64url 进 hash。
       const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
       session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&o=${encoded}`;
-      // 二维码：压缩后体积 ~1KB（候选过滤+deflate，实测 4.2KB→1.1KB），低于
-      // QR 字节模式上限（2953B）——扫码路径同为 direct；压缩失败回退 offer_id。
-      session.qrUrl = compressed
-        ? `${origin}/#v=1&t=${token}&p=${secret}&oc=${compressed}`
-        : `${origin}/#v=1&t=${token}&p=${secret}&i=${session.offerId}`;
+      // 二维码：短码形态（offer_id 经 mailbox 取回）。压缩 offer 进二维码
+      // （oc=，~1.0KB）虽低于 QR 字节上限，但 ~117 模块在对话框尺寸下过密、
+      // 相机扫不出（真机实测）——短码 ~95B（5px+/模块）可靠秒扫，代价仅
+      // 一次信令往返（desktop WS 在线，DO 即时转发）。复制链接仍为 o= direct。
+      session.qrUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${session.offerId}`;
       session.status = {
         ...session.status,
         state: "waiting-mobile",

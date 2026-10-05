@@ -91,7 +91,9 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
       setQrDataUrl(null);
       return;
     }
-    void QRCode.toDataURL(qrContent, { margin: 1, width: 220 })
+    // width 512 显示时缩到 size-64（2:1 高分屏仍清晰）；margin 4 为 QR 规范
+    // 静区——此前 margin 1 + 大 payload 过密，相机扫不出。
+    void QRCode.toDataURL(qrContent, { margin: 4, width: 512 })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url);
       })
