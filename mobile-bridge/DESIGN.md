@@ -73,17 +73,19 @@ BroadcastChannel 中继）有一个移动端致命缺陷：hub tab 被关闭/被
   敏感短期材料；新鲜度与 srflx 映射寿命绑定（「刷新二维码」= 重新生成
   offer）。p= 是 capability secret（防抢答信箱），对端身份认证由 DTLS
   指纹承担。
-- libp2p 的取舍（2026-10-05 二轮评审后精确化）：`webRTCDirect()` 不适合
-  （要求桌面公网 UDP 可达）；`webRTC()` 网络层面支持 NAT 后双端，但其
-  Circuit Relay v2 是完整 libp2p 协议栈（Noise + yamux + 长驻连接），
-  CF Worker 免费层跑不了——需要一台公网 VPS 跑 relay，与本项目「零基础设施
-  成本」的第一约束直接冲突；且其 transport 的 SDP 握手深度绑定 relay 流，
-  信令层不可插拔（换信令 = fork 维护）。本场景拓扑为 1:1 自有设备短连接，
-  mux 由 DataChannel 多 label 覆盖、认证由 DTLS 承担，libp2p 生态无买点。
-  结论：原生 WebRTC + 自定义信令面。若未来拓扑演变（多设备网格/第三方
-  peer），届时在应用层引入 libp2p 是加法而非重写。不用 STUN early-data /
-  SDP munging / 公网 UDP 监听；NAT 穿透仍由标准 ICE/STUN 栈负责（无 TURN，
-  成功率由 NAT 类型决定，本方案不改变穿透面）。
+- libp2p 的取舍（2026-10-05 三轮评审收敛）：`webRTCDirect()` 不适合（要求
+  桌面公网 UDP 可达）；`webRTC()` 网络层面支持 NAT 后双端（private-to-private
+  为其设计目标），否决点在基础设施而非能力——标准路径以 Circuit Relay 承载
+  私有 peer 间的 SDP 信令，运营该 relay 需要一个公网可达的 libp2p relay 节点，
+  超出本项目「零基础设施成本」约束（CF 免费层无法运行 Circuit Relay v2 协议
+  栈）。此外 `@libp2p/webrtc` 配合自有 out-of-band 信令不是受支持的配置形态，
+  替换其基于 relay 的信令需耦合或修改 transport 实现，维护成本与 1:1 自有
+  设备拓扑不成比例。本场景 mux 由 DataChannel 多 label（control/rpc/resource）
+  覆盖、认证由 DTLS 承担，无 discovery/多 peer 路由/协议协商需求。结论：
+  原生 WebRTC + 自定义信令面，不做 libp2p spike（结论可由架构事实先验推出）。
+  若未来拓扑演变（多设备网格/第三方 peer），届时在应用层引入 libp2p 是加法
+  而非重写。不用 STUN early-data / SDP munging / 公网 UDP 监听；NAT 穿透仍
+  由标准 ICE/STUN 栈负责（无 TURN，成功率由 NAT 类型决定，本方案不改变穿透面）。
 - 风险清单与验收：两端均 non-trickle（手机侧 answer gathering 约 0.5s
   量级）；总建链时延须 benchmark（信令轮转省下 vs gathering 前置），阶段 2
   先 A/B 并存两种模式，按 NAT 矩阵（家宽↔Wi-Fi / 家宽↔5G / 公司网↔5G /
