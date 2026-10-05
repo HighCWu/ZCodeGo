@@ -42,6 +42,45 @@ interface ScopedErrorBoundaryProps {
 
 const LOCALE_PREFERENCE_KEY = "zcode-locale-preference";
 
+// ── zcode-go：UI 崩溃自动恢复 ─────────────────────────────
+// 官方错误边界只提供手动恢复按钮；go 版在崩溃进入 fallback 后自动恢复：
+// 局部（Scoped）边界先 reset 重渲染（比整页 reload 轻得多，侧栏/其他面板状态
+// 不受影响），同一 scope 再次崩溃则升级为整页 reload；根级（App）边界直接
+// reload。会话级滑动额度（每 scope 5 分钟 3 次）防无限循环，超限退回手动。
+const ZCODE_GO_AUTO_RECOVERY_KEY = "zcodeGoUiAutoRecovery";
+const ZCODE_GO_AUTO_RECOVERY_DELAY_MS = 8_000;
+const ZCODE_GO_AUTO_RECOVERY_WINDOW_MS = 5 * 60_000;
+const ZCODE_GO_AUTO_RECOVERY_MAX = 3;
+
+function readZcodeGoAutoRecoveryStore(): Record<string, number[]> {
+  try {
+    return JSON.parse(sessionStorage.getItem(ZCODE_GO_AUTO_RECOVERY_KEY) ?? "{}") as Record<
+      string,
+      number[]
+    >;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 计划一次自动恢复；返回恢复动作（"reset" | "reload" | null——额度用尽）。
+ * scoped 边界第 1 次 reset、后续 reload；App 边界恒 reload。
+ */
+function planZcodeGoAutoRecovery(scope: string, preferReset: boolean): "reset" | "reload" | null {
+  const now = Date.now();
+  const store = readZcodeGoAutoRecoveryStore();
+  const history = (store[scope] ?? []).filter((at) => now - at < ZCODE_GO_AUTO_RECOVERY_WINDOW_MS);
+  if (history.length >= ZCODE_GO_AUTO_RECOVERY_MAX) return null;
+  history.push(now);
+  try {
+    sessionStorage.setItem(ZCODE_GO_AUTO_RECOVERY_KEY, JSON.stringify({ ...store, [scope]: history }));
+  } catch {
+    /* 隐私模式等 sessionStorage 不可用时退化为本次会话不限额（崩溃循环仍受 8s 延迟约束） */
+  }
+  return preferReset && history.length === 1 ? "reset" : "reload";
+}
+
 function normalizeError(error: unknown): Error {
   if (error instanceof Error) {
     return error;
@@ -305,12 +344,40 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     error: null,
     componentStack: "",
   };
+  private zcodeGoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
   static getDerivedStateFromError(error: unknown): AppErrorBoundaryState {
     return {
       error: normalizeError(error),
       componentStack: "",
     };
+  }
+
+  override componentWillUnmount(): void {
+    if (this.zcodeGoRecoveryTimer !== null) clearTimeout(this.zcodeGoRecoveryTimer);
+    this.zcodeGoRecoveryTimer = null;
+  }
+
+  private scheduleZcodeGoAutoRecovery(scope: string, preferReset: boolean): void {
+    if (this.zcodeGoRecoveryTimer !== null) clearTimeout(this.zcodeGoRecoveryTimer);
+    const action = planZcodeGoAutoRecovery(scope, preferReset);
+    if (action === null) {
+      logger.warn(`[zcode-go-ui-recovery] ${scope} 自动恢复额度已用尽，等待手动恢复`);
+      return;
+    }
+    logger.info(
+      `[zcode-go-ui-recovery] ${scope} React 子树崩溃，${ZCODE_GO_AUTO_RECOVERY_DELAY_MS / 1000}s 后自动${action === "reset" ? "重渲染" : "整页重载"}`,
+    );
+    this.zcodeGoRecoveryTimer = setTimeout(() => {
+      this.zcodeGoRecoveryTimer = null;
+      if (this.state.error === null) return;
+      if (action === "reset") {
+        this.handleReset();
+      } else {
+        this.handleReload();
+      }
+    }, ZCODE_GO_AUTO_RECOVERY_DELAY_MS);
+    this.zcodeGoRecoveryTimer.unref?.();
   }
 
   override componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
@@ -330,6 +397,8 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
       componentStack: errorInfo.componentStack ?? "",
     });
     this.setState({ componentStack: errorInfo.componentStack ?? "" });
+    // 根级边界代表整页不可用，自动恢复直接整页 reload。
+    this.scheduleZcodeGoAutoRecovery("app", false);
   }
 
   private handleReset = () => {
@@ -405,6 +474,9 @@ export class ScopedErrorBoundary extends Component<
       scope: this.props.scope,
     });
     this.setState({ componentStack: errorInfo.componentStack ?? "" });
+    // zcode-go：局部崩溃自动恢复——先 reset（仅重渲染出错区域，侧栏等其他
+    // 面板状态不受影响），同 scope 再次崩溃升级整页 reload。
+    this.scheduleZcodeGoAutoRecovery(`scoped:${this.props.scope}`, true);
   }
 
   override componentDidUpdate(previousProps: ScopedErrorBoundaryProps) {
@@ -417,6 +489,35 @@ export class ScopedErrorBoundary extends Component<
         componentStack: "",
       });
     }
+  }
+
+  override componentWillUnmount(): void {
+    if (this.zcodeGoRecoveryTimer !== null) clearTimeout(this.zcodeGoRecoveryTimer);
+    this.zcodeGoRecoveryTimer = null;
+  }
+
+  private zcodeGoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private scheduleZcodeGoAutoRecovery(scope: string, preferReset: boolean): void {
+    if (this.zcodeGoRecoveryTimer !== null) clearTimeout(this.zcodeGoRecoveryTimer);
+    const action = planZcodeGoAutoRecovery(scope, preferReset);
+    if (action === null) {
+      logger.warn(`[zcode-go-ui-recovery] ${scope} 自动恢复额度已用尽，等待手动恢复`);
+      return;
+    }
+    logger.info(
+      `[zcode-go-ui-recovery] ${scope} React 子树崩溃，${ZCODE_GO_AUTO_RECOVERY_DELAY_MS / 1000}s 后自动${action === "reset" ? "重渲染" : "整页重载"}`,
+    );
+    this.zcodeGoRecoveryTimer = setTimeout(() => {
+      this.zcodeGoRecoveryTimer = null;
+      if (this.state.error === null) return;
+      if (action === "reset") {
+        this.handleReset();
+      } else {
+        this.handleReload();
+      }
+    }, ZCODE_GO_AUTO_RECOVERY_DELAY_MS);
+    this.zcodeGoRecoveryTimer.unref?.();
   }
 
   private handleReset = () => {

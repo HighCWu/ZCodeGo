@@ -148,6 +148,7 @@ import {
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
+import { initZcodeGoRendererRecovery } from "./zcodeGoRendererRecovery.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
   getCredentialsDir,
@@ -2231,6 +2232,8 @@ app.whenReady().then(async () => {
     armsEnv: mapZCodeEnvToArmsRumEnv(desktopRuntimeEnv),
   });
   registerDesktopStabilityMonitors(logger, crashCapturePaths);
+  // zcode-go：渲染进程崩溃自动重载（官方只上报遥测不恢复，崩溃后主窗口白屏）。
+  initZcodeGoRendererRecovery(logger);
   registerDesktopResourceTelemetry(logger);
   // 主窗口 renderer 的 60 秒 heap 样本入口；随 App 生命周期常驻，只注册一次。
   registerRendererHeapSampleIpc();
