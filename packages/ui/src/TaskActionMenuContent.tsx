@@ -40,6 +40,7 @@ export function TaskActionMenuContent({
   onCopySessionId,
   onDeriveCompactSession,
   onViewModelTrajectory,
+  onOpenInNewWindow,
   zcodeGoForkDisabled,
 }: {
   intl: {
@@ -77,6 +78,8 @@ export function TaskActionMenuContent({
   onCopySessionId?: () => void;
   onDeriveCompactSession?: () => void;
   onViewModelTrajectory?: () => void;
+  /** zcode-go：在新窗口打开会话（同实例多窗口，仅桌面 shell 传入）。 */
+  onOpenInNewWindow?: () => void;
   /** zcode-go：会话已打开显示（fork 走会话内横幅）或分叉进行中时禁用菜单项。 */
   zcodeGoForkDisabled?: boolean;
 }) {
@@ -135,6 +138,11 @@ export function TaskActionMenuContent({
           onSelect={onOpenInSplitPane}
         >
           {intl.formatMessage({ id: "taskList.openInSplitPane" })}
+        </Item>
+      ) : null}
+      {onOpenInNewWindow ? (
+        <Item disabled={taskTargetActionsDisabled} onSelect={onOpenInNewWindow}>
+          {intl.formatMessage({ id: "taskList.openInNewWindow" })}
         </Item>
       ) : null}
       <Separator />

@@ -17,6 +17,7 @@ export function TaskListItemContextMenu({
   onArchiveTask,
   onMarkTaskAsUnread,
   onOpenInSplitPane,
+  onOpenInNewWindow,
   openInSplitPaneDisabled,
   onOpenTaskFeedback,
   onOpenTaskPathInFileManager,
@@ -48,6 +49,7 @@ export function TaskListItemContextMenu({
   onMarkTaskAsUnread: () => void;
   /** 「在分屏打开」（仅桌面 shell 传入）。 */
   onOpenInSplitPane?: () => void;
+  onOpenInNewWindow?: () => void;
   /** 叶子数达上限且该 session 未在任何 pane 时禁用。 */
   openInSplitPaneDisabled?: boolean;
   onOpenTaskFeedback: () => void;
@@ -79,6 +81,7 @@ export function TaskListItemContextMenu({
         onArchiveTask={onArchiveTask}
         onMarkTaskAsUnread={onMarkTaskAsUnread}
         onOpenInSplitPane={onOpenInSplitPane}
+        onOpenInNewWindow={onOpenInNewWindow}
         openInSplitPaneDisabled={openInSplitPaneDisabled}
         onOpenTaskFeedback={onOpenTaskFeedback}
         onOpenTaskPathInFileManager={onOpenTaskPathInFileManager}

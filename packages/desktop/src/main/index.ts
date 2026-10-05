@@ -2325,6 +2325,62 @@ app.whenReady().then(async () => {
     });
   });
 
+  // zcode-go：同实例多窗口打开会话。createWindowInstance 是官方多窗口骨架的
+  // 可重入装配（每窗口一个 local host，windowHostProcessMap 天然多窗口）；新窗口
+  // 的初始选中会话走「领取式」注入——渲染层启动就绪后主动 invoke 领取，无事件
+  // 时序竞态。app 退出语义不受影响：window-all-closed 只在全部窗口关闭后触发，
+  // Windows 的托盘隐藏/退出确认也按 getMainApplicationWindows().length 判定。
+  const zcodeGoPendingInitialSession = new Map<
+    number,
+    { taskId: string; workspacePath: string; workspaceIdentity?: string }
+  >();
+  ipcMain.handle(
+    PlatformChannels.ZcodeGoOpenSessionInNewWindow,
+    (_event, payload: unknown) => {
+      const request = payload as {
+        taskId?: unknown;
+        workspacePath?: unknown;
+        workspaceIdentity?: unknown;
+      };
+      if (
+        typeof request?.taskId !== "string" ||
+        typeof request?.workspacePath !== "string" ||
+        !request.taskId ||
+        !request.workspacePath
+      ) {
+        return { ok: false, error: "invalid payload" };
+      }
+      try {
+        const win = createWindowInstance({
+          initialWorkspacePath: request.workspacePath,
+        });
+        const wcId = win.webContents.id;
+        zcodeGoPendingInitialSession.set(wcId, {
+          taskId: request.taskId,
+          workspacePath: request.workspacePath,
+          ...(typeof request.workspaceIdentity === "string" && request.workspaceIdentity
+            ? { workspaceIdentity: request.workspaceIdentity }
+            : {}),
+        });
+        win.once("closed", () => {
+          zcodeGoPendingInitialSession.delete(wcId);
+        });
+        logger.info("[zcode-go-new-window] 已在新窗口打开会话", {
+          taskId: request.taskId,
+          workspacePath: request.workspacePath,
+        });
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  );
+  ipcMain.handle(PlatformChannels.ZcodeGoTakeSessionInitial, (event) => {
+    const pending = zcodeGoPendingInitialSession.get(event.sender.id);
+    if (pending) zcodeGoPendingInitialSession.delete(event.sender.id);
+    return pending ?? null;
+  });
+
   const primaryWindow = getApplicationWindowsExcludingCuaIndicator()[0];
   if (primaryWindow) {
     scheduleReportPerfAppStartAfterMainViewReady(primaryWindow.webContents, logger);

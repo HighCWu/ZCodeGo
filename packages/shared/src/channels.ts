@@ -422,6 +422,10 @@ export const PlatformChannels = {
   ZcodeGoTrimForkedSessionHistory: "zcode:zcode-go-trim-forked-history",
   /** Renderer → Main：直连分叉压缩历史会话（主进程建子会话，不打开父会话） */
   ZcodeGoForkCompactSession: "zcode:zcode-go-fork-compact-session",
+  /** Renderer → Main：在新窗口打开会话（同实例多窗口，共享配置/会话库/托盘） */
+  ZcodeGoOpenSessionInNewWindow: "zcode:zcode-go-open-session-in-new-window",
+  /** Renderer → Main：新窗口启动时领取待打开的初始会话（一次性质询，避免事件时序竞态） */
+  ZcodeGoTakeSessionInitial: "zcode:zcode-go-take-session-initial",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -1176,6 +1180,14 @@ export interface PlatformChannelMap {
   [PlatformChannels.ZcodeGoForkCompactSession]: {
     request: { parentSessionId: string };
     response: { ok: boolean; childSessionId: string; copiedMessages: number; workspacePath?: string; error?: string };
+  };
+  [PlatformChannels.ZcodeGoOpenSessionInNewWindow]: {
+    request: { taskId: string; workspacePath: string; workspaceIdentity?: string };
+    response: { ok: boolean; error?: string };
+  };
+  [PlatformChannels.ZcodeGoTakeSessionInitial]: {
+    request: void;
+    response: { taskId: string; workspacePath: string; workspaceIdentity?: string } | null;
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

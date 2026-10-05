@@ -15,6 +15,7 @@ import { buildWorkspaceServiceLookup } from "@/lib/workspaceServiceResolver.js";
 import { logger } from "@/logger.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
 import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
+import { openSessionInNewWindow } from "@/v4/zcodeGoNewWindowState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskListRemoteSyncHint } from "@/TaskListRemoteSyncHint.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
@@ -745,6 +746,10 @@ export function WorkspaceTimelineTasksSection({
             onDeriveCompactSession={() => {
               // zcode-go：直连 fork（不打开父会话）；完成后侧栏立即出现子任务。
               void forkCompactSessionViaHost(contextMenuItem.taskId, intl.formatMessage);
+            }}
+            onOpenInNewWindow={() => {
+              // zcode-go：同实例新窗口打开（多任务并行查看）。
+              void openSessionInNewWindow(contextMenuItem, intl.formatMessage);
             }}
             onTogglePinTask={(_taskId, pinned) => {
               // timeline 现在本地和远端分属两套缓存，pin 时需要同时维护成员关系。

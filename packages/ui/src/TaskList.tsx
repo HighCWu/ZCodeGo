@@ -12,6 +12,7 @@ import { NewTaskButtonGroup } from "@/NewTaskButtonGroup.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
 import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
+import { openSessionInNewWindow } from "@/v4/zcodeGoNewWindowState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
@@ -460,6 +461,10 @@ export const TaskList = memo(function TaskList({
                   onDeriveCompactSession={() => {
                     // zcode-go：直连 fork（不打开父会话）。
                     void forkCompactSessionViaHost(contextMenuTask.taskId, intl.formatMessage);
+                  }}
+                  onOpenInNewWindow={() => {
+                    // zcode-go：同实例新窗口打开（多任务并行查看）。
+                    void openSessionInNewWindow(contextMenuTask, intl.formatMessage);
                   }}
                   zcodeGoForkDisabled={isZcodeGoForking(contextMenuTask.taskId)}
                   onTogglePinTask={handleTogglePinTask}

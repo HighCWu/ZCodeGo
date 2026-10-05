@@ -6823,6 +6823,8 @@ const enUS: Record<string, string> = {
   "zcodeGo.forkCompact.failed": "Failed to fork compacted-history session: {error}",
   "taskList.forkCompactHistoryDisabled": "Session is open (use the in-session banner) or a fork is in progress",
   "taskList.forkCompactHistory": "Fork compacted-history session",
+  "taskList.openInNewWindow": "Open in new window",
+  "taskList.openInNewWindowFailed": "Failed to open session in a new window: {error}",
 };
 
 export default enUS;

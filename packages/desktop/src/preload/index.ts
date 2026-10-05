@@ -259,6 +259,19 @@ contextBridge.exposeInMainWorld("zcode", {
     keptMessages: number;
     error?: string;
   }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoTrimForkedSessionHistory, payload),
+  /** zcode-go：在新窗口打开会话（同实例多窗口）。 */
+  zcodeGoOpenSessionInNewWindow: (payload: {
+    taskId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+  }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoOpenSessionInNewWindow, payload),
+  /** zcode-go：新窗口启动时领取待打开的初始会话（一次性质询）。 */
+  zcodeGoTakeSessionInitial: (): Promise<{
+    taskId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+  } | null> => ipcRenderer.invoke(PlatformChannels.ZcodeGoTakeSessionInitial),
   connectRemote: (
     options: RemoteTarget,
     requestId?: string,

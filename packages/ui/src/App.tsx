@@ -874,6 +874,44 @@ export function App({
     onNavigateToAutomations: handleNavigateToAutomationsMain,
     onNavigateToPluginStore: handleNavigateToPluginStoreMain,
   });
+  // zcode-go：本窗口若是「在新窗口打开会话」创建的，启动时领取初始会话并打开。
+  // 领取是一次性质询（main 侧领取即清除）；本 effect 仅在窗口挂载时执行一次。
+  const handleSelectTaskRef = useRef(handleSelectTask);
+  handleSelectTaskRef.current = handleSelectTask;
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const bridge = (
+        window as {
+          zcode?: {
+            zcodeGoTakeSessionInitial?: () => Promise<{
+              taskId: string;
+              workspacePath: string;
+              workspaceIdentity?: string;
+            } | null>;
+          };
+        }
+      ).zcode;
+      let pending: { taskId: string; workspacePath: string; workspaceIdentity?: string } | null =
+        null;
+      try {
+        pending = (await bridge?.zcodeGoTakeSessionInitial?.()) ?? null;
+      } catch {
+        pending = null;
+      }
+      if (cancelled || !pending) return;
+      handleSelectTaskRef.current(
+        pending.workspacePath,
+        pending.taskId,
+        pending.workspaceIdentity,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 仅窗口启动执行一次：初始会话是 per-window 的一次性质询。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const handleOpenPluginStoreForScope = useCallback(
     (_target: PluginStoreOpenTarget = {}) => {
       // Workspace Marketplace 已收敛为全局入口。兼容旧事件中的 Workspace key，但返回

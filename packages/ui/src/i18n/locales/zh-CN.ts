@@ -6501,6 +6501,8 @@ const zhCN: Record<string, string> = {
   "zcodeGo.forkCompact.failed": "分叉压缩历史会话失败：{error}",
   "taskList.forkCompactHistoryDisabled": "会话已打开（请使用会话内横幅分叉）或正在分叉中",
   "taskList.forkCompactHistory": "分叉压缩历史会话",
+  "taskList.openInNewWindow": "在新窗口打开",
+  "taskList.openInNewWindowFailed": "在新窗口打开会话失败：{error}",
 };
 
 export default zhCN;
