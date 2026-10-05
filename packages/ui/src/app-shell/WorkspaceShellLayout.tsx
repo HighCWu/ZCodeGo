@@ -74,6 +74,7 @@ import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { getPathLeaf, toFileUrl } from "@/lib/path.js";
 import { shouldOpenAssistantHtmlInBrowser } from "@/lib/assistantPreviewCards.js";
 import { setWorkspaceSidebarResizeActive } from "@/lib/workspaceSidebarResizeState.js";
+import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import {
   addWorkspacePathOpenRequestListener,
@@ -403,6 +404,8 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     );
   }, [openWorkspaceKeys]);
   const isSidebarPanelVisible = isSidebarVisible;
+  // 移动视口：侧栏不再是内联分栏面板，而是覆盖式抽屉（官方 remote 形态）。
+  const isMobileViewport = useIsMobileViewport();
   const {
     panelRef: terminalPanelRef,
     panelElementRef: terminalPanelElementRef,
@@ -975,6 +978,14 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       workspaceTabs,
     ],
   );
+  // 移动抽屉形态下从侧栏选中任务后自动收起，回到对话主界面。
+  const handleSelectTaskFromSidebar = useCallback(
+    (...args: Parameters<typeof handleSelectTaskInChat>) => {
+      if (isMobileViewport) handleToggleSidebar();
+      handleSelectTaskInChat(...args);
+    },
+    [handleSelectTaskInChat, handleToggleSidebar, isMobileViewport],
+  );
   // 侧栏运行行：与 composer 徽标
   // 同一跳转——先选中会话，再开 run pane。没有 toolCallId 的 run（不该有）只选中会话。
   const handleOpenSidebarWorkflowRun = useCallback(
@@ -1527,16 +1538,33 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           // CSS 变量驱动的专用 split，普通窗口 resize 只走浏览器布局，不触发 React 状态。
         )}
       >
+        {isMobileViewport && isSidebarPanelVisible ? (
+          <button
+            type="button"
+            aria-label="close sidebar"
+            className="fixed inset-0 z-40 bg-black/50"
+            onClick={handleToggleSidebar}
+          />
+        ) : null}
         <div
           ref={workspaceSidebarPanelElementRef}
           data-panel=""
           data-workspace-sidebar-panel="true"
           id="sidebar"
           className={cn(
-            "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
-            // 拖动侧栏宽度时如果继续过渡 width，会让指针移动和实际宽度之间产生滞后。
-            // 拖拽 active 通过 DOM 标记切 transition，避免 pointerdown/up 为了切 class 重渲染整棵 workspace。
-            isSidebarPanelVisible ? "opacity-100" : "pointer-events-none opacity-0",
+            isMobileViewport
+              ? cn(
+                  "fixed inset-y-0 left-0 z-50 flex-none overflow-hidden shadow-2xl transition-transform duration-200 ease-out",
+                  isSidebarPanelVisible
+                    ? "w-[85vw] max-w-320 translate-x-0"
+                    : "w-[85vw] max-w-320 -translate-x-full pointer-events-none",
+                )
+              : cn(
+                  "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
+                  // 拖动侧栏宽度时如果继续过渡 width，会让指针移动和实际宽度之间产生滞后。
+                  // 拖拽 active 通过 DOM 标记切 transition，避免 pointerdown/up 为了切 class 重渲染整棵 workspace。
+                  isSidebarPanelVisible ? "opacity-100" : "pointer-events-none opacity-0",
+                ),
           )}
         >
           <aside
@@ -1561,7 +1589,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     workspacePath={workspaceAbsPath}
                     workspaceRemoteSessionId={workspaceRemoteSessionId}
                     activePreviewPath={activePreviewPath}
-                    onSelectTask={handleSelectTaskInChat}
+                    onSelectTask={handleSelectTaskFromSidebar}
                     onStartDraftInWorkspace={handleCreateProjectDraft}
                     onOpenCodeViewer={handleOpenCodeViewer}
                     onOpenBrowserUrl={handleOpenBrowserUrl}

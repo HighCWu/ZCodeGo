@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createUuid } from "@zcode/shared";
 import type { EmbeddedBrowserOpenUrlRequest, IPlatformService } from "@zcode/shared";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
+import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 // 保活：side pane terminal 跨 workspace 会话上移到模块级 registry。
 // 关闭 terminal tab 时必须显式 release，杀掉 PTY，避免常驻 registry 造成孤儿进程。
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
@@ -203,6 +204,12 @@ export function useAppPanels(options: {
   // 这样即使侧栏被隐藏，入口也仍然留在左上角，不会出现"收起后没有地方再展开"的问题；
   // 同时这里统一处理 macOS 红绿灯安全区，避免按钮和系统窗口控件重叠。
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  // 移动视口（<768，官方 remote 语义）：侧栏默认收起为抽屉；跨档切换时同步
+  // 显隐（移动 → 收起，回到桌面 → 展开）。
+  const isMobileViewport = useIsMobileViewport();
+  useEffect(() => {
+    setIsSidebarVisible(!isMobileViewport);
+  }, [isMobileViewport]);
   const [browserNavigationRequest, setBrowserNavigationRequest] =
     useState<BrowserNavigationRequest | null>(null);
   const [allRecentClosedSidePaneTabs, setAllRecentClosedSidePaneTabs] = useState<

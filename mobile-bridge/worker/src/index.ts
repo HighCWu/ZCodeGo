@@ -615,29 +615,6 @@ const SHIM_JS = String.raw`
   bgStyle.textContent =
     "html.__zcode_web_remote,html.__zcode_web_remote body{background:var(--color-background,#0b0e14)!important}";
   document.head.appendChild(bgStyle);
-  // 窄屏（手机）适配 v1——整体缩放到设计宽度：完整功能可见可交互；正式的
-  // 移动专属布局（官方 remote 风格且功能更全）在后续阶段做 UI 层支持。
-  (function () {
-    var DESIGN_WIDTH = 1280;
-    var fitStyle = document.createElement("style");
-    document.head.appendChild(fitStyle);
-    function refit() {
-      var w = window.innerWidth || document.documentElement.clientWidth || 0;
-      if (w >= 700) {
-        fitStyle.textContent = "";
-        return;
-      }
-      var scale = w / DESIGN_WIDTH;
-      var h = Math.ceil((window.innerHeight || 700) / scale);
-      fitStyle.textContent =
-        "html.__zcode_web_remote{overflow-x:hidden;}" +
-        "html.__zcode_web_remote body{width:" + DESIGN_WIDTH + "px;}" +
-        "html.__zcode_web_remote #root{transform:scale(" + scale + ");transform-origin:0 0;" +
-        "width:" + DESIGN_WIDTH + "px;min-height:" + h + "px;}";
-    }
-    refit();
-    window.addEventListener("resize", refit);
-  })();
   window.__ZCODE_DEVICE_ID__ = "";
   var parentWindow = null;
   try { parentWindow = window.parent; } catch (e) {}
