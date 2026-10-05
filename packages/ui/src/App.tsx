@@ -900,11 +900,26 @@ export function App({
         pending = null;
       }
       if (cancelled || !pending) return;
-      handleSelectTaskRef.current(
-        pending.workspacePath,
-        pending.taskId,
-        pending.workspaceIdentity,
-      );
+      // 冷启动时任务列表/store 可能尚未就绪（tab 恢复与 App 挂载并行）：验证
+      // activeTaskId 落位，未落位延迟重试（最多 3 次），避免一次性领取因时序
+      // 太早而丢掉初始会话。
+      const tryOpen = (remaining: number): void => {
+        handleSelectTaskRef.current(
+          pending.workspacePath,
+          pending.taskId,
+          pending.workspaceIdentity,
+        );
+        window.setTimeout(() => {
+          if (cancelled) return;
+          const workspaceState = useZCodeSessionStore
+            .getState()
+            .getWorkspaceState(pending.workspacePath, pending.workspaceIdentity);
+          if (workspaceState.activeTaskId !== pending.taskId && remaining > 0) {
+            tryOpen(remaining - 1);
+          }
+        }, 1_200);
+      };
+      tryOpen(3);
     })();
     return () => {
       cancelled = true;
