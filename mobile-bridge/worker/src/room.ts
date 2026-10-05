@@ -63,9 +63,14 @@ export class SignalRoom extends DurableObject {
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    // 登记探活（Worker 入口 POST）：创建 DO 实例并落房间计时（storage 持久，休眠不丢）。
+    // 登记探活（Worker 入口 POST）：创建 DO 实例并落房间计时；未过期时滑动
+    // 续期——桌面端会话存续期间每 2 分钟心跳，二维码长期可扫，桌面停止心跳
+    // 后 TTL 自然到期回收。
     if (request.method === "POST") {
-      await this.isRoomExpired();
+      const expired = await this.isRoomExpired();
+      if (!expired) {
+        await this.ctx.storage.put(ROOM_CREATED_AT_KEY, Date.now());
+      }
       return new Response(null, { status: 204 });
     }
     if (url.searchParams.has("role")) {

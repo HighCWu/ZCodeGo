@@ -77,9 +77,10 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     void bridge?.zcodeGoMobileBridgeStart?.().then((status) => {
       if (status) setBridgeStatus(status);
     });
+    // 注意：关闭对话框不停止配对——会话与已连接客户端保活（preload/桥窗口
+    // 自持），只有「刷新二维码」与「停止」按钮才会重建/结束会话。
     return () => {
       unsubscribe?.();
-      void bridge?.zcodeGoMobileBridgeStop?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 打开/关闭驱动配对生命周期
   }, [open]);

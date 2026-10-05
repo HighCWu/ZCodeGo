@@ -615,6 +615,29 @@ const SHIM_JS = String.raw`
   bgStyle.textContent =
     "html.__zcode_web_remote,html.__zcode_web_remote body{background:var(--color-background,#0b0e14)!important}";
   document.head.appendChild(bgStyle);
+  // 窄屏（手机）适配 v1——整体缩放到设计宽度：完整功能可见可交互；正式的
+  // 移动专属布局（官方 remote 风格且功能更全）在后续阶段做 UI 层支持。
+  (function () {
+    var DESIGN_WIDTH = 1280;
+    var fitStyle = document.createElement("style");
+    document.head.appendChild(fitStyle);
+    function refit() {
+      var w = window.innerWidth || document.documentElement.clientWidth || 0;
+      if (w >= 700) {
+        fitStyle.textContent = "";
+        return;
+      }
+      var scale = w / DESIGN_WIDTH;
+      var h = Math.ceil((window.innerHeight || 700) / scale);
+      fitStyle.textContent =
+        "html.__zcode_web_remote{overflow-x:hidden;}" +
+        "html.__zcode_web_remote body{width:" + DESIGN_WIDTH + "px;}" +
+        "html.__zcode_web_remote #root{transform:scale(" + scale + ");transform-origin:0 0;" +
+        "width:" + DESIGN_WIDTH + "px;min-height:" + h + "px;}";
+    }
+    refit();
+    window.addEventListener("resize", refit);
+  })();
   window.__ZCODE_DEVICE_ID__ = "";
   var parentWindow = null;
   try { parentWindow = window.parent; } catch (e) {}
@@ -847,6 +870,35 @@ const SHIM_JS = String.raw`
     get: function (_target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop === "then") return undefined;
+      // 本地直答（不经桌面）：web 远程的多开语义。
+      if (prop === "zcodeGoOpenSessionInNewWindow") {
+        return function () {
+          var payload = arguments[0] || {};
+          // 新 tab 复用配对 URL（query 路由）+ 目标会话参数；新 tab 作为新
+          // 客户端连入（多客户端并发），其 shim 凭 ot/ow/oi 领取会话。
+          var parent = window.parent;
+          var base = String(parent.location.href).split("#")[0];
+          var sep = base.indexOf("?") >= 0 ? "&" : "?";
+          var url =
+            base + sep + "ot=" + encodeURIComponent(payload.taskId || "") +
+            "&ow=" + encodeURIComponent(payload.workspacePath || "");
+          if (payload.workspaceIdentity) {
+            url += "&oi=" + encodeURIComponent(payload.workspaceIdentity);
+          }
+          parent.open(url, "_blank");
+          return Promise.resolve({ ok: true });
+        };
+      }
+      if (prop === "zcodeGoTakeSessionInitial") {
+        return function () {
+          var q = new URLSearchParams(window.parent.location.search);
+          var ot = q.get("ot");
+          var ow = q.get("ow");
+          var oi = q.get("oi") || undefined;
+          if (!ot || !ow) return Promise.resolve(null);
+          return Promise.resolve({ taskId: ot, workspacePath: ow, workspaceIdentity: oi });
+        };
+      }
       return function () {
         var args = Array.prototype.slice.call(arguments);
         if (/^on[A-Z]/.test(prop) && typeof args[0] === "function") {

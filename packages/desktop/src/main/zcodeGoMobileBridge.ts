@@ -4,10 +4,10 @@
  *
  * 架构：每个远端客户端（手机/浏览器 tab）↔ 桌面一个隐藏桥窗口 P2P。Worker
  * 仅是 answer mailbox（+ QR 路径的 offer 取回，按请求方路由）。配对两级：
- *   - 复制链接/二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——统一短码形
+ *   - 复制链接/二维码：?v=1&t=<token>&p=<secret>&i=<offer_id>——query 路由
  *     态，经 mailbox 取回 offer（每连接多一次信令往返，换取 URL 简洁与
  *     QR/链接同路径；容器页保留 o=/oc= direct 通道作兼容）
- *   - 二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——短码经 mailbox 取回
+ *   - 二维码：?v=1&t=<token>&p=<secret>&i=<offer_id>——短码经 mailbox 取回
  * 首个（primary）桥窗口随配对启动预生成 offer（扫码秒连）；后续客户端的
  * req-offer 到达时按需追加桥窗口（offer 预生成 ~1-8s 后应答）。
  *
@@ -97,6 +97,8 @@ interface Session {
   windows: BridgeWindowEntry[];
   status: MobileBridgeStatus;
   onStatus: (status: MobileBridgeStatus) => void;
+  /** 房间心跳（滑动续期）定时器；teardown/stop 清理。 */
+  roomHeartbeat: NodeJS.Timeout | null;
 }
 
 let activeSession: Session | null = null;
@@ -154,6 +156,7 @@ function anyConnected(session: Session): boolean {
 function teardown(session: Session, reason: string): void {
   if (activeSession !== session) return;
   activeSession = null;
+  if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
   for (const entry of [...session.windows]) destroyEntry(session, entry);
   try {
     session.ws?.close();
@@ -684,7 +687,7 @@ export function startMobileBridgePairing(
   // 短码 URL 在配对开始即可定（token/secret/offerId 均本地生成）——链接与
   // 二维码同时可用；早到的 req-offer 在 primary 窗口排队，offer 预生成完成
   //（≤8s）后即应答。
-  const shortUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${offerId}`;
+  const shortUrl = `${origin}/?v=1&t=${token}&p=${secret}&i=${offerId}`;
   const session: Session = {
     token,
     secret,
@@ -693,6 +696,7 @@ export function startMobileBridgePairing(
     qrUrl: shortUrl,
     ws: null,
     windows: [],
+    roomHeartbeat: null,
     status: { state: "signaling", token, pairingUrl: shortUrl, qrUrl: shortUrl },
     onStatus,
   };
@@ -752,7 +756,11 @@ export function startMobileBridgePairing(
     });
 
     const onBridgeEvent = (_event: unknown, payload: { kind: string; [key: string]: unknown }) => {
-      if (activeSession !== session || !session.windows.includes(entry)) return;
+      // 会话被刷新（stop 保留活连接）后窗口成为" detached"：仅处理 pc-state
+      // （failed → 回收窗口），其余事件随旧会话失效。
+      const detached = activeSession !== session;
+      if (!session.windows.includes(entry)) return;
+      if (detached && payload.kind !== "pc-state") return;
       if (payload.kind === "offer-ready") {
         const offer = payload.offer as { type: string; sdp: string };
         const compressed = typeof payload.compressed === "string" ? payload.compressed : null;
@@ -760,7 +768,7 @@ export function startMobileBridgePairing(
         if (isPrimary) {
           // 链接与二维码统一短码（offer_id 经 mailbox 取回）：URL 简洁、两条
           // 路径完全一致；direct 通道（o=/oc=）容器页保留兼容但不再产出。
-          session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${entry.offerId}`;
+          session.pairingUrl = `${origin}/?v=1&t=${token}&p=${secret}&i=${entry.offerId}`;
           session.qrUrl = session.pairingUrl;
           session.status = {
             ...session.status,
@@ -806,20 +814,20 @@ export function startMobileBridgePairing(
         const state = payload.state as string;
         if (state === "connected" && !entry.connected) {
           entry.connected = true;
-          if (!anyConnected(session) || session.status.state !== "connected") {
+          if (!detached && session.status.state !== "connected") {
             session.status = { ...session.status, state: "connected" };
             emit(session);
           }
         } else if (state === "failed") {
-          if (isPrimary) {
+          if (!detached && isPrimary) {
             // primary 持有 QR/链接指向的 offer，其死亡使后续配对失效——
-            // 整会话报错让用户刷新。
+            // 整会话报错让用户刷新。（detached 窗口只回收自身。）
             teardown(
               session,
               "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
             );
           } else {
-            logger.info("[zcode-go-mobile-bridge] 辅助窗口连接失败，回收", {
+            logger.info("[zcode-go-mobile-bridge] 桥窗口连接失败，回收", {
               token,
               offerId: entry.offerId,
             });
@@ -828,7 +836,7 @@ export function startMobileBridgePairing(
         }
       } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
         entry.connected = true;
-        if (session.status.state !== "connected") {
+        if (!detached && session.status.state !== "connected") {
           session.status = { ...session.status, state: "connected" };
           emit(session);
         }
@@ -934,70 +942,88 @@ export function startMobileBridgePairing(
         teardown(session, `房间登记失败（${registerResponse.status}）`);
         return;
       }
-      const ws = new WebSocket(`${origin.replace(/^http/, "ws")}/api/signal/${token}?role=desktop`);
-      session.ws = ws;
-      ws.onopen = () => {
+      /** 信令连接（可重入）：Worker 部署/DO 重启断开后自动重连。 */
+      const connectSignaling = (): void => {
         if (activeSession !== session) return;
-        // mailbox 注册 capability secret。
-        ws.send(JSON.stringify({ t: "register", p: session.secret }));
-        session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
-        emit(session);
-      };
-      ws.onmessage = (event) => {
-        if (activeSession !== session) return;
-        let message: { t?: string; r?: unknown; i?: unknown; data?: unknown };
-        try {
-          message = JSON.parse(String(event.data)) as {
-            t?: string;
-            r?: unknown;
-            i?: unknown;
-            data?: unknown;
-          };
-        } catch {
-          return;
-        }
-        const requestId = typeof message.r === "string" ? message.r : "";
-        if (message.t === "req-offer" && requestId) {
-          // 客户端凭 secret 请求 offer：优先分配未用 offer 的窗口；没有则
-          // 挂到预生成中的窗口（含按需新开的辅助窗口，offer-ready 后应答）。
-          const ready = session.windows.find((w) => w.offer && !w.offerUsed);
-          if (ready) {
-            ready.pendingRequestIds.push(requestId);
-            answerPendingRequest(ready, ws);
-          } else {
-            let pending = session.windows.find(
-              (w) => !w.offer && w.pendingRequestIds.length === 0,
-            );
-            if (!pending && session.windows.length < 5) {
-              pending = createBridgeWindow(false);
-              logger.info("[zcode-go-mobile-bridge] 追加辅助桥窗口", {
-                token,
-                offerId: pending.offerId,
-                total: session.windows.length,
-              });
-            }
-            pending?.pendingRequestIds.push(requestId);
+        const ws = new WebSocket(`${origin.replace(/^http/, "ws")}/api/signal/${token}?role=desktop`);
+        session.ws = ws;
+        ws.onopen = () => {
+          if (activeSession !== session) return;
+          // mailbox 注册 capability secret。
+          ws.send(JSON.stringify({ t: "register", p: session.secret }));
+          if (session.status.state !== "connected") {
+            session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
+            emit(session);
           }
-        } else if (message.t === "answer") {
-          const offerId = typeof message.i === "string" ? message.i : "";
-          // 多客户端：offer 按请求分配（i 为实际窗口的 offerId）；direct 链接
-          //（o=）的 answer 无 i——落到 primary 窗口。
-          const entry =
-            session.windows.find((w) => offerId && w.offerId === offerId) ??
-            session.windows.find((w) => w.isPrimary);
-          if (!entry || entry.win.isDestroyed()) return;
-          session.status = { ...session.status, state: "connecting" };
-          emit(session);
-          entry.win.webContents.send("zcode-go-bridge-answer", message.data);
-        }
-      };
+          // 房间滑动续期：会话存续期间每 2 分钟探活，二维码长期可扫。
+          if (!session.roomHeartbeat) {
+            session.roomHeartbeat = setInterval(() => {
+              void fetch(`${origin}/api/rooms`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ token }),
+              }).catch(() => {
+                /* 心跳失败不中断会话（既有连接不依赖信令） */
+              });
+            }, 120_000);
+          }
+        };
+        ws.onmessage = (event) => {
+          if (activeSession !== session) return;
+          let message: { t?: string; r?: unknown; i?: unknown; data?: unknown };
+          try {
+            message = JSON.parse(String(event.data)) as {
+              t?: string;
+              r?: unknown;
+              i?: unknown;
+              data?: unknown;
+            };
+          } catch {
+            return;
+          }
+          const requestId = typeof message.r === "string" ? message.r : "";
+          if (message.t === "req-offer" && requestId) {
+            // 客户端凭 secret 请求 offer：优先分配未用 offer 的窗口；没有则
+            // 挂到预生成中的窗口（含按需新开的辅助窗口，offer-ready 后应答）。
+            const ready = session.windows.find((w) => w.offer && !w.offerUsed);
+            if (ready) {
+              ready.pendingRequestIds.push(requestId);
+              answerPendingRequest(ready, ws);
+            } else {
+              let pending = session.windows.find(
+                (w) => !w.offer && w.pendingRequestIds.length === 0,
+              );
+              if (!pending && session.windows.length < 5) {
+                pending = createBridgeWindow(false);
+                logger.info("[zcode-go-mobile-bridge] 追加辅助桥窗口", {
+                  token,
+                  offerId: pending.offerId,
+                  total: session.windows.length,
+                });
+              }
+              pending?.pendingRequestIds.push(requestId);
+            }
+          } else if (message.t === "answer") {
+            const offerId = typeof message.i === "string" ? message.i : "";
+            // 多客户端：offer 按请求分配（i 为实际窗口的 offerId）；direct 链接
+            //（o=）的 answer 无 i——落到 primary 窗口。
+            const entry =
+              session.windows.find((w) => offerId && w.offerId === offerId) ??
+              session.windows.find((w) => w.isPrimary);
+            if (!entry || entry.win.isDestroyed()) return;
+            session.status = { ...session.status, state: "connecting" };
+            emit(session);
+            entry.win.webContents.send("zcode-go-bridge-answer", message.data);
+          }
+        };
         ws.onclose = () => {
           if (activeSession !== session) return;
           // Worker 部署/DO 重启会断信令；已建立的 P2P 连接不依赖信令——
-          // 保留既有连接，仅失去新客户端加入能力（重新配对可恢复）。
+          // 保留既有连接并 3s 后重连信令（新客户端可继续加入）。
           if (anyConnected(session)) {
-            logger.warn("[zcode-go-mobile-bridge] 信令断开（既有连接保留）", { token });
+            logger.warn("[zcode-go-mobile-bridge] 信令断开（既有连接保留，重连信令）", { token });
             session.ws = null;
+            setTimeout(connectSignaling, 3000);
             return;
           }
           teardown(session, "信令连接已断开，请刷新重试");
@@ -1010,6 +1036,8 @@ export function startMobileBridgePairing(
           }
           teardown(session, "信令连接失败");
         };
+      };
+      connectSignaling();
     } catch (error) {
       teardown(session, error instanceof Error ? error.message : String(error));
     }
@@ -1021,7 +1049,22 @@ export function startMobileBridgePairing(
 }
 
 export function stopMobileBridgePairing(): void {
-  if (activeSession) teardown(activeSession, "stopped");
+  if (!activeSession) return;
+  const session = activeSession;
+  activeSession = null;
+  if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
+  // 刷新二维码：已连接客户端的桥窗口保留——preload 侧 rpc/resource 自持
+  // （不依赖 main 会话状态），远端连接继续可用；仅回收未连接窗口与信令。
+  for (const entry of [...session.windows]) {
+    if (!entry.connected) destroyEntry(session, entry);
+  }
+  try {
+    session.ws?.close();
+  } catch {
+    /* 尽力而为 */
+  }
+  session.status = { state: "idle" };
+  session.onStatus({ ...session.status });
 }
 
 export function getMobileBridgeStatus(): MobileBridgeStatus {
