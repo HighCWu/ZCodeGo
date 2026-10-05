@@ -53,3 +53,30 @@ BroadcastChannel 中继）有一个移动端致命缺陷：hub tab 被关闭/被
 但打洞的网络成果会自动复用（NAT 映射存活 + STUN 结果相同）：首个 tab 建链
 1-3s，同浏览器后续 tab 通常亚秒；信令请求量每 tab 增加约 60 条（免费额度内
 忽略不计）。
+
+
+## 信令面定稿：out-of-band offer + minimal return signaling（2026-10-05 评审后）
+
+定义（评审建议的表述，直接作为阶段 2 设计基础）：
+
+- 桌面端在 ICE gathering 完成后生成完整 non-trickle SDP offer，嵌入短期
+  配对 URL。手机本地解出 offer，无需初始信令往返即开始协商。
+- Worker 仅保留为最小回传通道（answer mailbox）：转发手机的完整 answer，
+  不逐条转发 ICE candidate。协议 = REGISTER(room, p) / ANSWER(room, p,
+  answer, offer_id)；ack 由 WebRTC connectionState=connected 充当。
+- 两级 pairing：复制链接 = t+p+完整 offer（direct 最快路径）；二维码 =
+  t+p+offer_id（体积小，扫码后经 mailbox 取 offer——与多 tab 的 req-offer
+  是同一条消息，只维护一套状态机）。
+- 桌面预生成 offer：进入配对 UI 即开始 gathering，扫码/点击到达时 offer
+  已就绪（消除 non-trickle 的桌面侧等待）。
+- 配对 URL 是 capability URL：offer 含双方本地/公网 IP 与 STUN 配置，属
+  敏感短期材料；新鲜度与 srflx 映射寿命绑定（「刷新二维码」= 重新生成
+  offer）。p= 是 capability secret（防抢答信箱），对端身份认证由 DTLS
+  指纹承担。
+- 明确不基于 libp2p WebRTC Direct：不用 STUN early-data / SDP munging /
+  公网 UDP 监听；NAT 穿透仍由标准 ICE/STUN 栈负责（无 TURN，成功率由
+  NAT 类型决定，本方案不改变穿透面）。
+- 风险清单与验收：两端均 non-trickle（手机侧 answer gathering 约 0.5s
+  量级）；总建链时延须 benchmark（信令轮转省下 vs gathering 前置），阶段 2
+  先 A/B 并存两种模式，按 NAT 矩阵（家宽↔Wi-Fi / 家宽↔5G / 公司网↔5G /
+  CGNAT↔CGNAT）实测消息量、offer→connected 时延、成功率后再删旧路径。
