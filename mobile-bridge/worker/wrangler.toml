@@ -8,6 +8,14 @@ routes = [
   { pattern = "zcode-go.aimon.win", custom_domain = true }
 ]
 
+# 房间登记限频（防陌生人刷配额）：每 IP 每分钟 5 次。ratelimit binding 走
+# unsafe 声明（wrangler 4.x 对该 GA 能力的配置面仍标记为 experimental）。
+[[unsafe.bindings]]
+name = "ROOM_CREATE_LIMIT"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
+
 # 信令房间：Durable Objects + WebSocket Hibernation。
 [[durable_objects.bindings]]
 name = "SIGNAL_ROOM"

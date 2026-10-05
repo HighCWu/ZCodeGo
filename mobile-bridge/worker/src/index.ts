@@ -17,6 +17,7 @@ export { SignalRoom };
 
 interface Env {
   SIGNAL_ROOM: DurableObjectNamespace<SignalRoom>;
+  ROOM_CREATE_LIMIT: RateLimit;
 }
 
 const TOKEN_PATTERN = /^[a-z2-9]{6,12}$/;
@@ -34,6 +35,13 @@ export default {
     const path = url.pathname;
 
     if (path === "/api/rooms" && request.method === "POST") {
+      // 每 IP 限频（CF 原生 rate limiting binding，免费额度内）：防陌生人刷配对
+      // 把当天免费配额耗尽导致其他用户不可用（免费计划超额只限流不扣费）。
+      const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const limited = await env.ROOM_CREATE_LIMIT.limit({ key: clientIp });
+      if (!limited.success) {
+        return jsonResponse({ ok: false, error: "rate_limited" }, 429);
+      }
       let token = "";
       try {
         const body = (await request.json()) as { token?: unknown };
