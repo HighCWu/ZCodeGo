@@ -148,6 +148,15 @@ function makePeer() {
   return peer;
 }
 
+function filterCandidates(sdp) {
+  return sdp.split("\r\n").filter(function (line) {
+    if (line.indexOf("a=candidate:") !== 0) return true;
+    if (line.indexOf(" tcptype ") >= 0) return false; // TCP host：浏览器间几乎不生效
+    if (/ [fF][dD][0-9a-fA-F]{2}:/.test(line) && line.indexOf(" typ srflx") < 0) return false; // 链路本地 IPv6
+    return true;
+  }).join("\r\n");
+}
+
 // ── offer 预生成：建 PC → createOffer → 等 ICE gathering complete → 完整 offer ──
 async function pregenerateOffer() {
   try {
@@ -167,7 +176,23 @@ async function pregenerateOffer() {
       setTimeout(resolve, 8000);
     });
     const full = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
-    ipcRenderer.send("zcode-go-bridge-event", { kind: "offer-ready", offer: full });
+    // 二维码容量优化：过滤无效候选（TCP 在浏览器对浏览器场景几乎从不生效；
+    // 链路本地 IPv6 手机侧不可达）+ deflate 压缩——实测 3.0KB SDP 压到
+    // ~1.0KB base64url，完整 offer 得以装进二维码（上限 2953B），扫码路径
+    // 与复制链接同为 direct（省掉 mailbox 取 offer 的一跳）。
+    let compressed = null;
+    try {
+      const filteredSdp = filterCandidates(full.sdp);
+      const json = JSON.stringify({ type: full.type, sdp: filteredSdp });
+      const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+      const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 1) bin += String.fromCharCode(buf[i]);
+      compressed = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    } catch (e) {
+      compressed = null; // 压缩失败回退 mailbox 路径（二维码只带 offer_id）
+    }
+    ipcRenderer.send("zcode-go-bridge-event", { kind: "offer-ready", offer: full, compressed });
   } catch (error) {
     ipcRenderer.send("zcode-go-bridge-event", { kind: "offer-failed", error: String(error) });
   }
@@ -292,10 +317,16 @@ export function startMobileBridgePairing(
     if (activeSession !== session) return;
     if (payload.kind === "offer-ready") {
       const offer = payload.offer as { type: string; sdp: string };
+      const compressed = typeof payload.compressed === "string" ? payload.compressed : null;
       session.offer = offer;
       // 链接形态（direct 最快路径）：完整 offer base64url 进 hash。
       const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
       session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&o=${encoded}`;
+      // 二维码：压缩后体积 ~1KB（候选过滤+deflate，实测 4.2KB→1.1KB），低于
+      // QR 字节模式上限（2953B）——扫码路径同为 direct；压缩失败回退 offer_id。
+      session.qrUrl = compressed
+        ? `${origin}/#v=1&t=${token}&p=${secret}&oc=${compressed}`
+        : `${origin}/#v=1&t=${token}&p=${secret}&i=${session.offerId}`;
       session.status = {
         ...session.status,
         state: "waiting-mobile",

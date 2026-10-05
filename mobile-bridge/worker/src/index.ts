@@ -189,8 +189,9 @@ function containerPage(origin: string): string {
   var TOKEN = get("t");
   var SECRET = get("p");
   var OFFER_B64 = get("o");
+  var OFFER_COMPRESSED = get("oc");
   var OFFER_ID = get("i");
-  var MODE = OFFER_B64 ? "direct" : (OFFER_ID ? "mailbox" : "legacy");
+  var MODE = OFFER_B64 ? "direct" : (OFFER_COMPRESSED ? "direct-compressed" : (OFFER_ID ? "mailbox" : "legacy"));
 
   var STAGE = "boot";
   function setStage(x) { STAGE = x; $("meta").textContent = T.stage[x] || x; }
@@ -382,16 +383,29 @@ function containerPage(origin: string): string {
     setStatus(T.connecting);
     iceTimer = setTimeout(function () { if (!done) { cleanup(); fail(T.p2pFailed); } }, ICE_TIMEOUT_MS);
 
-    if (MODE === "direct") {
+    if (MODE === "direct" || MODE === "direct-compressed") {
       // 最快路径：URL 里的完整 offer，本地解出即刻协商；answer 走 mailbox。
-      try {
-        var offerJson = atob(OFFER_B64.replace(/-/g, "+").replace(/_/g, "/"));
-        var offer = JSON.parse(offerJson);
-        connectSignaling();
-        void negotiate(offer).catch(function () { cleanup(); fail(T.p2pFailed); });
-      } catch (e) {
-        fail(T.badSecret);
-      }
+      // oc= 为压缩形态（候选过滤 + deflate-raw + base64url，桌面端产出），
+      // 二维码与复制链接同为 direct；DecompressionStream 为原生 API，无需库。
+      void (async function () {
+        try {
+          var offer;
+          if (MODE === "direct-compressed") {
+            var bin = atob(OFFER_COMPRESSED.replace(/-/g, "+").replace(/_/g, "/"));
+            var bytes = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+            var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+            var json = await new Response(stream).text();
+            offer = JSON.parse(json);
+          } else {
+            offer = JSON.parse(atob(OFFER_B64.replace(/-/g, "+").replace(/_/g, "/")));
+          }
+          connectSignaling();
+          await negotiate(offer);
+        } catch (e) {
+          fail(T.p2pFailed);
+        }
+      })();
       return;
     }
     if (MODE === "mailbox") {
