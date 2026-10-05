@@ -316,7 +316,7 @@ function containerPage(origin: string): string {
         var text =
           "界面加载停滞（诊断）：状态已送达 " + (dbg.statesDelivered || 0) +
           "，端口 " + (dbg.portOpens || 0) +
-          "，控制触发 " + (dbg.controlSeen || 0);
+          "，控制触发 " + (dbg.controlSeen || 0) + "，端口重取 " + (dbg.portRequests || 0);
         var banner = document.createElement("div");
         banner.textContent = text;
         banner.style.cssText =
@@ -632,7 +632,7 @@ const SHIM_JS = String.raw`
   // 应用发出 startup-control（模块求值完毕、监听器已注册的铁证）时立即补投。
   var deferredDelivery = [];
   var bootPortMessage = null;
-  window.__zcodeShimDebug = { portOpens: 0, deferred: 0, flushed: 0, controlSeen: 0, statesDelivered: 0 };
+  window.__zcodeShimDebug = { portOpens: 0, portRequests: 0, deferred: 0, flushed: 0, controlSeen: 0, statesDelivered: 0 };
   // 窗口消息审计（诊断用）：应用视角收到的一切带 type 消息。
   window.__winMsgLog = [];
   window.addEventListener("message", function (event) {
@@ -822,6 +822,13 @@ const SHIM_JS = String.raw`
     if (event.data.type === WIN_CHANNELS.DatabaseStartupControl) {
       window.__zcodeShimDebug.controlSeen += 1;
       deliverBootPort();
+      // WebKit（iOS）会丢弃通道打开早期到达的 DC 消息——冲刷的 port-open
+      // 可能整体丢失（真机实测：状态送达而端口为 0）。应用发出控制消息即
+      // 证明存活，此时仍未见过端口则向桌面按需重取（此时通道必然畅通）。
+      if (!window.__zcodeShimDebug.portOpens) {
+        window.__zcodeShimDebug.portRequests += 1;
+        rpcSend({ kind: "request-port" });
+      }
       rpcSend({ kind: "startup-control", control: event.data.control });
     } else if (
       event.data.type === WIN_CHANNELS.ScopedServicePortReady &&

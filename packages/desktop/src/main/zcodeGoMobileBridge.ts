@@ -371,6 +371,10 @@ var portStreams = new Map();
 var rpcOutbox = [];
 var portSeq = 0;
 var adoptedPorts = typeof WeakSet === "function" ? new WeakSet() : null;
+// 已收养的 service 端口信息：WebKit（iOS）会丢弃通道打开早期（监听器未就绪
+// 时）到达的 DataChannel 消息——冲刷的 port-open 可能整体丢失。远端 shim
+// 凭 request-port 按需重取（同 streamId 重发，端口本体仍在 portStreams）。
+var bootPortInfo = null;
 
 function bytesToB64(u8) {
   var out = "";
@@ -401,13 +405,14 @@ function decodePortData(envelope) {
   return envelope.value;
 }
 
-function adoptPort(port, payload, portType) {
+function adoptPort(port, payload, portType, info) {
   if (adoptedPorts) {
     if (adoptedPorts.has(port)) return;
     adoptedPorts.add(port);
   }
   var streamId = ++portSeq;
   portStreams.set(streamId, port);
+  if (info) info.streamId = streamId;
   port.onmessage = function (e) {
     rpcReply({ kind: "port-msg", streamId: streamId, data: encodePortData(e.data) });
   };
@@ -426,7 +431,8 @@ window.addEventListener("message", function (event) {
     var port = event.ports && event.ports[0];
     if (!port) return;
     if (type === WIN_CHANNELS.ServicePort) {
-      adoptPort(port, { databaseStartupId: event.data.databaseStartupId }, "service");
+      bootPortInfo = { streamId: null, payload: { databaseStartupId: event.data.databaseStartupId } };
+      adoptPort(port, bootPortInfo.payload, "service", bootPortInfo);
     } else {
       adoptPort(
         port,
@@ -529,6 +535,21 @@ async function handleRpcMessage(raw) {
       rpcReply({ kind: "sub-ok", id: msg.id });
     } catch (error2) {
       rpcReply({ kind: "sub-error", id: msg.id, error: String((error2 && error2.message) || error2) });
+    }
+    return;
+  }
+  if (msg.kind === "request-port") {
+    // 远端 shim 报告从未收到 port-open（WebKit 丢弃早期 DC 消息）——重发。
+    // 同 streamId：端口本体一直在 portStreams，重发只影响远端建仿真端口。
+    if (bootPortInfo && bootPortInfo.streamId) {
+      rpcReply({
+        kind: "port-open",
+        streamId: bootPortInfo.streamId,
+        portType: "service",
+        payload: bootPortInfo.payload,
+      });
+    } else {
+      rpcReply({ kind: "no-port", reason: bootPortInfo ? "adopting" : "not-attached" });
     }
     return;
   }
