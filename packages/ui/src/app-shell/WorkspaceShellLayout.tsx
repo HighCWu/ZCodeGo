@@ -406,6 +406,18 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   const isSidebarPanelVisible = isSidebarVisible;
   // 移动视口：侧栏不再是内联分栏面板，而是覆盖式抽屉（官方 remote 形态）。
   const isMobileViewport = useIsMobileViewport();
+  // 移动端首屏 = 项目/任务选择页（官方 remote 语义，initialWebRemoteControl
+  // MobileNavigationIntent 对应行为）：无活跃会话时停留在全屏列表；一旦有
+  // 活跃会话（含"在新窗口打开"领取的初始会话）自动收起进入对话。仅自动
+  // 一次，用户手动开合不再干预。
+  const mobileAutoEnteredConversationRef = useRef(false);
+  useEffect(() => {
+    if (!isMobileViewport || mobileAutoEnteredConversationRef.current) return;
+    if (activeTaskId) {
+      mobileAutoEnteredConversationRef.current = true;
+      handleToggleSidebar();
+    }
+  }, [isMobileViewport, activeTaskId, handleToggleSidebar]);
   const {
     panelRef: terminalPanelRef,
     panelElementRef: terminalPanelElementRef,
@@ -978,13 +990,20 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
       workspaceTabs,
     ],
   );
-  // 移动抽屉形态下从侧栏选中任务后自动收起，回到对话主界面。
+  // 移动抽屉形态下从侧栏选中/新建任务后自动收起，回到对话主界面。
   const handleSelectTaskFromSidebar = useCallback(
     (...args: Parameters<typeof handleSelectTaskInChat>) => {
       if (isMobileViewport) handleToggleSidebar();
       handleSelectTaskInChat(...args);
     },
     [handleSelectTaskInChat, handleToggleSidebar, isMobileViewport],
+  );
+  const handleCreateTaskFromSidebar = useCallback(
+    (...args: Parameters<typeof handleCreateTaskInChat>) => {
+      if (isMobileViewport) handleToggleSidebar();
+      handleCreateTaskInChat(...args);
+    },
+    [handleCreateTaskInChat, handleToggleSidebar, isMobileViewport],
   );
   // 侧栏运行行：与 composer 徽标
   // 同一跳转——先选中会话，再开 run pane。没有 toolCallId 的 run（不该有）只选中会话。
@@ -1554,10 +1573,10 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           className={cn(
             isMobileViewport
               ? cn(
-                  "fixed inset-y-0 left-0 z-50 flex-none overflow-hidden shadow-2xl transition-transform duration-200 ease-out",
+                  "fixed inset-y-0 left-0 z-50 flex-none overflow-hidden transition-transform duration-200 ease-out",
                   isSidebarPanelVisible
-                    ? "w-[85vw] max-w-[320px] translate-x-0"
-                    : "w-[85vw] max-w-[320px] -translate-x-full pointer-events-none",
+                    ? "w-full translate-x-0"
+                    : "w-full -translate-x-full pointer-events-none",
                 )
               : cn(
                   "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
@@ -1594,8 +1613,8 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     onOpenCodeViewer={handleOpenCodeViewer}
                     onOpenBrowserUrl={handleOpenBrowserUrl}
                     fileTreeOpenRequest={fileTreeOpenRequest}
-                    onCreateTask={handleCreateTaskInChat}
-                    onCreateConversationTask={onCreateConversationTask ?? handleCreateTaskInChat}
+                    onCreateTask={handleCreateTaskFromSidebar}
+                    onCreateConversationTask={onCreateConversationTask ?? handleCreateTaskFromSidebar}
                     onOpenFolderFromWorkspaceMenu={onOpenFolderFromWorkspaceMenu}
                     onOpenRemoteWorkspace={onOpenRemoteWorkspace}
                     theme={theme}
