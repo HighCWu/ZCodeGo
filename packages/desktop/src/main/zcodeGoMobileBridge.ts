@@ -1,14 +1,13 @@
 /**
  * zcode-go 移动端远程控制桥（阶段 2/3：out-of-band offer + mailbox + 资源通道
- * + preload API 透传）。
+ * + preload API 透传 + 多客户端并发）。
  *
- * 架构：手机（CF Worker 容器页）↔ 桌面隐藏桥窗口 P2P。Worker 仅是 answer
- * mailbox（+ QR 路径的 offer 取回）。配对两级：
+ * 架构：每个远端客户端（手机/浏览器 tab）↔ 桌面一个隐藏桥窗口 P2P。Worker
+ * 仅是 answer mailbox（+ QR 路径的 offer 取回，按请求方路由）。配对两级：
  *   - 复制链接：#v=1&t=<token>&p=<secret>&o=<完整 offer（non-trickle，base64url）>
- *     ——手机本地解 offer 即刻协商，全程仅 answer 一条信令
  *   - 二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——短码经 mailbox 取回
- *     （压缩 offer 进 QR 实测过密相机扫不出；oc= 通道容器页保留）
- * 旧 trickle 路径保留（容器页 URL 无 v= 参数时走 legacy），A/B 实测后移除。
+ * 首个（primary）桥窗口随配对启动预生成 offer（扫码秒连）；后续客户端的
+ * req-offer 到达时按需追加桥窗口（offer 预生成 ~1-8s 后应答）。
  *
  * 桥窗口（contextIsolation:true + sandbox:false + 自定义 preload，全部逻辑在
  * preload 隔离世界——node/DOM 俱全）职责：
@@ -16,7 +15,9 @@
  *      与三条 DataChannel（control/rpc/resource）；
  *   2. resource 通道 fs 直读桌面 renderer 产物分片回传（版本天然对齐）；
  *   3. 求值真实 preload bundle（伪造 contextBridge 捕获 window.zcode 原生
- *      API——映射表零维护），rpc 通道按方法名透传 invoke/订阅给远端 shim。
+ *      API——映射表零维护），rpc 通道按方法名透传 invoke/订阅给远端 shim；
+ *   4. MessagePort 仿真：真 preload 转发到本 window 的 ServicePort/启动状态
+ *      消息被截获，端口本地收养、消息经 rpc 双向转发（二进制帧 base64 标签）。
  * 注意 RTCSessionDescription/RTCIceCandidate 跨 ipcRenderer 序列化会丢成
  * 空对象——桥内一律先解构为普通对象。
  *
@@ -57,7 +58,7 @@ const PRELOAD_BUNDLE_PATH = join(
 
 export interface MobileBridgeStatus {
   state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
-  /** 复制链接（携带完整 offer，direct 最快路径）。 */
+  /** 复制链接（携带完整 offer，direct 最快路径；primary 窗口产出）。 */
   pairingUrl?: string;
   /** 二维码内容（offer_id 短码，经 mailbox 取回；相机可靠扫描优先）。 */
   qrUrl?: string;
@@ -70,20 +71,30 @@ interface MobileBridgeLogger {
   warn(...args: unknown[]): void;
 }
 
+/** 一个远端客户端 ↔ 一个桥窗口。 */
+interface BridgeWindowEntry {
+  offerId: string;
+  win: BrowserWindow;
+  isPrimary: boolean;
+  offer: { type: string; sdp: string } | null;
+  offerUsed: boolean;
+  connected: boolean;
+  attachTimer: NodeJS.Timeout | null;
+  /** 挂起的 req-offer 请求标记（该窗口 offer 就绪后应答）。 */
+  pendingRequestIds: string[];
+}
+
 interface Session {
   token: string;
   secret: string;
+  /** primary 窗口的 offerId（QR/链接指向它）。 */
   offerId: string;
-  offer: { type: string; sdp: string } | null;
   pairingUrl: string;
   qrUrl: string;
   ws: WebSocket | null;
-  bridgeWindow: BrowserWindow | null;
+  windows: BridgeWindowEntry[];
   status: MobileBridgeStatus;
   onStatus: (status: MobileBridgeStatus) => void;
-  /** host 挂接（ServicePort + startup relay）是否完成。 */
-  hostAttached: boolean;
-  hostAttachTimer: NodeJS.Timeout | null;
 }
 
 let activeSession: Session | null = null;
@@ -122,17 +133,30 @@ function emit(session: Session): void {
   session.onStatus({ ...session.status });
 }
 
+function destroyEntry(session: Session, entry: BridgeWindowEntry): void {
+  if (session.windows.includes(entry)) {
+    session.windows = session.windows.filter((w) => w !== entry);
+  }
+  if (entry.attachTimer) clearTimeout(entry.attachTimer);
+  try {
+    if (!entry.win.isDestroyed()) entry.win.destroy();
+  } catch {
+    /* 尽力而为 */
+  }
+}
+
+function anyConnected(session: Session): boolean {
+  return session.windows.some((w) => w.connected);
+}
+
 function teardown(session: Session, reason: string): void {
   if (activeSession !== session) return;
   activeSession = null;
-  if (session.hostAttachTimer) clearTimeout(session.hostAttachTimer);
+  for (const entry of [...session.windows]) destroyEntry(session, entry);
   try {
     session.ws?.close();
   } catch {
     /* 尽力而为 */
-  }
-  if (session.bridgeWindow && !session.bridgeWindow.isDestroyed()) {
-    session.bridgeWindow.destroy();
   }
   // 用户主动停止 → idle；其余 teardown 原因都值得在对话框里露出。
   const stopped = reason === "stopped";
@@ -168,7 +192,7 @@ function makePeer(iceServers) {
     channels[label] = dc;
     dc.onopen = function () {
       // rpc 打开时冲刷缓冲：host 挂接（ServicePort/启动状态）发生在配对开始，
-      // 早于手机连接——那时的 rpcReply 会因通道未开而入队等待。
+      // 早于远端连接——那时的 rpcReply 会因通道未开而入队等待。
       if (label === "rpc") flushRpcOutbox();
       ipcRenderer.send("zcode-go-bridge-event", { kind: "channel-open", label: label });
     };
@@ -203,7 +227,7 @@ function filterCandidates(sdp) {
       if (line.indexOf("a=candidate:") !== 0) return true;
       if (line.indexOf(" tcptype ") >= 0) return false; // TCP host：浏览器间几乎不生效
       if (/ [fF][dD][0-9a-fA-F]{2}:/.test(line) && line.indexOf(" typ srflx") < 0) {
-        return false; // 链路本地 IPv6：手机侧不可达
+        return false; // 链路本地 IPv6：远端不可达
       }
       return true;
     })
@@ -344,6 +368,7 @@ var WIN_CHANNELS = {
 var portStreams = new Map();
 var rpcOutbox = [];
 var portSeq = 0;
+var adoptedPorts = typeof WeakSet === "function" ? new WeakSet() : null;
 
 function bytesToB64(u8) {
   var out = "";
@@ -374,10 +399,7 @@ function decodePortData(envelope) {
   return envelope.value;
 }
 
-var adoptedPorts = typeof WeakSet === "function" ? new WeakSet() : null;
 function adoptPort(port, payload, portType) {
-  // 直连 ipcRenderer 与 window 消息两条路可能对同一物理端口各触发一次：
-  // 首个收养者独占（onmessage 覆盖会撕裂数据流）。
   if (adoptedPorts) {
     if (adoptedPorts.has(port)) return;
     adoptedPorts.add(port);
@@ -416,35 +438,10 @@ window.addEventListener("message", function (event) {
     }
   }
 });
+// 注意：不直接 ipcRenderer.on 订阅 ServicePort/启动状态——真 preload 的尾部
+// 监听会把两者转成本 window 的 postMessage（上方截获已覆盖）；双路订阅会对
+// 同一端口双重收养（transfer 后对象不同，WeakSet 去重失效）。
 
-// 直接订阅启动面（不经求值 bundle 的尾部注册——实测其 ipcRenderer 监听
-// 在本桥窗口不可靠，改为双保险直连）：main 经 webContents.send/postMessage
-// 投递的 DatabaseStartupState 与 ServicePort 端口在此直接接收。
-ipcRenderer.on(WIN_CHANNELS.DatabaseStartupState, function (_event, raw) {
-  rpcReply({ kind: "win-msg", winType: "DatabaseStartupState", data: raw });
-});
-ipcRenderer.on(WIN_CHANNELS.ServicePort, function (event, payload) {
-  var port = event.ports && event.ports[0];
-  if (!port) return;
-  var parsed = payload && typeof payload === "object" ? payload : {};
-  adoptPort(port, { databaseStartupId: parsed.databaseStartupId }, "service");
-});
-ipcRenderer.on(WIN_CHANNELS.ScopedServicePort, function (event, payload) {
-  var scopedPort = event.ports && event.ports[0];
-  if (!scopedPort) return;
-  var scopedPayload = payload && typeof payload === "object" ? payload : {};
-  adoptPort(
-    scopedPort,
-    {
-      attachmentId: scopedPayload.attachmentId,
-      sessionId: scopedPayload.sessionId,
-      target: scopedPayload.target,
-    },
-    "scoped",
-  );
-});
-
-// ── rpc 通道：远端 shim 按方法名透传 invoke/事件订阅 ──
 function rpcReply(payload) {
   var text;
   try {
@@ -454,7 +451,7 @@ function rpcReply(payload) {
   }
   var dc = channels.rpc;
   if (!dc || dc.readyState !== "open") {
-    // 手机尚未连接：缓冲（上限防泄漏），rpc 通道 open 时冲刷。
+    // 远端尚未连接：缓冲（上限防泄漏），rpc 通道 open 时冲刷。
     if (rpcOutbox.length < 2000) rpcOutbox.push(text);
     return;
   }
@@ -475,6 +472,7 @@ function flushRpcOutbox() {
   }
 }
 
+// ── rpc 通道：远端 shim 按方法名透传 invoke/事件订阅 ──
 async function handleRpcMessage(raw) {
   var msg;
   try {
@@ -556,7 +554,7 @@ async function handleRpcMessage(raw) {
   }
 }
 
-// ── resource 通道：手机请求桌面 renderer 产物（白名单在 rendererRoot 内）──
+// ── resource 通道：远端请求桌面 renderer 产物（白名单在 rendererRoot 内）──
 var MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -641,11 +639,17 @@ function writeBridgeWindowFiles(): { htmlPath: string; preloadPath: string } {
   return { htmlPath, preloadPath };
 }
 
+export interface MobileBridgeHostAttach {
+  /** 挂接现有 host（ServicePort + startup relay）到桥窗口，由 app 侧提供。 */
+  attach: (win: BrowserWindow) => boolean;
+  /** 设备标识（additionalArguments 透传给 preload 的 --device-id）。 */
+  deviceMid: string;
+}
+
 export function startMobileBridgePairing(
   logger: MobileBridgeLogger,
   onStatus: (status: MobileBridgeStatus) => void,
-  /** 挂接现有 host（ServicePort + startup relay）到桥窗口，由 app 侧提供。 */
-  attachHost?: (win: BrowserWindow) => boolean,
+  host?: MobileBridgeHostAttach,
 ): MobileBridgeStatus {
   if (activeSession) {
     return { ...activeSession.status };
@@ -653,225 +657,323 @@ export function startMobileBridgePairing(
   const origin = resolveSignalingOrigin();
   const token = generateToken();
   const secret = randomBytes(16).toString("hex");
-  const offerId = randomBytes(6).toString("hex");
   const session: Session = {
     token,
     secret,
-    offerId,
-    offer: null,
+    offerId: randomBytes(6).toString("hex"),
     pairingUrl: "",
-    qrUrl: `${origin}/#v=1&t=${token}&p=${secret}&i=${offerId}`,
+    qrUrl: `${origin}/#v=1&t=${token}&p=${secret}`,
     ws: null,
-    bridgeWindow: null,
+    windows: [],
     status: { state: "signaling", token },
     onStatus,
-    hostAttached: false,
-    hostAttachTimer: null,
   };
   activeSession = session;
 
-  const { htmlPath, preloadPath } = writeBridgeWindowFiles();
-  session.bridgeWindow = new BrowserWindow({
-    show: false,
-    skipTaskbar: true,
-    webPreferences: {
-      // 全部桥逻辑在 preload 隔离世界（node/DOM 俱全）；真实 preload 的
-      // contextBridge 也只有在此形态下才能被求值捕获。
-      preload: preloadPath,
-      contextIsolation: true,
-      sandbox: false,
-      nodeIntegration: false,
-      // 隐藏窗口会被节流（计时器暂停会拖慢 8s gathering 兜底），关掉。
-      backgroundThrottling: false,
-    },
-  });
-  const bridgeWindow = session.bridgeWindow;
-  // 桥窗口 preload 的 console/异常唯一可见出口（隐藏窗口，否则静默）。
-  bridgeWindow.webContents.on("console-message", (_event, level, message) => {
-    if (level >= 2) logger.warn("[zcode-go-bridge-page]", { level, message: message.slice(0, 300) });
-  });
-  bridgeWindow.webContents.on("render-process-gone", (_event, details) => {
-    logger.warn("[zcode-go-mobile-bridge] 桥渲染进程异常退出", { token, reason: details.reason });
-  });
-
-  const onBridgeEvent = (_event: unknown, payload: { kind: string; [key: string]: unknown }) => {
-    if (activeSession !== session) return;
-    if (payload.kind === "offer-ready") {
-      const offer = payload.offer as { type: string; sdp: string };
-      const compressed = typeof payload.compressed === "string" ? payload.compressed : null;
-      clearTimeout(readinessWatchdog);
-      session.offer = offer;
-      // 链接形态（direct 最快路径）：完整 offer base64url 进 hash。
-      const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
-      session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&o=${encoded}`;
-      // 二维码：短码形态（offer_id 经 mailbox 取回）。压缩 offer 进二维码
-      // （oc=，~1.0KB）虽低于 QR 字节上限，但 ~117 模块在对话框尺寸下过密、
-      // 相机扫不出（真机实测）——短码 ~95B（5px+/模块）可靠秒扫，代价仅
-      // 一次信令往返（desktop WS 在线，DO 即时转发）。复制链接仍为 o= direct。
-      session.qrUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${session.offerId}`;
-      session.status = {
-        ...session.status,
-        state: "waiting-mobile",
-        pairingUrl: session.pairingUrl,
-        qrUrl: session.qrUrl,
-      };
-      emit(session);
-      logger.info("[zcode-go-mobile-bridge] offer 预生成完成", {
-        token,
-        sdpBytes: offer.sdp.length,
-        compressedBytes: compressed ? compressed.length : null,
-      });
-    } else if (payload.kind === "preload-eval-warning") {
-      logger.warn("[zcode-go-mobile-bridge] preload 求值部分失败（尾部监听器可能缺失）", {
-        token,
-        error: String(payload.error),
-      });
-    } else if (payload.kind === "preload-capture-failed") {
-      logger.warn("[zcode-go-mobile-bridge] preload API 捕获失败（rpc 通道不可用）", {
-        token,
-        error: String(payload.error),
-      });
-    } else if (payload.kind === "offer-failed") {
-      teardown(session, `offer 预生成失败：${String(payload.error)}`);
-    } else if (payload.kind === "req-offer-received") {
-      // QR 路径应答：经信令 WS 推预生成的 offer。
-      if (session.offer && session.ws?.readyState === WebSocket.OPEN) {
-        session.ws.send(JSON.stringify({ t: "offer", i: session.offerId, data: session.offer }));
-      }
-    } else if (payload.kind === "pc-state") {
-      const state = payload.state as string;
-      if (state === "connected") {
-        session.status = { ...session.status, state: "connected" };
-        emit(session);
-      } else if (state === "failed") {
-        teardown(
-          session,
-          "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
-        );
-      }
-    } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
-      session.status = { ...session.status, state: "connected" };
-      emit(session);
-    } else {
-      // 未知桥事件统一记录（诊断透传：TEST 探针/未来新增事件不静默）。
-      logger.info("[zcode-go-mobile-bridge] 桥事件", {
-        token,
-        kind: payload.kind,
-        detail: JSON.stringify(payload).slice(0, 200),
-      });
+  /** 用窗口应答一个挂起的 req-offer（offer 就绪时调用）。 */
+  const answerPendingRequest = (entry: BridgeWindowEntry, ws: WebSocket): void => {
+    if (!entry.offer || entry.offerUsed) return;
+    const requestId = entry.pendingRequestIds.shift();
+    if (!requestId) return;
+    entry.offerUsed = true;
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ t: "offer", r: requestId, i: entry.offerId, data: entry.offer }));
     }
-  };
-  ipcMain.on("zcode-go-bridge-event", onBridgeEvent);
-
-  const sendToBridge = (channel: string, data: unknown): void => {
-    if (activeSession !== session || !bridgeWindow || bridgeWindow.isDestroyed()) return;
-    bridgeWindow.webContents.send(channel, data);
+    logger.info("[zcode-go-mobile-bridge] offer 已分配", { token, offerId: entry.offerId });
   };
 
-  bridgeWindow.webContents.once("did-finish-load", () => {
+  const createBridgeWindow = (isPrimary: boolean): BridgeWindowEntry => {
+    const offerId = isPrimary ? session.offerId : randomBytes(6).toString("hex");
+    const { htmlPath, preloadPath } = writeBridgeWindowFiles();
+    const win = new BrowserWindow({
+      show: false,
+      skipTaskbar: true,
+      webPreferences: {
+        // 全部桥逻辑在 preload 隔离世界（node/DOM 俱全）；真实 preload 的
+        // contextBridge 也只有在此形态下才能被求值捕获。
+        preload: preloadPath,
+        contextIsolation: true,
+        sandbox: false,
+        nodeIntegration: false,
+        // 真实 preload 从命令行参数解析 --device-id（渲染前同步读取）。
+        additionalArguments: ["--device-id=" + (host?.deviceMid ?? "")],
+        // 隐藏窗口会被节流（计时器暂停会拖慢 8s gathering 兜底），关掉。
+        backgroundThrottling: false,
+      },
+    });
+    const entry: BridgeWindowEntry = {
+      offerId,
+      win,
+      isPrimary,
+      offer: null,
+      offerUsed: false,
+      connected: false,
+      attachTimer: null,
+      pendingRequestIds: [],
+    };
+    session.windows.push(entry);
+    // 桥窗口 preload 的 console/异常唯一可见出口（隐藏窗口，否则静默）。
+    win.webContents.on("console-message", (_event, level, message) => {
+      if (level >= 2) {
+        logger.warn("[zcode-go-bridge-page]", { token, level, message: message.slice(0, 300) });
+      }
+    });
+    win.webContents.on("render-process-gone", (_event, details) => {
+      logger.warn("[zcode-go-mobile-bridge] 桥渲染进程异常退出", { token, reason: details.reason });
+      if (activeSession === session) destroyEntry(session, entry);
+    });
+
+    const onBridgeEvent = (_event: unknown, payload: { kind: string; [key: string]: unknown }) => {
+      if (activeSession !== session || !session.windows.includes(entry)) return;
+      if (payload.kind === "offer-ready") {
+        const offer = payload.offer as { type: string; sdp: string };
+        const compressed = typeof payload.compressed === "string" ? payload.compressed : null;
+        entry.offer = offer;
+        if (isPrimary) {
+          // 链接形态（direct 最快路径）：完整 offer base64url 进 hash。
+          const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
+          session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&o=${encoded}`;
+          // 二维码：短码（offer_id 经 mailbox 取回，相机可靠扫描优先）。
+          session.qrUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${entry.offerId}`;
+          session.status = {
+            ...session.status,
+            state: "waiting-mobile",
+            pairingUrl: session.pairingUrl,
+            qrUrl: session.qrUrl,
+          };
+          emit(session);
+        }
+        logger.info("[zcode-go-mobile-bridge] offer 预生成完成", {
+          token,
+          offerId: entry.offerId,
+          primary: isPrimary,
+          sdpBytes: offer.sdp.length,
+          compressedBytes: compressed ? compressed.length : null,
+        });
+        // 有挂起的客户端请求则立刻应答。
+        if (session.ws?.readyState === WebSocket.OPEN) {
+          answerPendingRequest(entry, session.ws);
+        }
+      } else if (payload.kind === "preload-eval-warning") {
+        logger.warn("[zcode-go-mobile-bridge] preload 求值部分失败（尾部监听器可能缺失）", {
+          token,
+          error: String(payload.error),
+        });
+      } else if (payload.kind === "preload-capture-failed") {
+        logger.warn("[zcode-go-mobile-bridge] preload API 捕获失败（rpc 通道不可用）", {
+          token,
+          error: String(payload.error),
+        });
+      } else if (payload.kind === "offer-failed") {
+        logger.warn("[zcode-go-mobile-bridge] offer 预生成失败", {
+          token,
+          offerId: entry.offerId,
+          error: String(payload.error),
+        });
+      } else if (payload.kind === "req-offer-received") {
+        // mailbox req-offer 的应答由 main 直接推（offer 已在手中）。
+        if (session.ws?.readyState === WebSocket.OPEN) {
+          answerPendingRequest(entry, session.ws);
+        }
+      } else if (payload.kind === "pc-state") {
+        const state = payload.state as string;
+        if (state === "connected" && !entry.connected) {
+          entry.connected = true;
+          if (!anyConnected(session) || session.status.state !== "connected") {
+            session.status = { ...session.status, state: "connected" };
+            emit(session);
+          }
+        } else if (state === "failed") {
+          if (isPrimary) {
+            // primary 持有 QR/链接指向的 offer，其死亡使后续配对失效——
+            // 整会话报错让用户刷新。
+            teardown(
+              session,
+              "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
+            );
+          } else {
+            logger.info("[zcode-go-mobile-bridge] 辅助窗口连接失败，回收", {
+              token,
+              offerId: entry.offerId,
+            });
+            destroyEntry(session, entry);
+          }
+        }
+      } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
+        entry.connected = true;
+        if (session.status.state !== "connected") {
+          session.status = { ...session.status, state: "connected" };
+          emit(session);
+        }
+      } else if (payload.kind === "channel-closed") {
+        entry.connected = false;
+      } else {
+        logger.info("[zcode-go-mobile-bridge] 桥事件", {
+          token,
+          offerId: entry.offerId,
+          kind: payload.kind,
+          detail: JSON.stringify(payload).slice(0, 200),
+        });
+      }
+    };
+    ipcMain.on("zcode-go-bridge-event", onBridgeEvent);
+
     // 挂接现有 host：远端 UI 的 boot 门禁需要 ServicePort（服务层数据通道）
     // 与 DatabaseStartupState 事件——两者都只投递给走 createWindow 生命周期
     // 的窗口，桥窗口须手动补挂（preload 的监听器已随页面加载就位）。
-    if (attachHost) {
-      let attempts = 0;
-      const tryAttach = (): void => {
-        if (activeSession !== session || session.hostAttached) return;
-        attempts += 1;
-        let attached = false;
-        try {
-          attached = attachHost(bridgeWindow);
-        } catch (error) {
-          logger.warn("[zcode-go-mobile-bridge] host 挂接异常", {
-            token,
-            error: String(error),
-          });
-        }
-        if (attached) {
-          session.hostAttached = true;
-          logger.info("[zcode-go-mobile-bridge] host 已挂接桥窗口", { token });
-          return;
-        }
-        if (attempts >= 30) {
-          logger.warn("[zcode-go-mobile-bridge] host 未就绪，远端界面将卡在启动门禁", {
-            token,
-          });
-          return;
-        }
-        session.hostAttachTimer = setTimeout(tryAttach, 1000);
-      };
-      tryAttach();
-    }
-    void (async () => {
-      try {
-        const registerResponse = await fetch(`${origin}/api/rooms`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
-        if (!registerResponse.ok) {
-          teardown(session, `房间登记失败（${registerResponse.status}）`);
-          return;
-        }
-        const ws = new WebSocket(`${origin.replace(/^http/, "ws")}/api/signal/${token}?role=desktop`);
-        session.ws = ws;
-        ws.onopen = () => {
-          if (activeSession !== session) return;
-          // mailbox 注册 capability secret。
-          ws.send(JSON.stringify({ t: "register", p: session.secret }));
-          session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
-          emit(session);
-        };
-        ws.onmessage = (event) => {
-          if (activeSession !== session) return;
-          let message: { t?: string; i?: unknown; data?: unknown };
+    const attachHost = host?.attach;
+    win.webContents.once("did-finish-load", () => {
+      if (attachHost) {
+        let attempts = 0;
+        const tryAttach = (): void => {
+          if (activeSession !== session || !session.windows.includes(entry)) return;
+          attempts += 1;
+          let attached = false;
           try {
-            message = JSON.parse(String(event.data)) as { t?: string; i?: unknown; data?: unknown };
-          } catch {
+            attached = attachHost(win);
+          } catch (error) {
+            logger.warn("[zcode-go-mobile-bridge] host 挂接异常", {
+              token,
+              error: String(error),
+            });
+          }
+          if (attached) {
+            logger.info("[zcode-go-mobile-bridge] host 已挂接桥窗口", {
+              token,
+              offerId: entry.offerId,
+            });
             return;
           }
-          if (message.t === "req-offer") {
-            // QR 路径：手机凭 secret 请求 offer。
-            sendToBridge("zcode-go-bridge-req-offer", null);
-          } else if (message.t === "answer") {
-            if (!session.offer) return; // offer 预生成未完成（极端时序），手机会重试
-            session.status = { ...session.status, state: "connecting" };
-            emit(session);
-            sendToBridge("zcode-go-bridge-answer", message.data);
+          if (attempts >= 30) {
+            logger.warn("[zcode-go-mobile-bridge] host 未就绪，该窗口的远端将卡在启动门禁", {
+              token,
+              offerId: entry.offerId,
+            });
+            return;
           }
+          entry.attachTimer = setTimeout(tryAttach, 1000);
         };
-        ws.onclose = () => {
-          if (activeSession === session) teardown(session, "信令连接已断开，请刷新重试");
-        };
-        ws.onerror = () => {
-          if (activeSession === session) teardown(session, "信令连接失败");
-        };
-      } catch (error) {
-        teardown(session, error instanceof Error ? error.message : String(error));
+        tryAttach();
       }
-    })();
-  });
+    });
 
-  bridgeWindow.once("closed", () => {
-    ipcMain.removeListener("zcode-go-bridge-event", onBridgeEvent);
-    if (activeSession === session) teardown(session, "桥窗口已关闭");
-  });
+    win.webContents.once("did-fail-load", (_event, code, desc) => {
+      logger.warn("[zcode-go-mobile-bridge] 桥窗口加载失败", {
+        token,
+        offerId: entry.offerId,
+        code,
+        desc,
+      });
+      if (activeSession === session) destroyEntry(session, entry);
+    });
 
-  // 就绪看门狗：15s 内仍未拿到 offer（窗口未加载/页面异常）就显式报错，
-  // 不让对话框无限停在「启动中」。
+    win.once("closed", () => {
+      ipcMain.removeListener("zcode-go-bridge-event", onBridgeEvent);
+      if (session.windows.includes(entry)) destroyEntry(session, entry);
+    });
+
+    void win.loadFile(htmlPath).catch((error: unknown) => {
+      logger.warn("[zcode-go-mobile-bridge] 桥窗口导航失败", {
+        token,
+        offerId: entry.offerId,
+        error: String(error),
+      });
+      if (activeSession === session) destroyEntry(session, entry);
+    });
+
+    return entry;
+  };
+
+  // primary 窗口：随配对启动，offer 预生成供 QR/链接。
+  createBridgeWindow(true);
+
+  // 就绪看门狗：15s 内 primary 仍未产出 offer 就显式报错（不无限「启动中」）。
   const readinessWatchdog = setTimeout(() => {
-    if (activeSession === session && !session.offer) {
+    if (activeSession !== session) return;
+    const primary = session.windows.find((w) => w.isPrimary);
+    if (!primary?.offer) {
       teardown(session, "桥就绪超时（15s 内未生成 offer）");
     }
   }, 15000);
 
-  // 关键：窗口必须显式导航到桥页面，否则页面脚本（offer 预生成）不会执行、
-  // did-finish-load（Worker 登记）不会触发——会话永远停在 signaling。
-  bridgeWindow.webContents.once("did-fail-load", (_event, code, desc) => {
-    if (activeSession === session) teardown(session, `桥窗口加载失败（${code} ${desc}）`);
-  });
-  void bridgeWindow.loadFile(htmlPath).catch((error: unknown) => {
-    if (activeSession === session) teardown(session, `桥窗口加载失败：${String(error)}`);
-  });
+  void (async () => {
+    try {
+      const registerResponse = await fetch(`${origin}/api/rooms`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!registerResponse.ok) {
+        teardown(session, `房间登记失败（${registerResponse.status}）`);
+        return;
+      }
+      const ws = new WebSocket(`${origin.replace(/^http/, "ws")}/api/signal/${token}?role=desktop`);
+      session.ws = ws;
+      ws.onopen = () => {
+        if (activeSession !== session) return;
+        // mailbox 注册 capability secret。
+        ws.send(JSON.stringify({ t: "register", p: session.secret }));
+        session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
+        emit(session);
+      };
+      ws.onmessage = (event) => {
+        if (activeSession !== session) return;
+        let message: { t?: string; r?: unknown; i?: unknown; data?: unknown };
+        try {
+          message = JSON.parse(String(event.data)) as {
+            t?: string;
+            r?: unknown;
+            i?: unknown;
+            data?: unknown;
+          };
+        } catch {
+          return;
+        }
+        const requestId = typeof message.r === "string" ? message.r : "";
+        if (message.t === "req-offer" && requestId) {
+          // 客户端凭 secret 请求 offer：优先分配未用 offer 的窗口；没有则
+          // 挂到预生成中的窗口（含按需新开的辅助窗口，offer-ready 后应答）。
+          const ready = session.windows.find((w) => w.offer && !w.offerUsed);
+          if (ready) {
+            ready.pendingRequestIds.push(requestId);
+            answerPendingRequest(ready, ws);
+          } else {
+            let pending = session.windows.find(
+              (w) => !w.offer && w.pendingRequestIds.length === 0,
+            );
+            if (!pending && session.windows.length < 5) {
+              pending = createBridgeWindow(false);
+              logger.info("[zcode-go-mobile-bridge] 追加辅助桥窗口", {
+                token,
+                offerId: pending.offerId,
+                total: session.windows.length,
+              });
+            }
+            pending?.pendingRequestIds.push(requestId);
+          }
+        } else if (message.t === "answer") {
+          const offerId = typeof message.i === "string" ? message.i : "";
+          // 多客户端：offer 按请求分配（i 为实际窗口的 offerId）；direct 链接
+          //（o=）的 answer 无 i——落到 primary 窗口。
+          const entry =
+            session.windows.find((w) => offerId && w.offerId === offerId) ??
+            session.windows.find((w) => w.isPrimary);
+          if (!entry || entry.win.isDestroyed()) return;
+          session.status = { ...session.status, state: "connecting" };
+          emit(session);
+          entry.win.webContents.send("zcode-go-bridge-answer", message.data);
+        }
+      };
+      ws.onclose = () => {
+        if (activeSession === session) teardown(session, "信令连接已断开，请刷新重试");
+      };
+      ws.onerror = () => {
+        if (activeSession === session) teardown(session, "信令连接失败");
+      };
+    } catch (error) {
+      teardown(session, error instanceof Error ? error.message : String(error));
+    }
+  })();
 
   logger.info("[zcode-go-mobile-bridge] 配对开始", { token });
   emit(session);

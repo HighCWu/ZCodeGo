@@ -2455,7 +2455,10 @@ app.whenReady().then(async () => {
     return true;
   };
   ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStart, () =>
-    startMobileBridgePairing(logger, broadcastMobileBridgeStatus, attachHostToBridgeWindow),
+    startMobileBridgePairing(logger, broadcastMobileBridgeStatus, {
+      attach: attachHostToBridgeWindow,
+      deviceMid,
+    }),
   );
   ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStop, () => {
     stopMobileBridgePairing();

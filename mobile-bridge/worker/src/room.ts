@@ -19,6 +19,8 @@ interface SignalWire {
   p?: unknown;
   // offer id（两级 pairing：QR 只带 id，offer 经 mailbox 取回）
   i?: unknown;
+  // 请求标记：多客户端并发时 req-offer 的应答 offer 按此路由回请求方
+  r?: unknown;
   data?: unknown;
 }
 
@@ -38,6 +40,9 @@ async function secretMatches(stored: string | undefined, presented: string): Pro
 }
 
 export class SignalRoom extends DurableObject {
+  /** req-offer 的 r 标记 → 请求方 socket（offer 应答按此路由；答后即删）。 */
+  private readonly pendingOfferReplies = new Map<string, WebSocket>();
+
   private send(ws: WebSocket, message: SignalWire): void {
     if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(message));
@@ -95,12 +100,9 @@ export class SignalRoom extends DurableObject {
 
       const existingMobile = this.socketsFor("mobile")[0];
       if (existingMobile && existingMobile.readyState === WebSocket.OPEN) {
-        // 单手机页限制（沿用官方 relay 语义）：旧页占用即拒绝新页。
-        const pair = new WebSocketPair();
-        this.ctx.acceptWebSocket(pair[1], [tag]);
-        this.send(pair[1], { t: "error", data: { code: "session_conflict" } });
-        pair[1].close(4003, "conflict");
-        return new Response(null, { status: 101, webSocket: pair[0] });
+        // 多客户端并发（官方语义：手机 + 桌面浏览器同时连接）——不再拒绝
+        // 第二个页面；desktop 侧按 req-offer 的 r 标记为每个客户端分配独立
+        // 桥窗口/offer，answer 按 offer id 路由到对应窗口。
       }
       const pair = new WebSocketPair();
       this.ctx.acceptWebSocket(pair[1], [tag]);
@@ -145,8 +147,8 @@ export class SignalRoom extends DurableObject {
         return;
       }
       case "req-offer": {
-        // mobile 凭 secret 取 offer（QR 路径 / 多 tab）。转发给 desktop，由其
-        // 推送 offer；迟到或伪造的请求因 secret 校验挡在门外。
+        // mobile 凭 secret 取 offer（QR 路径 / 多客户端并发）。转发给 desktop，
+        // 由其为请求方分配独立桥窗口并推送 offer；r 标记用于应答路由。
         void this.authorize(ws, message.p).then((ok) => {
           if (!ok) {
             this.send(ws, { t: "error", data: { code: "bad_secret" } });
@@ -154,7 +156,12 @@ export class SignalRoom extends DurableObject {
           }
           const desktop = this.socketsFor("desktop")[0];
           if (desktop?.readyState === WebSocket.OPEN) {
-            this.send(desktop, { t: "req-offer", i: message.i });
+            const r = typeof message.r === "string" ? message.r.slice(0, 64) : "";
+            if (r) {
+              if (this.pendingOfferReplies.size > 64) this.pendingOfferReplies.clear();
+              this.pendingOfferReplies.set(r, ws);
+            }
+            this.send(desktop, { t: "req-offer", i: message.i, r });
           } else {
             this.send(ws, { t: "error", data: { code: "desktop_offline" } });
           }
@@ -179,11 +186,17 @@ export class SignalRoom extends DurableObject {
         return;
       }
       case "offer": {
-        // desktop → 请求方（req-offer 的回应）。
+        // desktop → 请求方（req-offer 的回应；r 路由到发起请求的 mobile）。
         if (!isDesktop) return;
-        const mobile = this.socketsFor("mobile")[0];
+        const r = typeof message.r === "string" ? message.r : "";
+        const requester = r ? this.pendingOfferReplies.get(r) : undefined;
+        if (r) this.pendingOfferReplies.delete(r);
+        const mobile =
+          requester && requester.readyState === WebSocket.OPEN
+            ? requester
+            : this.socketsFor("mobile")[0];
         if (mobile?.readyState === WebSocket.OPEN) {
-          this.send(mobile, { t: "offer", i: message.i, data: message.data });
+          this.send(mobile, { t: "offer", i: message.i, r, data: message.data });
         }
         return;
       }

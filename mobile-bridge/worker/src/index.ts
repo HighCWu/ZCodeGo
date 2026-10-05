@@ -209,6 +209,8 @@ function containerPage(origin: string): string {
   }
 
   var pc = null, ws = null, resourceDc = null, controlDc = null, rpcDc = null;
+  var REQ_ID = "";
+  var ACTIVE_OFFER_ID = "";
   var iceTimer = null, done = false;
   var resourceRequests = new Map();
   var resourceSeq = 0;
@@ -428,7 +430,7 @@ function containerPage(origin: string): string {
         ws.addEventListener("open", function () { clearTimeout(t); resolve(); }, { once: true });
       });
       if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ t: "answer", p: SECRET, i: OFFER_ID || "", data: fullAnswer }));
+        ws.send(JSON.stringify({ t: "answer", p: SECRET, i: ACTIVE_OFFER_ID || OFFER_ID || "", data: fullAnswer }));
       }
     }
     setStage("answer-wait");
@@ -445,7 +447,9 @@ function containerPage(origin: string): string {
       var m;
       try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.t === "offer") {
-        // mailbox 取回（QR 路径）。
+        // mailbox 取回（QR 路径）。记住实际分配的 offer id——多客户端并发时
+        // 它不同于 URL 里的 primary id，answer 必须据此路由回正确的桥窗口。
+        if (typeof m.i === "string" && m.i) ACTIVE_OFFER_ID = m.i;
         try { await negotiate(m.data); } catch (e) { cleanup(); fail(T.p2pFailed); }
       } else if (m.t === "error") {
         var code = m.data && m.data.code;
@@ -497,7 +501,8 @@ function containerPage(origin: string): string {
       return;
     }
     if (MODE === "mailbox") {
-      // QR 路径：连信令 → 凭 secret 请求 offer → 协商。
+      // QR 路径：连信令 → 凭 secret 请求 offer → 协商。r 为请求标记，
+      // 多客户端并发时 desktop 按 r 把 offer 路由回本页。
       connectSignaling();
       var waitOpen = function (cb) {
         if (ws.readyState === 1) cb();
@@ -505,7 +510,10 @@ function containerPage(origin: string): string {
       };
       waitOpen(function () {
         setStage("req-offer");
-        ws.send(JSON.stringify({ t: "req-offer", p: SECRET, i: OFFER_ID }));
+        var rid = "";
+        try { rid = crypto.randomUUID(); } catch (e) { rid = String(Date.now()) + Math.random(); }
+        REQ_ID = rid;
+        ws.send(JSON.stringify({ t: "req-offer", p: SECRET, i: OFFER_ID, r: rid }));
       });
       return;
     }
@@ -581,6 +589,82 @@ const SHIM_JS = String.raw`
   var pending = new Map();
   var subs = new Map();
   var streams = new Map();
+  var portMsgQueue = new Map();
+  // 关键时序：rpc 缓冲回放发生在 shim 初始化（head 内联脚本，页面 parsing 中）
+  // ——此时应用的模块脚本（含 window message 监听注册）尚未求值。端口/状态
+  // 消息必须推迟投递：DOMContentLoaded（模块脚本先于其完成）兜底，且在看到
+  // 应用发出 startup-control（模块求值完毕、监听器已注册的铁证）时立即补投。
+  var deferredDelivery = [];
+  var bootPortMessage = null;
+  window.__zcodeShimDebug = { portOpens: 0, deferred: 0, flushed: 0, controlSeen: 0, statesDelivered: 0 };
+  // 窗口消息审计（诊断用）：应用视角收到的一切带 type 消息。
+  window.__winMsgLog = [];
+  window.addEventListener("message", function (event) {
+    try {
+      if (event.data && typeof event.data === "object" && event.data.type) {
+        window.__winMsgLog.push({
+          t: String(event.data.type).slice(0, 40),
+          self: event.source === window,
+          ports: event.ports ? event.ports.length : 0,
+          dbId: typeof event.data.databaseStartupId === "string" ? event.data.databaseStartupId.slice(0, 12) : undefined,
+          phase: event.data.state && event.data.state.phase,
+          stId: event.data.state && event.data.state.startupId ? String(event.data.state.startupId).slice(0, 12) : undefined,
+          seq: event.data.state && event.data.state.sequence,
+        });
+        if (window.__winMsgLog.length > 100) window.__winMsgLog.shift();
+      }
+    } catch (e) {}
+  });
+  // 应用监听器审计：移除（包装应用监听器有侵入性；winMsgLog 已够诊断）。
+  function deliverToWindow(fn) {
+    if (document.readyState === "loading") {
+      window.__zcodeShimDebug.deferred += 1;
+      deferredDelivery.push(fn);
+      return;
+    }
+    fn();
+  }
+  function buildBootPortDelivery(msg) {
+    return function () {
+      var channelPair = new MessageChannel();
+      streams.set(msg.streamId, channelPair.port2);
+      channelPair.port2.onmessage = function (e) {
+        rpcSend({ kind: "port-msg", streamId: msg.streamId, data: encodePortData(e.data) });
+      };
+      channelPair.port2.start();
+      // 回放早到的桌面帧：host 的 Initialize 等消息先于端口投递到达时按流
+      // 排队（否则双方互等握手，服务层死锁——应用门禁通过但 UI 永不绘制）。
+      var queued = portMsgQueue.get(msg.streamId) || [];
+      portMsgQueue.delete(msg.streamId);
+      for (var k = 0; k < queued.length; k += 1) {
+        try { channelPair.port2.postMessage(decodePortData(queued[k])); } catch (e) {}
+      }
+      var portMessage =
+        msg.portType === "service"
+          ? { type: WIN_CHANNELS.ServicePort, databaseStartupId: msg.payload.databaseStartupId }
+          : {
+              type: WIN_CHANNELS.ScopedServicePort,
+              attachmentId: msg.payload.attachmentId,
+              sessionId: msg.payload.sessionId,
+              target: msg.payload.target,
+            };
+      window.postMessage(portMessage, "*", [channelPair.port1]);
+    };
+  }
+  function deliverBootPort() {
+    if (!bootPortMessage) return;
+    var fn = buildBootPortDelivery(bootPortMessage);
+    bootPortMessage = null;
+    try { fn(); } catch (e) {}
+  }
+  document.addEventListener("DOMContentLoaded", function () {
+    var queued = deferredDelivery;
+    deferredDelivery = [];
+    window.__zcodeShimDebug.flushed += queued.length;
+    for (var i = 0; i < queued.length; i += 1) {
+      try { queued[i](); } catch (e) {}
+    }
+  });
 
   var WIN_CHANNELS = {
     DatabaseStartupState: "zcode:database-startup-state",
@@ -638,28 +722,24 @@ const SHIM_JS = String.raw`
           }
         }
       } else if (msg.kind === "win-msg" && msg.winType === "DatabaseStartupState") {
-        window.postMessage({ type: WIN_CHANNELS.DatabaseStartupState, state: msg.data }, "*");
+        deliverToWindow(function () {
+          window.__zcodeShimDebug.statesDelivered += 1;
+          window.postMessage({ type: WIN_CHANNELS.DatabaseStartupState, state: msg.data }, "*");
+        });
       } else if (msg.kind === "port-open") {
-        var channelPair = new MessageChannel();
-        streams.set(msg.streamId, channelPair.port2);
-        channelPair.port2.onmessage = function (e) {
-          rpcSend({ kind: "port-msg", streamId: msg.streamId, data: encodePortData(e.data) });
-        };
-        channelPair.port2.start();
-        var portMessage =
-          msg.portType === "service"
-            ? { type: WIN_CHANNELS.ServicePort, databaseStartupId: msg.payload.databaseStartupId }
-            : {
-                type: WIN_CHANNELS.ScopedServicePort,
-                attachmentId: msg.payload.attachmentId,
-                sessionId: msg.payload.sessionId,
-                target: msg.payload.target,
-              };
-        window.postMessage(portMessage, "*", [channelPair.port1]);
+        window.__zcodeShimDebug.portOpens += 1;
+        bootPortMessage = msg;
+        deliverToWindow(deliverBootPort);
       } else if (msg.kind === "port-msg") {
         var streamPort = streams.get(msg.streamId);
         if (streamPort) {
           try { streamPort.postMessage(decodePortData(msg.data)); } catch (e3) {}
+        } else {
+          // 流尚未建立（boot 端口投递被延迟到 DOMContentLoaded）：按流排队，
+          // 建立时回放——否则 host 的 Initialize 帧丢失，握手死锁。
+          var q = portMsgQueue.get(msg.streamId) || [];
+          if (q.length < 2000) q.push(msg.data);
+          portMsgQueue.set(msg.streamId, q);
         }
       }
     });
@@ -698,11 +778,14 @@ const SHIM_JS = String.raw`
   }
 
   // UI → main 方向的 window 消息截获（真桌面里由 preload 转发；这里经 rpc）：
-  // 启动控制（snapshot/retry/exit）与 scoped port 就绪 ACK。
+  // 启动控制（snapshot/retry/exit）与 scoped port 就绪 ACK。startup-control
+  // 的出现同时证明应用模块已求值、监听器已注册——补投 boot 端口。
   window.addEventListener("message", function (event) {
     if (event.source !== window || !event.data || typeof event.data !== "object") return;
     if (!rpc) return;
     if (event.data.type === WIN_CHANNELS.DatabaseStartupControl) {
+      window.__zcodeShimDebug.controlSeen += 1;
+      deliverBootPort();
       rpcSend({ kind: "startup-control", control: event.data.control });
     } else if (
       event.data.type === WIN_CHANNELS.ScopedServicePortReady &&
