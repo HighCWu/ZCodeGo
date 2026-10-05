@@ -208,10 +208,29 @@ function containerPage(origin: string): string {
     $("retry").style.display = "block";
   }
 
-  var pc = null, ws = null, resourceDc = null, controlDc = null;
+  var pc = null, ws = null, resourceDc = null, controlDc = null, rpcDc = null;
   var iceTimer = null, done = false;
   var resourceRequests = new Map();
   var resourceSeq = 0;
+  var rpcCallbacks = [];
+
+  // rpc DataChannel → window.__zcodeGoRpc：iframe 里的 shim 经此透传
+  // invoke/事件订阅到桌面（同源 window.parent 访问）。
+  function exposeRpc() {
+    window.__zcodeGoRpc = {
+      post: function (text) {
+        if (rpcDc && rpcDc.readyState === "open") rpcDc.send(text);
+      },
+      onMessage: function (cb) {
+        rpcCallbacks.push(cb);
+      },
+    };
+    rpcDc.onmessage = function (e) {
+      for (var i = 0; i < rpcCallbacks.length; i += 1) {
+        try { rpcCallbacks[i](e.data); } catch (err) {}
+      }
+    };
+  }
 
   function cleanup() {
     if (iceTimer) clearTimeout(iceTimer);
@@ -354,6 +373,9 @@ function containerPage(origin: string): string {
       if (label === "zcode-go-resource") {
         resourceDc = ev.channel;
         resourceDc.onmessage = function (e) { handleResourceMessage(e.data); };
+      } else if (label === "zcode-go-rpc") {
+        rpcDc = ev.channel;
+        exposeRpc();
       } else if (label === "zcode-go-control") {
         controlDc = ev.channel;
         controlDc.onopen = onConnected;
@@ -522,7 +544,127 @@ function containerPage(origin: string): string {
 }
 
 /**
- * Service Worker：桌面版 UI 资源的本地代理。
+ * 浏览器侧 preload shim（注入到 /app/ 文档，先于 UI bundle 执行）。
+ * window.zcode = Proxy：任意方法调用经容器页的 rpc DataChannel 透传到桌面
+ * 桥窗口（其隔离世界里求值了真实 preload，按方法名直调原生 ipcRenderer）。
+ * 约定：onXxx 且首参为函数 = 事件订阅（回调本地分发，disposer 本地退订）。
+ * String.raw 纪律同容器页：无反引号、无 "${"。
+ */
+const SHIM_JS = String.raw`
+(function () {
+  if (window.zcode) return;
+  window.__ZCODE_DEVICE_ID__ = "";
+  var parentWindow = null;
+  try { parentWindow = window.parent; } catch (e) {}
+  var rpc = parentWindow && parentWindow.__zcodeGoRpc ? parentWindow.__zcodeGoRpc : null;
+
+  var seq = 0;
+  var subSeq = 0;
+  var pending = new Map();
+  var subs = new Map();
+
+  function wire() {
+    rpc.onMessage(function (raw) {
+      var msg;
+      try { msg = JSON.parse(raw); } catch (e) { return; }
+      var entry = pending.get(msg.id !== undefined ? msg.id : msg.subId);
+      if (msg.kind === "result" || msg.kind === "sub-ok" || msg.kind === "sub-error") {
+        if (!entry) return;
+        pending.delete(msg.id);
+        if (msg.kind === "result" && msg.ok) entry.resolve(msg.value);
+        else if (msg.kind === "sub-ok") entry.resolve();
+        else entry.reject(new Error(msg.error || ("rpc-failed:" + msg.kind)));
+      } else if (msg.kind === "event") {
+        var list = subs.get(msg.subId);
+        if (list) {
+          for (var i = 0; i < list.length; i += 1) {
+            try { list[i](msg.payload); } catch (e2) {}
+          }
+        }
+      }
+    });
+  }
+
+  function rpcSend(payload) {
+    rpc.post(JSON.stringify(payload));
+  }
+
+  function invoke(method, args) {
+    return new Promise(function (resolve, reject) {
+      var id = ++seq;
+      pending.set(id, { resolve: resolve, reject: reject });
+      rpcSend({ kind: "invoke", id: id, method: method, args: args || [] });
+      setTimeout(function () {
+        if (pending.has(id)) {
+          pending.delete(id);
+          reject(new Error("rpc-timeout:" + method));
+        }
+      }, 30000);
+    });
+  }
+
+  function subscribe(method, rest, subId) {
+    return new Promise(function (resolve, reject) {
+      pending.set(subId, { resolve: resolve, reject: reject });
+      rpcSend({ kind: "subscribe", id: subId, method: method, args: rest });
+    });
+  }
+
+  if (rpc) {
+    wire();
+    invoke("__zcodeGoMeta", []).then(function (meta) {
+      if (meta && typeof meta.deviceId === "string") window.__ZCODE_DEVICE_ID__ = meta.deviceId;
+    }).catch(function () {});
+  }
+
+  window.zcode = new Proxy({}, {
+    get: function (_target, prop) {
+      if (typeof prop !== "string") return undefined;
+      if (prop === "then") return undefined;
+      return function () {
+        var args = Array.prototype.slice.call(arguments);
+        if (/^on[A-Z]/.test(prop) && typeof args[0] === "function") {
+          var cb = args[0];
+          var rest = args.slice(1);
+          var subId = ++subSeq;
+          subs.set(subId, [cb]);
+          if (rpc) {
+            subscribe(prop, rest, subId).catch(function () {});
+          }
+          return function () {
+            subs.delete(subId);
+          };
+        }
+        if (!rpc) return Promise.reject(new Error("rpc-not-connected:" + prop));
+        return invoke(prop, args);
+      };
+    },
+  });
+
+  // rpc 通道可能晚于 control 打开（或重连）：迟绑定重试。
+  if (!rpc) {
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts += 1;
+      var candidate = null;
+      try { candidate = window.parent && window.parent.__zcodeGoRpc; } catch (e) {}
+      if (candidate) {
+        rpc = candidate;
+        wire();
+        invoke("__zcodeGoMeta", []).then(function (meta) {
+          if (meta && typeof meta.deviceId === "string") window.__ZCODE_DEVICE_ID__ = meta.deviceId;
+        }).catch(function () {});
+        clearInterval(timer);
+      } else if (attempts > 75) {
+        clearInterval(timer);
+      }
+    }, 200);
+  }
+})();
+`;
+
+/**
+ * Service Worker：桌面版 UI 资源的本地代理 + preload shim 注入。
  *
  * 拦截 /app/* 请求：Cache Storage 命中直接回（离线可用）；miss 时把请求经
  * MessageChannel 交给主页面（容器页——它持有 resource DataChannel），主页面
@@ -532,6 +674,7 @@ function containerPage(origin: string): string {
 function serviceWorkerScript(): string {
   return `
 const APP_CACHE = "zcode-go-app-v1";
+const SHIM_SOURCE = ${JSON.stringify(SHIM_JS)};
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -544,6 +687,16 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  // 浏览器侧 preload shim（桌面 UI bundle 启动即访问 window.zcode，缺失则
+  // 启动即崩——白屏）。随 Worker 部署，不经 DataChannel。
+  if (url.pathname === "/app/__zcode_shim.js") {
+    event.respondWith(
+      new Response(SHIM_SOURCE, {
+        headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-store" },
+      }),
+    );
+    return;
+  }
   if (!url.pathname.startsWith("/app/")) return;
   if (event.request.method !== "GET") return;
   event.respondWith(serveAppResource(event.request));
@@ -559,13 +712,27 @@ async function serveAppResource(request) {
     const cached = await caches.open(APP_CACHE).then((cache) => cache.match(request));
     if (cached) return cached;
   }
-  const response = await requestFromPage(request);
-  if (response && response.ok && !isDocument) {
+  let response = await requestFromPage(request);
+  if (!response) response = new Response("resource unavailable", { status: 502 });
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.indexOf("text/html") >= 0) {
+    // 在首个脚本之前注入 shim：head 内联经典脚本先于模块脚本（deferred）执行。
+    const text = await response.text();
+    const injected = text.replace(
+      /<head[^>]*>/i,
+      function (head) { return head + '<script src="/app/__zcode_shim.js"></script>'; },
+    );
+    response = new Response(injected, {
+      status: response.status,
+      headers: response.headers,
+    });
+  }
+  if (response.ok && !isDocument) {
     const cache = await caches.open(APP_CACHE);
     // Response body 只能消费一次，clone 后入缓存。
     cache.put(request, response.clone()).catch(() => {});
   }
-  return response ?? new Response("resource unavailable", { status: 502 });
+  return response;
 }
 
 // 容器页注册进来的资源代理端口（页面持有 resource DataChannel）。

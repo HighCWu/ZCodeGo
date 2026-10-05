@@ -1,5 +1,6 @@
 /**
- * zcode-go 移动端远程控制桥（阶段 2：out-of-band offer + mailbox + 资源通道）。
+ * zcode-go 移动端远程控制桥（阶段 2/3：out-of-band offer + mailbox + 资源通道
+ * + preload API 透传）。
  *
  * 架构：手机（CF Worker 容器页）↔ 桌面隐藏桥窗口 P2P。Worker 仅是 answer
  * mailbox（+ QR 路径的 offer 取回）。配对两级：
@@ -9,9 +10,13 @@
  *     （压缩 offer 进 QR 实测过密相机扫不出；oc= 通道容器页保留）
  * 旧 trickle 路径保留（容器页 URL 无 v= 参数时走 legacy），A/B 实测后移除。
  *
- * 桥窗口职责：持有 RTCPeerConnection（offer 侧预生成：等 ICE gathering
- * complete）、三条 DataChannel（control/rpc/resource）；resource 通道以
- * fs 直读桌面 renderer 产物并分片回传（版本天然对齐桌面当前运行的构建）。
+ * 桥窗口（contextIsolation:true + sandbox:false + 自定义 preload，全部逻辑在
+ * preload 隔离世界——node/DOM 俱全）职责：
+ *   1. 持有 RTCPeerConnection（offer 侧预生成：等 ICE gathering complete）
+ *      与三条 DataChannel（control/rpc/resource）；
+ *   2. resource 通道 fs 直读桌面 renderer 产物分片回传（版本天然对齐）；
+ *   3. 求值真实 preload bundle（伪造 contextBridge 捕获 window.zcode 原生
+ *      API——映射表零维护），rpc 通道按方法名透传 invoke/订阅给远端 shim。
  * 注意 RTCSessionDescription/RTCIceCandidate 跨 ipcRenderer 序列化会丢成
  * 空对象——桥内一律先解构为普通对象。
  *
@@ -37,6 +42,17 @@ const RENDERER_ROOT = join(
   "app",
   "out",
   "renderer",
+);
+/** 官方桌面 preload bundle（桥窗口求值它以捕获原生 zcode API）。 */
+const PRELOAD_BUNDLE_PATH = join(
+  homedir(),
+  ".zcode-go",
+  "electron",
+  "resources",
+  "app",
+  "out",
+  "preload",
+  "index.cjs",
 );
 
 export interface MobileBridgeStatus {
@@ -121,26 +137,25 @@ function teardown(session: Session, reason: string): void {
 }
 
 /**
- * 桥窗口页面脚本源码（纯 JS 字符串，运行在 nodeIntegration 页面里）。
- * 硬约束（破坏任一条 = 页面在隐藏窗口里静默死亡）：
+ * 桥窗口 preload 源码（运行在隔离世界，node/DOM 俱全）。
+ * 硬约束（破坏任一条 = 隐藏窗口里静默死亡）：
  * 1) 不得出现反引号与 "${"——外层是模板字符串，String.raw 只保护反斜杠
  *    转义序列，不保护这两者；
- * 2) 不得引用本字符串之外的任何标识符——rendererRoot/iceServers 由发射时
- *    的外层包装函数注入；
- * 3) 改动后必须过 /tmp/zgbridge 的隔离页面加载 e2e（隐藏窗口内 SyntaxError
- *    不会浮出到任何日志）。
- * 用 String.raw 字符串而非函数 toString() 发射：esbuild 会给函数源码注入
- * keepNames（__name 包装每个具名函数）、require 互操作等外部引用，toString()
- * 出来的代码在页面里不可独立执行；字符串常量则原样穿过 bundler。
+ * 2) 不得引用本字符串之外的任何标识符——rendererRoot/iceServers/realPreload
+ *    由发射时拼进的头部 const 提供；
+ * 3) 改动后必须过 /tmp/zgbridge 的隔离加载 e2e。
+ * 用 String.raw 而非函数 toString() 发射：esbuild 会注入 keepNames/require
+ * 互操作 helper，toString() 的代码不可独立执行；字符串常量原样穿过 bundler。
  */
-const PAGE_SCRIPT_SOURCE = String.raw`
-var pageRequire = globalThis.require;
-var ipcRenderer = pageRequire("electron").ipcRenderer;
-var fs = pageRequire("node:fs");
-var path = pageRequire("node:path");
+const PRELOAD_SCRIPT_SOURCE = String.raw`
+var ipcRenderer = require("electron").ipcRenderer;
+var fs = require("node:fs");
+var path = require("node:path");
 
 var pc = null;
 var channels = {};
+var capturedGlobals = {};
+var capturedApi = null;
 
 function makePeer(iceServers) {
   var peer = new RTCPeerConnection({ iceServers: iceServers });
@@ -158,6 +173,9 @@ function makePeer(iceServers) {
     if (channels.control.readyState === "open") {
       channels.control.send("echo:" + event.data);
     }
+  };
+  channels.rpc.onmessage = function (event) {
+    handleRpcMessage(event.data);
   };
   channels.resource.onmessage = function (event) {
     handleResourceRequest(event.data);
@@ -210,10 +228,6 @@ async function pregenerateOffer(iceServers) {
     var local = peer.localDescription;
     if (!local) throw new Error("missing local description");
     var full = { type: local.type, sdp: local.sdp };
-    // 二维码容量优化：过滤无效候选（TCP 在浏览器对浏览器场景几乎从不生效；
-    // 链路本地 IPv6 手机侧不可达）+ deflate 压缩——实测 4.2KB 压到 ~1.1KB
-    // base64url，完整 offer 得以装进二维码（上限 2953B），扫码路径与复制
-    // 链接同为 direct（省掉 mailbox 取 offer 的一跳）。
     var compressed = null;
     try {
       var filteredSdp = filterCandidates(full.sdp);
@@ -229,7 +243,7 @@ async function pregenerateOffer(iceServers) {
         .replace(/\//g, "_")
         .replace(/=+$/, "");
     } catch (e) {
-      compressed = null; // 压缩失败回退 mailbox 路径（二维码只带 offer_id）
+      compressed = null;
     }
     ipcRenderer.send("zcode-go-bridge-event", {
       kind: "offer-ready",
@@ -260,6 +274,109 @@ ipcRenderer.on("zcode-go-bridge-req-offer", function () {
     ipcRenderer.send("zcode-go-bridge-event", { kind: "req-offer-received" });
   }
 });
+
+// ── 真实 preload API 捕获 ──
+// 真 preload 的 contextBridge 需要隔离环境；本 preload 本身就在隔离世界里，
+// 伪造 contextBridge.exposeInMainWorld 后求值 bundle，捕获其构造的 API 对象
+// （闭包内即真 ipcRenderer.invoke 直连——方法名→通道映射零维护）。
+try {
+  var electronModule = require("electron");
+  var fakeElectron = {};
+  for (var moduleName in electronModule) fakeElectron[moduleName] = electronModule[moduleName];
+  fakeElectron.contextBridge = {
+    exposeInMainWorld: function (key, value) {
+      capturedGlobals[key] = value;
+    },
+  };
+  var preloadSourceText = fs.readFileSync(realPreload, "utf8");
+  var wrappedPreload = new Function("require", "module", "exports", preloadSourceText);
+  var preloadModule = { exports: {} };
+  wrappedPreload(
+    function (id) {
+      return id === "electron" ? fakeElectron : require(id);
+    },
+    preloadModule,
+    preloadModule.exports,
+  );
+  capturedApi = capturedGlobals.zcode || null;
+  if (!capturedApi) throw new Error("preload 未暴露 zcode API");
+} catch (error) {
+  ipcRenderer.send("zcode-go-bridge-event", {
+    kind: "preload-capture-failed",
+    error: String(error),
+  });
+}
+
+// ── rpc 通道：远端 shim 按方法名透传 invoke/事件订阅 ──
+function rpcReply(payload) {
+  var dc = channels.rpc;
+  if (!dc || dc.readyState !== "open") return;
+  var text;
+  try {
+    text = JSON.stringify(payload);
+  } catch (e) {
+    return;
+  }
+  dc.send(text);
+}
+
+async function handleRpcMessage(raw) {
+  var msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch (e) {
+    return;
+  }
+  if (msg.kind === "invoke") {
+    if (msg.method === "__zcodeGoMeta") {
+      rpcReply({
+        kind: "result",
+        id: msg.id,
+        ok: true,
+        value: {
+          deviceId:
+            typeof capturedGlobals.__ZCODE_DEVICE_ID__ === "string"
+              ? capturedGlobals.__ZCODE_DEVICE_ID__
+              : "",
+        },
+      });
+      return;
+    }
+    var fn = capturedApi ? capturedApi[msg.method] : undefined;
+    if (typeof fn !== "function") {
+      rpcReply({ kind: "result", id: msg.id, error: "no-method:" + String(msg.method) });
+      return;
+    }
+    try {
+      var value = await fn.apply(null, msg.args || []);
+      rpcReply({ kind: "result", id: msg.id, ok: true, value: value === undefined ? null : value });
+    } catch (error) {
+      rpcReply({ kind: "result", id: msg.id, error: String((error && error.message) || error) });
+    }
+    return;
+  }
+  if (msg.kind === "subscribe") {
+    var sub = capturedApi ? capturedApi[msg.method] : undefined;
+    if (typeof sub !== "function") {
+      rpcReply({ kind: "sub-error", id: msg.id, error: "no-method:" + String(msg.method) });
+      return;
+    }
+    try {
+      var rest = (msg.args || []).slice();
+      sub.apply(
+        null,
+        [
+          function (payload) {
+            rpcReply({ kind: "event", subId: msg.id, payload: payload === undefined ? null : payload });
+          },
+        ].concat(rest),
+      );
+      rpcReply({ kind: "sub-ok", id: msg.id });
+    } catch (error2) {
+      rpcReply({ kind: "sub-error", id: msg.id, error: String((error2 && error2.message) || error2) });
+    }
+  }
+}
 
 // ── resource 通道：手机请求桌面 renderer 产物（白名单在 rendererRoot 内）──
 var MIME = {
@@ -321,22 +438,29 @@ ipcRenderer.send("zcode-go-bridge-event", { kind: "ready" });
 `;
 
 /**
- * 桥窗口页面：本地生成（可信内容），nodeIntegration 直用 ipcRenderer/fs。
- * 发射前先在主进程用 new Function 做纯解析自检——拼装错误在写文件前抛出，
- * 不再依赖隐藏窗口里的静默 SyntaxError（历史两种事故：模板字符串对页面代码
- * 的正则/转义二次求值；函数 toString() 被 esbuild 注入 keepNames/require
- * helper 变得不可独立执行）。
+ * 桥窗口双文件：stub HTML（主世界无逻辑）+ 自定义 preload（隔离世界承载
+ * 全部桥逻辑与真实 preload API 捕获）。发射前 new Function 纯解析自检——
+ * 拼装错误在写文件前抛出（历史事故见 PRELOAD_SCRIPT_SOURCE 注释）。
  */
-function writeBridgeWindowHtml(): string {
-  new Function("rendererRoot", "iceServers", PAGE_SCRIPT_SOURCE);
-  const html = `<!doctype html>
-<html><body><script>(function(rendererRoot,iceServers){${PAGE_SCRIPT_SOURCE}})(${JSON.stringify(
-    RENDERER_ROOT,
-  )},${JSON.stringify(ICE_SERVERS)});</script></body></html>`;
+function writeBridgeWindowFiles(): { htmlPath: string; preloadPath: string } {
+  new Function("rendererRoot", "iceServers", "realPreload", PRELOAD_SCRIPT_SOURCE);
+  const preloadSource =
+    "const rendererRoot = " +
+    JSON.stringify(RENDERER_ROOT) +
+    ";\n" +
+    "const iceServers = " +
+    JSON.stringify(ICE_SERVERS) +
+    ";\n" +
+    "const realPreload = " +
+    JSON.stringify(PRELOAD_BUNDLE_PATH) +
+    ";\n" +
+    PRELOAD_SCRIPT_SOURCE;
   mkdirSync(STATE_DIR, { recursive: true });
-  const filePath = join(STATE_DIR, "mobile-bridge-window.html");
-  writeFileSync(filePath, html, "utf8");
-  return filePath;
+  const preloadPath = join(STATE_DIR, "mobile-bridge-window-preload.cjs");
+  writeFileSync(preloadPath, preloadSource, "utf8");
+  const htmlPath = join(STATE_DIR, "mobile-bridge-window.html");
+  writeFileSync(htmlPath, "<!doctype html><html><body></body></html>", "utf8");
+  return { htmlPath, preloadPath };
 }
 
 export function startMobileBridgePairing(
@@ -364,14 +488,17 @@ export function startMobileBridgePairing(
   };
   activeSession = session;
 
-  const htmlPath = writeBridgeWindowHtml();
+  const { htmlPath, preloadPath } = writeBridgeWindowFiles();
   session.bridgeWindow = new BrowserWindow({
     show: false,
     skipTaskbar: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      // 全部桥逻辑在 preload 隔离世界（node/DOM 俱全）；真实 preload 的
+      // contextBridge 也只有在此形态下才能被求值捕获。
+      preload: preloadPath,
+      contextIsolation: true,
       sandbox: false,
+      nodeIntegration: false,
       // 隐藏窗口会被节流（计时器暂停会拖慢 8s gathering 兜底），关掉。
       backgroundThrottling: false,
     },
@@ -404,6 +531,11 @@ export function startMobileBridgePairing(
         token,
         sdpBytes: offer.sdp.length,
         compressedBytes: compressed ? compressed.length : null,
+      });
+    } else if (payload.kind === "preload-capture-failed") {
+      logger.warn("[zcode-go-mobile-bridge] preload API 捕获失败（rpc 通道不可用）", {
+        token,
+        error: String(payload.error),
       });
     } else if (payload.kind === "offer-failed") {
       teardown(session, `offer 预生成失败：${String(payload.error)}`);
