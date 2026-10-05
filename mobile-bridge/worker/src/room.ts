@@ -67,10 +67,11 @@ export class SignalRoom extends DurableObject {
     // 续期——桌面端会话存续期间每 2 分钟心跳，二维码长期可扫，桌面停止心跳
     // 后 TTL 自然到期回收。
     if (request.method === "POST") {
-      const expired = await this.isRoomExpired();
-      if (!expired) {
-        await this.ctx.storage.put(ROOM_CREATED_AT_KEY, Date.now());
-      }
+      // 登记探活（Worker 入口 POST，仅桌面端发起）：无条件落/续房间计时——
+      // 桌面端会话存续期间每 2 分钟心跳，二维码长期可扫；桌面停止心跳后
+      // TTL 自然到期回收。已过期房间收到桌面心跳即复活（桌面网络中断恢复
+      // 后自愈，无需重新生成二维码；secret 持久在 storage，旧 QR 仍可配对）。
+      await this.ctx.storage.put(ROOM_CREATED_AT_KEY, Date.now());
       return new Response(null, { status: 204 });
     }
     if (url.searchParams.has("role")) {
@@ -137,6 +138,12 @@ export class SignalRoom extends DurableObject {
     const isDesktop = tag.endsWith(":desktop");
     console.log("[room] msg", JSON.stringify({ kind: message.t, from: isDesktop ? "desktop" : "mobile", size: raw.length }));
     switch (message.t) {
+      // ── 保活：桌面端每 30s ping，防 NAT 空闲超时把信令 WS 变成半开连接
+      //（桌面据此检测 pong 超时并重建连接）。──
+      case "ping": {
+        this.send(ws, { t: "pong" });
+        return;
+      }
       // ── 新信令面（阶段 2）：answer mailbox ──
       case "register": {
         // desktop 声明 capability secret，后续 answer/req-offer 凭此放行。

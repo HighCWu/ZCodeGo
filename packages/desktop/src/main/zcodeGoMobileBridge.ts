@@ -99,9 +99,13 @@ interface Session {
   onStatus: (status: MobileBridgeStatus) => void;
   /** 房间心跳（滑动续期）定时器；teardown/stop 清理。 */
   roomHeartbeat: NodeJS.Timeout | null;
+  /** primary PC 失败的时间戳（10 分钟滑窗内 ≥5 次才判定网络禁 WebRTC）。 */
+  primaryFailureTimestamps: number[];
 }
 
 let activeSession: Session | null = null;
+/** teardown 用：startMobileBridgePairing 时注入的 logger（teardown 需留痕）。 */
+let sessionLogger: MobileBridgeLogger | null = null;
 /** 刷新二维码后保留的 detached 窗口（连接自持）；超限回收最旧，防泄漏。 */
 const detachedEntries: BridgeWindowEntry[] = [];
 const MAX_DETACHED_ENTRIES = 8;
@@ -161,6 +165,13 @@ function anyConnected(session: Session): boolean {
 function teardown(session: Session, reason: string): void {
   if (activeSession !== session) return;
   activeSession = null;
+  // 所有 teardown 路径都要留痕：会话静默死亡（UI 只见 idle）时靠这条定位原因。
+  sessionLogger?.warn("[zcode-go-mobile-bridge] 会话 teardown", {
+    token: session.token,
+    reason,
+    windows: session.windows.length,
+    anyConnected: anyConnected(session),
+  });
   if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
   for (const entry of [...session.windows]) destroyEntry(session, entry);
   try {
@@ -685,6 +696,7 @@ export function startMobileBridgePairing(
   if (activeSession) {
     return { ...activeSession.status };
   }
+  sessionLogger = logger;
   const origin = resolveSignalingOrigin();
   const token = generateToken();
   const secret = randomBytes(16).toString("hex");
@@ -702,6 +714,7 @@ export function startMobileBridgePairing(
     ws: null,
     windows: [],
     roomHeartbeat: null,
+    primaryFailureTimestamps: [],
     status: { state: "signaling", token, pairingUrl: shortUrl, qrUrl: shortUrl },
     onStatus,
   };
@@ -824,19 +837,35 @@ export function startMobileBridgePairing(
             emit(session);
           }
         } else if (state === "failed") {
-          if (!detached && isPrimary) {
-            // primary 持有 QR/链接指向的 offer，其死亡使后续配对失效——
-            // 整会话报错让用户刷新。（detached 窗口只回收自身。）
-            teardown(
-              session,
-              "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
+          // 远端关页/锁屏/断网都会把该窗口的 PC 推到 failed。绝不因 primary
+          // 失败拆整个会话（否则任一手机关页 = 二维码作废，其余客户端陪葬）：
+          // 回收失败窗口；primary 被回收时补开新 primary。URL/QR 只含
+          // token+secret（一次性 offer 走 mailbox 按请求分配），补开后依旧
+          // 可扫。10 分钟滑窗内 primary 连败 ≥5 次才判定网络禁 WebRTC。
+          logger.info("[zcode-go-mobile-bridge] 桥窗口连接失败，回收", {
+            token,
+            offerId: entry.offerId,
+            isPrimary,
+          });
+          destroyEntry(session, entry);
+          if (isPrimary && !detached) {
+            const now = Date.now();
+            session.primaryFailureTimestamps = session.primaryFailureTimestamps.filter(
+              (ts) => now - ts < 600_000,
             );
-          } else {
-            logger.info("[zcode-go-mobile-bridge] 桥窗口连接失败，回收", {
-              token,
-              offerId: entry.offerId,
-            });
-            destroyEntry(session, entry);
+            session.primaryFailureTimestamps.push(now);
+            if (session.primaryFailureTimestamps.length >= 5) {
+              teardown(
+                session,
+                "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
+              );
+            } else {
+              createBridgeWindow(true);
+              if (!anyConnected(session) && session.status.state !== "waiting-mobile") {
+                session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
+                emit(session);
+              }
+            }
           }
         }
       } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
@@ -936,41 +965,110 @@ export function startMobileBridgePairing(
     }
   }, 15000);
 
+  // 房间登记/心跳共用的容错请求：瞬时网络错误（undici 抛 "fetch failed"，
+  // 请求未达服务端）与 5xx/429 按退避重试；明确 4xx 视为终态由调用方处理。
+  let lastRoomPingFailureStatus = 0;
+  const postRoomPing = async (attempts: number): Promise<Response | null> => {
+    lastRoomPingFailureStatus = 0;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (activeSession !== session) return null;
+      try {
+        const response = await fetch(`${origin}/api/rooms`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        if (response.status >= 500 || response.status === 429) {
+          lastRoomPingFailureStatus = response.status;
+          throw new Error(String(response.status));
+        }
+        return response;
+      } catch {
+        if (attempt === attempts - 1) return null;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 2 ** attempt, 15000)));
+      }
+    }
+    return null;
+  };
+
   void (async () => {
     try {
-      const registerResponse = await fetch(`${origin}/api/rooms`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
+      const registerResponse = await postRoomPing(6);
+      if (activeSession !== session) return;
+      if (!registerResponse) {
+        teardown(
+          session,
+          lastRoomPingFailureStatus > 0
+            ? `配对服务暂时不可用（${lastRoomPingFailureStatus}），请稍后重试`
+            : "无法连接配对服务：请检查本机网络（或代理）后重试",
+        );
+        return;
+      }
       if (!registerResponse.ok) {
         teardown(session, `房间登记失败（${registerResponse.status}）`);
         return;
       }
       let signalingReconnectAttempts = 0;
-      /** 信令连接（可重入）：Worker 部署/DO 重启断开后自动重连。 */
+      /**
+       * 信令连接（可重入）：Worker 部署/DO 重启断开后自动重连。
+       * 30s 应用层 ping + pong 超时检测：家庭路由/NAT 会静默回收空闲 TCP，
+       * undici WebSocket 无自动心跳，半开连接本地毫无感知（表现为新客户端
+       * req-offer 永远无回应）——pong 连续缺席即主动废弃并重建连接。
+       */
       const connectSignaling = (): void => {
         if (activeSession !== session) return;
         const ws = new WebSocket(`${origin.replace(/^http/, "ws")}/api/signal/${token}?role=desktop`);
         session.ws = ws;
+        let lastPongAt = Date.now();
+        let signalingPing: ReturnType<typeof setInterval> | null = null;
         ws.onopen = () => {
           if (activeSession !== session) return;
           signalingReconnectAttempts = 0;
+          lastPongAt = Date.now();
           // mailbox 注册 capability secret。
           ws.send(JSON.stringify({ t: "register", p: session.secret }));
           if (session.status.state !== "connected") {
             session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
             emit(session);
           }
+          // 信令保活：30s ping；75s 无 pong 判定半开，废弃重建。
+          if (!signalingPing) {
+            signalingPing = setInterval(() => {
+              if (activeSession !== session || session.ws !== ws) {
+                if (signalingPing) clearInterval(signalingPing);
+                signalingPing = null;
+                return;
+              }
+              if (Date.now() - lastPongAt > 75_000) {
+                logger.warn("[zcode-go-mobile-bridge] 信令 pong 超时，判定半开连接，重建", { token });
+                if (signalingPing) clearInterval(signalingPing);
+                signalingPing = null;
+                session.ws = null;
+                try {
+                  ws.close();
+                } catch {
+                  /* 尽力而为 */
+                }
+                signalingReconnectAttempts = 0;
+                setTimeout(connectSignaling, 1000);
+                return;
+              }
+              try {
+                ws.send(JSON.stringify({ t: "ping" }));
+              } catch {
+                /* onclose 会接管重连 */
+              }
+            }, 30_000);
+          }
           // 房间滑动续期：会话存续期间每 2 分钟探活，二维码长期可扫。
+          // 单次失败不中断会话（既有连接不依赖信令）；连续重试仍失败只记
+          // 日志——房间 TTL 5 分钟 > 心跳周期，恢复后首跳即续上。
           if (!session.roomHeartbeat) {
             session.roomHeartbeat = setInterval(() => {
-              void fetch(`${origin}/api/rooms`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ token }),
-              }).catch(() => {
-                /* 心跳失败不中断会话（既有连接不依赖信令） */
+              void postRoomPing(3).then((response) => {
+                if (!response && activeSession === session) {
+                  logger.warn("[zcode-go-mobile-bridge] 房间心跳失败（重试后仍失败）", { token });
+                }
               });
             }, 120_000);
           }
@@ -986,6 +1084,10 @@ export function startMobileBridgePairing(
               data?: unknown;
             };
           } catch {
+            return;
+          }
+          if (message.t === "pong") {
+            lastPongAt = Date.now();
             return;
           }
           const requestId = typeof message.r === "string" ? message.r : "";
@@ -1025,28 +1127,32 @@ export function startMobileBridgePairing(
         };
         ws.onclose = () => {
           if (activeSession !== session) return;
-          // Worker 部署/DO 重启会断信令；已建立的 P2P 连接不依赖信令——
-          // 保留既有连接并按退避重连信令（新客户端可继续加入）。
-          if (anyConnected(session)) {
-            const delay = Math.min(3000 * 2 ** signalingReconnectAttempts, 30000);
-            signalingReconnectAttempts += 1;
-            logger.warn("[zcode-go-mobile-bridge] 信令断开（既有连接保留，重连信令）", {
+          // 该 socket 已被 pong 超时路径废弃（session.ws 指向新连接/为空），
+          // 重连已另行调度——避免双重连接。
+          if (session.ws !== ws) return;
+          // Worker 部署/DO 重启、本机网络瞬断都会断信令；已建立的 P2P 连接
+          // 不依赖信令——保留既有连接并按退避重连信令（新客户端可继续加入）。
+          // 尚无 P2P 连接时同样退避重连若干次（配对初期网络抖动不该杀死会话），
+          // 连续失败才放弃。
+          const delay = Math.min(3000 * 2 ** signalingReconnectAttempts, 30000);
+          signalingReconnectAttempts += 1;
+          if (anyConnected(session) || signalingReconnectAttempts <= 5) {
+            logger.warn("[zcode-go-mobile-bridge] 信令断开，退避重连", {
               token,
               retryInMs: delay,
+              hasConnection: anyConnected(session),
+              attempt: signalingReconnectAttempts,
             });
             session.ws = null;
             setTimeout(connectSignaling, delay);
             return;
           }
-          teardown(session, "信令连接已断开，请刷新重试");
+          teardown(session, "信令连接不可用：请检查本机网络后重试");
         };
         ws.onerror = () => {
           if (activeSession !== session) return;
-          if (anyConnected(session)) {
-            logger.warn("[zcode-go-mobile-bridge] 信令错误（既有连接保留）", { token });
-            return;
-          }
-          teardown(session, "信令连接失败");
+          // undici WebSocket 出错后必触发 close，重试/放弃决策统一在 onclose。
+          logger.warn("[zcode-go-mobile-bridge] 信令错误", { token });
         };
       };
       connectSignaling();
@@ -1064,6 +1170,7 @@ export function stopMobileBridgePairing(): void {
   if (!activeSession) return;
   const session = activeSession;
   activeSession = null;
+  sessionLogger?.info("[zcode-go-mobile-bridge] 配对停止（保留已连接窗口）", { token: session.token });
   if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
   // 刷新二维码：已连接客户端的桥窗口保留——preload 侧 rpc/resource 自持
   // （不依赖 main 会话状态），远端连接继续可用；仅回收未连接窗口与信令。

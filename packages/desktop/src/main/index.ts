@@ -2460,7 +2460,11 @@ app.whenReady().then(async () => {
       deviceMid,
     }),
   );
-  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStop, () => {
+  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStop, (event) => {
+    // 排查意外 Stop：记录调用方（主窗口 / 桥窗口 / 远程 UI 经 rpc 透传）。
+    logger.info("[zcode-go-mobile-bridge] 收到 Stop 请求", {
+      senderUrl: event.sender.getURL().slice(0, 200),
+    });
     stopMobileBridgePairing();
     return null;
   });
