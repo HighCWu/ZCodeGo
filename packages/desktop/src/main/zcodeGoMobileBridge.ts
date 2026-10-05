@@ -4,7 +4,9 @@
  *
  * 架构：每个远端客户端（手机/浏览器 tab）↔ 桌面一个隐藏桥窗口 P2P。Worker
  * 仅是 answer mailbox（+ QR 路径的 offer 取回，按请求方路由）。配对两级：
- *   - 复制链接：#v=1&t=<token>&p=<secret>&o=<完整 offer（non-trickle，base64url）>
+ *   - 复制链接/二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——统一短码形
+ *     态，经 mailbox 取回 offer（每连接多一次信令往返，换取 URL 简洁与
+ *     QR/链接同路径；容器页保留 o=/oc= direct 通道作兼容）
  *   - 二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——短码经 mailbox 取回
  * 首个（primary）桥窗口随配对启动预生成 offer（扫码秒连）；后续客户端的
  * req-offer 到达时按需追加桥窗口（offer 预生成 ~1-8s 后应答）。
@@ -58,7 +60,7 @@ const PRELOAD_BUNDLE_PATH = join(
 
 export interface MobileBridgeStatus {
   state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
-  /** 复制链接（携带完整 offer，direct 最快路径；primary 窗口产出）。 */
+  /** 复制链接（与二维码同形的 offer_id 短码，经 mailbox 取回）。 */
   pairingUrl?: string;
   /** 二维码内容（offer_id 短码，经 mailbox 取回；相机可靠扫描优先）。 */
   qrUrl?: string;
@@ -730,11 +732,10 @@ export function startMobileBridgePairing(
         const compressed = typeof payload.compressed === "string" ? payload.compressed : null;
         entry.offer = offer;
         if (isPrimary) {
-          // 链接形态（direct 最快路径）：完整 offer base64url 进 hash。
-          const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
-          session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&o=${encoded}`;
-          // 二维码：短码（offer_id 经 mailbox 取回，相机可靠扫描优先）。
-          session.qrUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${entry.offerId}`;
+          // 链接与二维码统一短码（offer_id 经 mailbox 取回）：URL 简洁、两条
+          // 路径完全一致；direct 通道（o=/oc=）容器页保留兼容但不再产出。
+          session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&i=${entry.offerId}`;
+          session.qrUrl = session.pairingUrl;
           session.status = {
             ...session.status,
             state: "waiting-mobile",
