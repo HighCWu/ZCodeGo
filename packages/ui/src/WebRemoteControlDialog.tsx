@@ -52,6 +52,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   const [bridgeStatus, setBridgeStatus] = useState<{
     state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
     pairingUrl?: string;
+    qrUrl?: string;
     token?: string;
     error?: string;
   }>({ state: "idle" });
@@ -85,11 +86,12 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
 
   useEffect(() => {
     let cancelled = false;
-    if (!bridgeStatus.pairingUrl) {
+    const qrContent = bridgeStatus.qrUrl ?? bridgeStatus.pairingUrl;
+    if (!qrContent) {
       setQrDataUrl(null);
       return;
     }
-    void QRCode.toDataURL(bridgeStatus.pairingUrl, { margin: 1, width: 220 })
+    void QRCode.toDataURL(qrContent, { margin: 1, width: 220 })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url);
       })
@@ -99,7 +101,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     return () => {
       cancelled = true;
     };
-  }, [bridgeStatus.pairingUrl]);
+  }, [bridgeStatus.qrUrl, bridgeStatus.pairingUrl]);
 
   // 状态 → 官方文案/色点映射（status/statusDetail 与官方 key 一致）。
   const bridgeStatusLabelId = (() => {

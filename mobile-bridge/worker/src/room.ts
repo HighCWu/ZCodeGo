@@ -11,10 +11,30 @@ import { DurableObject } from "cloudflare:workers";
 
 const ROOM_TTL_MS = 5 * 60_000;
 const ROOM_CREATED_AT_KEY = "createdAt";
+const ROOM_SECRET_KEY = "pairingSecret";
 
 interface SignalWire {
   t: string;
+  // capability secret（防抢答信箱；对端身份认证由 DTLS 承担）
+  p?: unknown;
+  // offer id（两级 pairing：QR 只带 id，offer 经 mailbox 取回）
+  i?: unknown;
   data?: unknown;
+}
+
+/** 时序安全比较（Workers 无 timingSafeEqual，用双 hash 摘要比对）。 */
+async function secretMatches(stored: string | undefined, presented: string): Promise<boolean> {
+  if (!stored) return false;
+  const encoder = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(stored)),
+    crypto.subtle.digest("SHA-256", encoder.encode(presented)),
+  ]);
+  const left = new Uint8Array(a);
+  const right = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < left.length; i += 1) diff |= left[i]! ^ right[i]!;
+  return diff === 0;
 }
 
 export class SignalRoom extends DurableObject {
@@ -106,12 +126,84 @@ export class SignalRoom extends DurableObject {
       this.send(ws, { t: "error", data: { code: "bad_json" } });
       return;
     }
-    if (message.t !== "signal") return;
-    const isDesktop = (this.ctx.getTags(ws)[0] ?? "").endsWith(":desktop");
-    const target = (isDesktop ? this.socketsFor("mobile") : this.socketsFor("desktop"))[0];
-    if (target?.readyState === WebSocket.OPEN) {
-      this.send(target, { t: "signal", data: message.data });
+    const tag = this.ctx.getTags(ws)[0] ?? "";
+    const isDesktop = tag.endsWith(":desktop");
+    console.log("[room] msg", JSON.stringify({ kind: message.t, from: isDesktop ? "desktop" : "mobile", size: raw.length }));
+    switch (message.t) {
+      // ── 新信令面（阶段 2）：answer mailbox ──
+      case "register": {
+        // desktop 声明 capability secret，后续 answer/req-offer 凭此放行。
+        if (!isDesktop) return;
+        const secret = typeof message.p === "string" ? message.p : "";
+        if (!secret) {
+          this.send(ws, { t: "error", data: { code: "bad_register" } });
+          return;
+        }
+        void this.ctx.storage.put(ROOM_SECRET_KEY, secret).then(() => {
+          this.send(ws, { t: "registered" });
+        });
+        return;
+      }
+      case "req-offer": {
+        // mobile 凭 secret 取 offer（QR 路径 / 多 tab）。转发给 desktop，由其
+        // 推送 offer；迟到或伪造的请求因 secret 校验挡在门外。
+        void this.authorize(ws, message.p).then((ok) => {
+          if (!ok) {
+            this.send(ws, { t: "error", data: { code: "bad_secret" } });
+            return;
+          }
+          const desktop = this.socketsFor("desktop")[0];
+          if (desktop?.readyState === WebSocket.OPEN) {
+            this.send(desktop, { t: "req-offer", i: message.i });
+          } else {
+            this.send(ws, { t: "error", data: { code: "desktop_offline" } });
+          }
+        });
+        return;
+      }
+      case "answer": {
+        // phone → mailbox → desktop：完整 non-trickle answer（阶段 2 核心）。
+        void this.authorize(ws, message.p).then((ok) => {
+          if (!ok) {
+            this.send(ws, { t: "error", data: { code: "bad_secret" } });
+            return;
+          }
+          const desktop = this.socketsFor("desktop")[0];
+          if (desktop?.readyState === WebSocket.OPEN) {
+            this.send(desktop, { t: "answer", i: message.i, data: message.data });
+            this.send(ws, { t: "answer-accepted" });
+          } else {
+            this.send(ws, { t: "error", data: { code: "desktop_offline" } });
+          }
+        });
+        return;
+      }
+      case "offer": {
+        // desktop → 请求方（req-offer 的回应）。
+        if (!isDesktop) return;
+        const mobile = this.socketsFor("mobile")[0];
+        if (mobile?.readyState === WebSocket.OPEN) {
+          this.send(mobile, { t: "offer", i: message.i, data: message.data });
+        }
+        return;
+      }
+      // ── legacy trickle 转发（A/B 对照，阶段 2 实测后移除）──
+      case "signal": {
+        const target = (isDesktop ? this.socketsFor("mobile") : this.socketsFor("desktop"))[0];
+        if (target?.readyState === WebSocket.OPEN) {
+          this.send(target, { t: "signal", data: message.data });
+        }
+        return;
+      }
+      default:
+        return;
     }
+  }
+
+  private async authorize(ws: WebSocket, presented: unknown): Promise<boolean> {
+    if (typeof presented !== "string" || !presented) return false;
+    const stored = await this.ctx.storage.get<string>(ROOM_SECRET_KEY);
+    return secretMatches(stored, presented);
   }
 
   override webSocketClose(ws: WebSocket): void {

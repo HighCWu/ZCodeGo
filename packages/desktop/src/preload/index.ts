@@ -270,6 +270,7 @@ contextBridge.exposeInMainWorld("zcode", {
   zcodeGoMobileBridgeStart: (): Promise<{
     state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
     pairingUrl?: string;
+    qrUrl?: string;
     token?: string;
     error?: string;
   }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeStart),
@@ -280,6 +281,7 @@ contextBridge.exposeInMainWorld("zcode", {
   zcodeGoMobileBridgeGetStatus: (): Promise<{
     state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
     pairingUrl?: string;
+    qrUrl?: string;
     token?: string;
     error?: string;
   }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeGetStatus),

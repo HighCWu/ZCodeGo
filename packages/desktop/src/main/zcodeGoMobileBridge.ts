@@ -1,20 +1,25 @@
 /**
- * zcode-go 移动端远程控制桥（阶段 1：信令 + WebRTC DataChannel echo）。
+ * zcode-go 移动端远程控制桥（阶段 2：out-of-band offer + mailbox + 资源通道）。
  *
- * 架构：手机（CF Worker 容器页，answer 侧）↔ 桌面隐藏桥窗口（offer 侧）。
- * main 只做配对编排与信令转发——WebRTC 必须活在桥窗口（Chromium）里：
- * Electron main 是纯 Node，没有 WebRTC。
+ * 架构：手机（CF Worker 容器页）↔ 桌面隐藏桥窗口 P2P。Worker 仅是 answer
+ * mailbox（+ QR 路径的 offer 取回）。配对两级：
+ *   - 复制链接：#v=1&t=<token>&p=<secret>&o=<完整 offer（non-trickle，base64url）>
+ *     ——手机本地解 offer 即刻协商，全程仅 answer 一条信令
+ *   - 二维码：#v=1&t=<token>&p=<secret>&i=<offer_id>——扫码后经 mailbox
+ *     req-offer 取回（URL 小，可扫）
+ * 旧 trickle 路径保留（容器页 URL 无 v= 参数时走 legacy），A/B 实测后移除。
  *
- * 生命周期：startPairing() 生成一次性 token → 登记房间 → 连信令（desktop）→
- * 打开桥窗口待命；手机 join 后桥窗口发 offer → answer/ICE 交换 → DataChannel
- * open 即配对完成。任一环失败/断开整体回收；无 TURN，ICE 失败即终态（容器页
- * 负责向用户展示换网络提示）。
+ * 桥窗口职责：持有 RTCPeerConnection（offer 侧预生成：等 ICE gathering
+ * complete）、三条 DataChannel（control/rpc/resource）；resource 通道以
+ * fs 直读桌面 renderer 产物并分片回传（版本天然对齐桌面当前运行的构建）。
+ * 注意 RTCSessionDescription/RTCIceCandidate 跨 ipcRenderer 序列化会丢成
+ * 空对象——桥内一律先解构为普通对象。
  *
  * 信令地址：~/.zcode-go/config.json → mobileBridge.signalingOrigin；
- * ZCODE_GO_SIGNALING_ORIGIN env 覆盖（dev 指向 wrangler dev 的 localhost）。
+ * ZCODE_GO_SIGNALING_ORIGIN env 覆盖；兜底 https://zcode-go.aimon.win。
  */
-import { randomInt } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { randomBytes, randomInt } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { BrowserWindow, ipcMain } from "electron";
@@ -23,10 +28,23 @@ const STATE_DIR = join(homedir(), ".zcode-go");
 const ICE_SERVERS = [
   { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
 ];
+/** 桌面 renderer 产物根（resource 通道的只读白名单根）。 */
+const RENDERER_ROOT = join(
+  homedir(),
+  ".zcode-go",
+  "electron",
+  "resources",
+  "app",
+  "out",
+  "renderer",
+);
 
 export interface MobileBridgeStatus {
   state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+  /** 复制链接（携带完整 offer，direct 最快路径）。 */
   pairingUrl?: string;
+  /** 二维码内容（仅 token/secret/offer_id，体积小）。 */
+  qrUrl?: string;
   token?: string;
   error?: string;
 }
@@ -38,7 +56,11 @@ interface MobileBridgeLogger {
 
 interface Session {
   token: string;
+  secret: string;
+  offerId: string;
+  offer: { type: string; sdp: string } | null;
   pairingUrl: string;
+  qrUrl: string;
   ws: WebSocket | null;
   bridgeWindow: BrowserWindow | null;
   status: MobileBridgeStatus;
@@ -96,66 +118,137 @@ function teardown(session: Session, reason: string): void {
   session.onStatus({ ...session.status });
 }
 
-/** 桥窗口页面：本地生成（可信内容），nodeIntegration 直用 ipcRenderer。 */
+/** 桥窗口页面：本地生成（可信内容），nodeIntegration 直用 ipcRenderer/fs。 */
 function writeBridgeWindowHtml(): string {
   const html = `<!doctype html>
 <html><body><script>
 const { ipcRenderer } = require("electron");
-const pc = new RTCPeerConnection({ iceServers: ${JSON.stringify(ICE_SERVERS)} });
+const fs = require("node:fs");
+const path = require("node:path");
+const RENDERER_ROOT = ${JSON.stringify(RENDERER_ROOT)};
+
+let pc = null;
 const channels = {};
-for (const label of ["control", "rpc", "resource"]) {
-  const dc = pc.createDataChannel("zcode-go-" + label, { ordered: true });
-  channels[label] = dc;
-  dc.onopen = () => ipcRenderer.send("zcode-go-bridge-event", { kind: "channel-open", label });
-  dc.onclose = () => ipcRenderer.send("zcode-go-bridge-event", { kind: "channel-closed", label });
-}
-const control = channels.control;
-// 阶段 1 echo：control 通道回环（容器页输入 → 桥回复 echo:...）。
-control.onmessage = (event) => {
-  if (control.readyState === "open") control.send("echo:" + event.data);
-};
-// RTCIceCandidate/RTCSessionDescription 跨 ipcRenderer structured clone 会丢成
-// 空对象——发送前必须解构为普通对象（e2e 实测：mobile 收到空 offer）。
-pc.onicecandidate = (event) => {
-  if (event.candidate) {
-    ipcRenderer.send("zcode-go-bridge-signal-out", {
-      candidate: event.candidate.candidate,
-      sdpMid: event.candidate.sdpMid,
-      sdpMLineIndex: event.candidate.sdpMLineIndex,
-      usernameFragment: event.candidate.usernameFragment,
-    });
+
+function makePeer() {
+  const peer = new RTCPeerConnection({ iceServers: ${JSON.stringify(ICE_SERVERS)} });
+  for (const label of ["control", "rpc", "resource"]) {
+    const dc = peer.createDataChannel("zcode-go-" + label, { ordered: true });
+    channels[label] = dc;
+    dc.onopen = () => ipcRenderer.send("zcode-go-bridge-event", { kind: "channel-open", label });
+    dc.onclose = () => ipcRenderer.send("zcode-go-bridge-event", { kind: "channel-closed", label });
   }
-};
-pc.onconnectionstatechange = () => {
-  ipcRenderer.send("zcode-go-bridge-event", { kind: "pc-state", state: pc.connectionState });
-};
-ipcRenderer.on("zcode-go-bridge-signal-start", async () => {
+  channels.control.onmessage = (event) => {
+    if (channels.control.readyState === "open") channels.control.send("echo:" + event.data);
+  };
+  channels.resource.onmessage = (event) => handleResourceRequest(event.data);
+  peer.onconnectionstatechange = () => {
+    ipcRenderer.send("zcode-go-bridge-event", { kind: "pc-state", state: peer.connectionState });
+  };
+  return peer;
+}
+
+// ── offer 预生成：建 PC → createOffer → 等 ICE gathering complete → 完整 offer ──
+async function pregenerateOffer() {
   try {
+    pc = makePeer();
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    ipcRenderer.send("zcode-go-bridge-signal-out", {
-      type: pc.localDescription.type,
-      sdp: pc.localDescription.sdp,
+    await new Promise((resolve) => {
+      if (pc.iceGatheringState === "complete") return resolve();
+      const check = () => {
+        if (pc.iceGatheringState === "complete") {
+          pc.removeEventListener("icegatheringstatechange", check);
+          resolve();
+        }
+      };
+      pc.addEventListener("icegatheringstatechange", check);
+      // 兜底超时：srflx 慢或不可达时 8s 后带现有候选收工。
+      setTimeout(resolve, 8000);
     });
+    const full = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+    ipcRenderer.send("zcode-go-bridge-event", { kind: "offer-ready", offer: full });
   } catch (error) {
     ipcRenderer.send("zcode-go-bridge-event", { kind: "offer-failed", error: String(error) });
   }
+}
+
+// mailbox 送来的完整 answer（direct 与 QR 路径共用）。
+ipcRenderer.on("zcode-go-bridge-answer", (_event, answer) => {
+  if (!pc || !answer || typeof answer.sdp !== "string") return;
+  pc.setRemoteDescription({ type: "answer", sdp: answer.sdp }).then(
+    () => ipcRenderer.send("zcode-go-bridge-event", { kind: "answer-set" }),
+    (error) =>
+      ipcRenderer.send("zcode-go-bridge-event", { kind: "answer-err", error: String(error) }),
+  );
 });
-ipcRenderer.on("zcode-go-bridge-signal-in", (_event, data) => {
-  if (data && data.type === "answer") {
-    pc.setRemoteDescription(data).catch((error) => {
-      ipcRenderer.send("zcode-go-bridge-event", { kind: "answer-failed", error: String(error) });
-    });
-  } else if (data && data.candidate) {
-    pc.addIceCandidate(data).catch(() => {});
+
+// QR 路径：mailbox 转来 req-offer → 通知 main 推预生成的 offer。
+ipcRenderer.on("zcode-go-bridge-req-offer", () => {
+  if (pc && pc.localDescription && pc.localDescription.sdp) {
+    ipcRenderer.send("zcode-go-bridge-event", { kind: "req-offer-received" });
   }
 });
+
+// ── resource 通道：手机请求桌面 renderer 产物（白名单在 RENDERER_ROOT 内）──
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".woff2": "font/woff2",
+};
+
+function handleResourceRequest(raw) {
+  let request;
+  try {
+    request = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const id = request && request.id;
+  const urlPath = request && request.path;
+  if (typeof id !== "number" || typeof urlPath !== "string") return;
+  const dc = channels.resource;
+  if (!dc || dc.readyState !== "open") return;
+  const send = (payload) => dc.send(JSON.stringify(payload));
+  // path 归一化：/app/<rel> → RENDERER_ROOT/<rel>；resolve 后必须仍在根内（禁穿越）。
+  const rel = urlPath.replace(/^\\/app\\//, "").replace(/^\\/+/, "");
+  const resolved = path.resolve(RENDERER_ROOT, rel);
+  if (resolved !== RENDERER_ROOT && !resolved.startsWith(RENDERER_ROOT + path.sep)) {
+    send({ id, type: "error", message: "forbidden" });
+    return;
+  }
+  let data;
+  try {
+    data = fs.readFileSync(resolved);
+  } catch {
+    send({ id, type: "error", message: "not-found" });
+    return;
+  }
+  const mime = MIME[path.extname(resolved).toLowerCase()] || "application/octet-stream";
+  const CHUNK = 48 * 1024;
+  send({ id, type: "meta", status: 200, mime, size: data.length });
+  for (let offset = 0; offset < data.length; offset += CHUNK) {
+    send({
+      id,
+      type: "chunk",
+      seq: offset / CHUNK,
+      b64: data.slice(offset, offset + CHUNK).toString("base64"),
+    });
+  }
+  send({ id, type: "end" });
+}
+
+pregenerateOffer();
 ipcRenderer.send("zcode-go-bridge-event", { kind: "ready" });
 </script></body></html>`;
-  const path = join(STATE_DIR, "mobile-bridge-window.html");
   mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(path, html, "utf8");
-  return path;
+  const filePath = join(STATE_DIR, "mobile-bridge-window.html");
+  writeFileSync(filePath, html, "utf8");
+  return filePath;
 }
 
 export function startMobileBridgePairing(
@@ -166,21 +259,19 @@ export function startMobileBridgePairing(
     return { ...activeSession.status };
   }
   const origin = resolveSignalingOrigin();
-  if (!origin) {
-    const status: MobileBridgeStatus = {
-      state: "error",
-      error: "未配置信令服务器：请在 ~/.zcode-go/config.json 设置 mobileBridge.signalingOrigin",
-    };
-    onStatus(status);
-    return status;
-  }
   const token = generateToken();
+  const secret = randomBytes(16).toString("hex");
+  const offerId = randomBytes(6).toString("hex");
   const session: Session = {
     token,
-    pairingUrl: `${origin}/#${token}`,
+    secret,
+    offerId,
+    offer: null,
+    pairingUrl: "",
+    qrUrl: `${origin}/#v=1&t=${token}&p=${secret}&i=${offerId}`,
     ws: null,
     bridgeWindow: null,
-    status: { state: "signaling", pairingUrl: `${origin}/#${token}`, token },
+    status: { state: "signaling", token },
     onStatus,
   };
   activeSession = session;
@@ -195,14 +286,29 @@ export function startMobileBridgePairing(
       sandbox: false,
     },
   });
-  const webContentsId = session.bridgeWindow.webContents.id;
   const bridgeWindow = session.bridgeWindow;
-  void bridgeWindow.loadFile(htmlPath).catch((error) => {
-    logger.warn("[zcode-go-mobile-bridge] 桥窗口加载失败:", error);
-  });
+
   const onBridgeEvent = (_event: unknown, payload: { kind: string; [key: string]: unknown }) => {
     if (activeSession !== session) return;
-    if (payload.kind === "pc-state") {
+    if (payload.kind === "offer-ready") {
+      const offer = payload.offer as { type: string; sdp: string };
+      session.offer = offer;
+      // 链接形态（direct 最快路径）：完整 offer base64url 进 hash。
+      const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
+      session.pairingUrl = `${origin}/#v=1&t=${token}&p=${secret}&o=${encoded}`;
+      session.status = {
+        ...session.status,
+        state: "waiting-mobile",
+        pairingUrl: session.pairingUrl,
+        qrUrl: session.qrUrl,
+      };
+      emit(session);
+    } else if (payload.kind === "req-offer-received") {
+      // QR 路径应答：经信令 WS 推预生成的 offer。
+      if (session.offer && session.ws?.readyState === WebSocket.OPEN) {
+        session.ws.send(JSON.stringify({ t: "offer", i: session.offerId, data: session.offer }));
+      }
+    } else if (payload.kind === "pc-state") {
       const state = payload.state as string;
       if (state === "connected") {
         session.status = { ...session.status, state: "connected" };
@@ -216,12 +322,6 @@ export function startMobileBridgePairing(
     }
   };
   ipcMain.on("zcode-go-bridge-event", onBridgeEvent);
-
-  const signalOut = (_event: unknown, data: unknown) => {
-    if (activeSession !== session || !session.ws || session.ws.readyState !== WebSocket.OPEN) return;
-    session.ws.send(JSON.stringify({ t: "signal", data }));
-  };
-  ipcMain.on("zcode-go-bridge-signal-out", signalOut);
 
   const sendToBridge = (channel: string, data: unknown): void => {
     if (activeSession !== session || !bridgeWindow || bridgeWindow.isDestroyed()) return;
@@ -244,27 +344,27 @@ export function startMobileBridgePairing(
         session.ws = ws;
         ws.onopen = () => {
           if (activeSession !== session) return;
-          session.status = { ...session.status, state: "waiting-mobile" };
+          // mailbox 注册 capability secret。
+          ws.send(JSON.stringify({ t: "register", p: session.secret }));
+          session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
           emit(session);
         };
         ws.onmessage = (event) => {
           if (activeSession !== session) return;
-          let message: { t?: string; data?: unknown };
+          let message: { t?: string; i?: unknown; data?: unknown };
           try {
-            message = JSON.parse(String(event.data)) as { t?: string; data?: unknown };
+            message = JSON.parse(String(event.data)) as { t?: string; i?: unknown; data?: unknown };
           } catch {
             return;
           }
-          if (message.t === "peer-joined") {
+          if (message.t === "req-offer") {
+            // QR 路径：手机凭 secret 请求 offer。
+            sendToBridge("zcode-go-bridge-req-offer", null);
+          } else if (message.t === "answer") {
+            if (!session.offer) return; // offer 预生成未完成（极端时序），手机会重试
             session.status = { ...session.status, state: "connecting" };
             emit(session);
-            sendToBridge("zcode-go-bridge-signal-start", null);
-          } else if (message.t === "signal") {
-            sendToBridge("zcode-go-bridge-signal-in", message.data);
-          } else if (message.t === "peer-left") {
-            teardown(session, "peer-left");
-          } else if (message.t === "error") {
-            teardown(session, `信令错误：${JSON.stringify(message.data)}`);
+            sendToBridge("zcode-go-bridge-answer", message.data);
           }
         };
         ws.onclose = () => {
@@ -281,11 +381,9 @@ export function startMobileBridgePairing(
 
   bridgeWindow.once("closed", () => {
     ipcMain.removeListener("zcode-go-bridge-event", onBridgeEvent);
-    ipcMain.removeListener("zcode-go-bridge-signal-out", signalOut);
     if (activeSession === session) teardown(session, "bridge-window-closed");
   });
-  void webContentsId;
-  logger.info("[zcode-go-mobile-bridge] 配对开始", { token, pairingUrl: session.pairingUrl });
+  logger.info("[zcode-go-mobile-bridge] 配对开始", { token });
   emit(session);
   return { ...session.status };
 }

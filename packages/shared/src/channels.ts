@@ -1202,6 +1202,7 @@ export interface PlatformChannelMap {
     response: {
       state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
       pairingUrl?: string;
+      qrUrl?: string;
       token?: string;
       error?: string;
     };
@@ -1215,6 +1216,7 @@ export interface PlatformChannelMap {
     response: {
       state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
       pairingUrl?: string;
+      qrUrl?: string;
       token?: string;
       error?: string;
     };
