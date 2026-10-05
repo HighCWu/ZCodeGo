@@ -991,12 +991,25 @@ export function startMobileBridgePairing(
           entry.win.webContents.send("zcode-go-bridge-answer", message.data);
         }
       };
-      ws.onclose = () => {
-        if (activeSession === session) teardown(session, "信令连接已断开，请刷新重试");
-      };
-      ws.onerror = () => {
-        if (activeSession === session) teardown(session, "信令连接失败");
-      };
+        ws.onclose = () => {
+          if (activeSession !== session) return;
+          // Worker 部署/DO 重启会断信令；已建立的 P2P 连接不依赖信令——
+          // 保留既有连接，仅失去新客户端加入能力（重新配对可恢复）。
+          if (anyConnected(session)) {
+            logger.warn("[zcode-go-mobile-bridge] 信令断开（既有连接保留）", { token });
+            session.ws = null;
+            return;
+          }
+          teardown(session, "信令连接已断开，请刷新重试");
+        };
+        ws.onerror = () => {
+          if (activeSession !== session) return;
+          if (anyConnected(session)) {
+            logger.warn("[zcode-go-mobile-bridge] 信令错误（既有连接保留）", { token });
+            return;
+          }
+          teardown(session, "信令连接失败");
+        };
     } catch (error) {
       teardown(session, error instanceof Error ? error.message : String(error));
     }

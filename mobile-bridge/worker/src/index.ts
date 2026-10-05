@@ -990,14 +990,24 @@ function requestFromPage(request) {
       proxyPort.postMessage({ kind: "app-resource", url }, [channel.port2]);
       return;
     }
-    // 兜底：容器页尚未注册代理端口（时序窗口）——直接 postMessage 到窗口 client。
+    // 兜底：容器页尚未注册代理端口（时序窗口 / Worker 部署后新 SW 接管）——
+    // 直接 postMessage 到容器页（pathname 为 / 的 window client；iframe 场景
+    // 不能把请求发给应用 iframe 自身）。
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       if (clients.length === 0) {
         clearTimeout(timeout);
         resolve(null);
         return;
       }
-      clients[0].postMessage({ kind: "app-resource", url }, [channel.port2]);
+      const target =
+        clients.find((c) => {
+          try {
+            return new URL(c.url).pathname === "/";
+          } catch (e) {
+            return false;
+          }
+        }) ?? clients[0];
+      target.postMessage({ kind: "app-resource", url }, [channel.port2]);
     });
   });
 }
