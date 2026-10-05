@@ -426,6 +426,14 @@ export const PlatformChannels = {
   ZcodeGoOpenSessionInNewWindow: "zcode:zcode-go-open-session-in-new-window",
   /** Renderer → Main：新窗口启动时领取待打开的初始会话（一次性质询，避免事件时序竞态） */
   ZcodeGoTakeSessionInitial: "zcode:zcode-go-take-session-initial",
+  /** Renderer → Main：移动端远程控制——开始配对（生成二维码/链接并连信令） */
+  ZcodeGoMobileBridgeStart: "zcode:zcode-go-mobile-bridge-start",
+  /** Renderer → Main：移动端远程控制——停止配对/断开 */
+  ZcodeGoMobileBridgeStop: "zcode:zcode-go-mobile-bridge-stop",
+  /** Renderer → Main：移动端远程控制——查询当前状态 */
+  ZcodeGoMobileBridgeGetStatus: "zcode:zcode-go-mobile-bridge-get-status",
+  /** Main → Renderer：移动端远程控制状态变化（配对 URL / 连接状态） */
+  ZcodeGoMobileBridgeStatusChanged: "zcode:zcode-go-mobile-bridge-status-changed",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -1188,6 +1196,28 @@ export interface PlatformChannelMap {
   [PlatformChannels.ZcodeGoTakeSessionInitial]: {
     request: void;
     response: { taskId: string; workspacePath: string; workspaceIdentity?: string } | null;
+  };
+  [PlatformChannels.ZcodeGoMobileBridgeStart]: {
+    request: void;
+    response: {
+      state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+      pairingUrl?: string;
+      token?: string;
+      error?: string;
+    };
+  };
+  [PlatformChannels.ZcodeGoMobileBridgeStop]: {
+    request: void;
+    response: void;
+  };
+  [PlatformChannels.ZcodeGoMobileBridgeGetStatus]: {
+    request: void;
+    response: {
+      state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+      pairingUrl?: string;
+      token?: string;
+      error?: string;
+    };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

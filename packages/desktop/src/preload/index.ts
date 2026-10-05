@@ -266,6 +266,36 @@ contextBridge.exposeInMainWorld("zcode", {
     workspaceIdentity?: string;
   }): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(PlatformChannels.ZcodeGoOpenSessionInNewWindow, payload),
+  /** zcode-go：移动端远程控制——开始配对。 */
+  zcodeGoMobileBridgeStart: (): Promise<{
+    state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+    pairingUrl?: string;
+    token?: string;
+    error?: string;
+  }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeStart),
+  /** zcode-go：移动端远程控制——停止。 */
+  zcodeGoMobileBridgeStop: (): Promise<void> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeStop),
+  /** zcode-go：移动端远程控制——状态查询。 */
+  zcodeGoMobileBridgeGetStatus: (): Promise<{
+    state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+    pairingUrl?: string;
+    token?: string;
+    error?: string;
+  }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeGetStatus),
+  onZcodeGoMobileBridgeStatusChanged: (
+    handler: (status: {
+      state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+      pairingUrl?: string;
+      token?: string;
+      error?: string;
+    }) => void,
+  ): (() => void) => {
+    const listener = (_event: unknown, status: Parameters<typeof handler>[0]): void =>
+      handler(status);
+    ipcRenderer.on(PlatformChannels.ZcodeGoMobileBridgeStatusChanged, listener);
+    return () => ipcRenderer.removeListener(PlatformChannels.ZcodeGoMobileBridgeStatusChanged, listener);
+  },
   /** zcode-go：新窗口启动时领取待打开的初始会话（一次性质询）。 */
   zcodeGoTakeSessionInitial: (): Promise<{
     taskId: string;

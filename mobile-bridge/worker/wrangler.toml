@@ -1,0 +1,20 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "zcode-go-mobile-bridge"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# 信令房间：Durable Objects + WebSocket Hibernation。
+[[durable_objects.bindings]]
+name = "SIGNAL_ROOM"
+class_name = "SignalRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SignalRoom"]
+
+[observability]
+enabled = true
+
+[vars]
+# 桌面端可覆盖（构建时注入或部署后改）；容器页在同源下提供。
+# SIGNAL_MAX_ROOM_AGE_SECONDS = "300"

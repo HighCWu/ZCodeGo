@@ -149,6 +149,12 @@ import {
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import { initZcodeGoRendererRecovery } from "./zcodeGoRendererRecovery.js";
+import {
+  startMobileBridgePairing,
+  stopMobileBridgePairing,
+  getMobileBridgeStatus,
+  type MobileBridgeStatus,
+} from "./zcodeGoMobileBridge.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
 import {
   getCredentialsDir,
@@ -2392,6 +2398,22 @@ app.whenReady().then(async () => {
       }
     },
   );
+  // zcode-go：移动端远程控制（WebRTC P2P 桥，阶段 1 = 信令 + DataChannel echo）。
+  const broadcastMobileBridgeStatus = (status: MobileBridgeStatus): void => {
+    for (const win of getApplicationWindowsExcludingCuaIndicator()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(PlatformChannels.ZcodeGoMobileBridgeStatusChanged, status);
+      }
+    }
+  };
+  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStart, () =>
+    startMobileBridgePairing(logger, broadcastMobileBridgeStatus),
+  );
+  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStop, () => {
+    stopMobileBridgePairing();
+    return null;
+  });
+  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeGetStatus, () => getMobileBridgeStatus());
   ipcMain.handle(PlatformChannels.ZcodeGoTakeSessionInitial, (event) => {
     const pending = zcodeGoPendingInitialSession.get(event.sender.id);
     if (pending) zcodeGoPendingInitialSession.delete(event.sender.id);
