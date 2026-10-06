@@ -92,9 +92,10 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
       setQrDataUrl(null);
       return;
     }
-    // width 512 显示时缩到 size-64（2:1 高分屏仍清晰）；margin 4 为 QR 规范
-    // 静区——此前 margin 1 + 大 payload 过密，相机扫不出。
-    void QRCode.toDataURL(qrContent, { margin: 4, width: 512 })
+    // width 640 显示时缩到 size-80（2:1 高分屏仍清晰）；margin 4 为 QR 规范
+    // 静区——此前 margin 1 + 大 payload 过密，相机扫不出。静区已内嵌在图片
+    // 白边里，显示侧不再叠加 padding（否则留白观感翻倍）。
+    void QRCode.toDataURL(qrContent, { margin: 4, width: 640 })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url);
       })
@@ -365,7 +366,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
                     <img
                       src={qrDataUrl}
                       alt={intl.formatMessage({ id: "webRemoteControl.qrAlt" })}
-                      className="size-64 max-w-full rounded-lg bg-white p-3"
+                      className="size-80 max-w-full rounded-lg bg-white"
                     />
                   ) : (
                     <div className="flex flex-col items-center gap-3 text-center text-ui-base text-foreground-subtle">
