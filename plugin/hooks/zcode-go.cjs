@@ -26,6 +26,13 @@ var import_node_child_process = require("node:child_process");
 var import_node_fs = require("node:fs");
 var import_node_os = require("node:os");
 var import_node_path = require("node:path");
+{
+  const originalEmit = process.emit.bind(process);
+  process.emit = ((name, warning, ...rest) => {
+    if (name === "warning") return false;
+    return originalEmit(name, warning, ...rest);
+  });
+}
 var STATE_DIR = (0, import_node_path.join)((0, import_node_os.homedir)(), ".zcode-go");
 var OFFICIAL_JSON = (0, import_node_path.join)(STATE_DIR, "official.json");
 var CONFIG_JSON = (0, import_node_path.join)(STATE_DIR, "config.json");

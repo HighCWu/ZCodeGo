@@ -14,6 +14,19 @@ import { existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, writeFil
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+// 官方把 hook 的任何 stderr 输出都按「Hook error」展示（用户会在每次
+// /zcode-go 下方看到 ZCode 报错信息横幅）。本进程用 node:sqlite 清理空会话，
+// 该实验性模块在加载时向 stderr 打 ExperimentalWarning——在本进程内吞掉
+// process warning（hook 是秒级编排进程，警告无处可去只会变成噪音横幅）。
+// 必须先于任何触发模块加载的调用执行（node:sqlite 是函数内按需加载）。
+{
+  const originalEmit = process.emit.bind(process);
+  process.emit = ((name: unknown, warning: unknown, ...rest: unknown[]) => {
+    if (name === "warning") return false;
+    return originalEmit(name as never, warning as never, ...(rest as never[]));
+  }) as typeof process.emit;
+}
+
 const STATE_DIR = join(homedir(), ".zcode-go");
 const OFFICIAL_JSON = join(STATE_DIR, "official.json");
 const CONFIG_JSON = join(STATE_DIR, "config.json");
