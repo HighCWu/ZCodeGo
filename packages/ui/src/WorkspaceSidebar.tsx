@@ -262,6 +262,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   automationsActive = false,
   pluginStoreActive = false,
   onFileTreeOpenChange,
+  hideTopOverlaySpacer = false,
 }: {
   workspacePath: string;
   workspaceRemoteSessionId?: string;
@@ -314,6 +315,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   automationsActive?: boolean;
   pluginStoreActive?: boolean;
   onFileTreeOpenChange?: (open: boolean) => void;
+  /** 移动抽屉形态下顶部浮层不渲染，侧栏不再预留 h-12 空条。 */
+  hideTopOverlaySpacer?: boolean;
 }) {
   const { intl, localePreference, setLocalePreference } = useZCodeIntl();
   const handleTaskRowSelect = useCallback(
@@ -1254,7 +1257,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
       // 这里用设计系统的结构面 token 固定侧栏层级，避免不同合成器把左侧容器混成异常灰块。
       className="flex h-full flex-col overflow-hidden"
     >
-      <div className="h-12 [app-region:drag]"></div>
+      {!hideTopOverlaySpacer ? <div className="h-12 [app-region:drag]"></div> : null}
       <div className="relative flex-1 min-h-0 overflow-hidden">
         <div
           className={cn(

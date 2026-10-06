@@ -9,7 +9,7 @@ export type ViewportTier = "mobile" | "tablet" | "desktop";
 const MOBILE_MAX_WIDTH_PX = 768;
 const TABLET_MAX_WIDTH_PX = 1024;
 
-function computeViewportTier(): ViewportTier {
+export function computeViewportTier(): ViewportTier {
   if (typeof window === "undefined") return "desktop";
   const width = window.innerWidth;
   if (width < MOBILE_MAX_WIDTH_PX) return "mobile";

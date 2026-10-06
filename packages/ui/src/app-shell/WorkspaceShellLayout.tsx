@@ -32,7 +32,6 @@ import { usePaneSessionPersistence } from "@/v4/usePaneSessionPersistence.js";
 import { requestV4ComposerDraftWorkspaceTransfer } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { ChatEmptyWorkspacePreviewMenu } from "@/ChatEmptyState.js";
 import { DesktopTopOverlay } from "@/DesktopTopOverlay.js";
-import { MobileChatHeader } from "@/app-shell/MobileChatHeader.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { WorkspacePluginPreview } from "@/WorkspacePluginPreview.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -405,20 +404,9 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     );
   }, [openWorkspaceKeys]);
   const isSidebarPanelVisible = isSidebarVisible;
-  // 移动视口：侧栏不再是内联分栏面板，而是覆盖式抽屉（官方 remote 形态）。
+  // 移动视口：侧栏为左滑抽屉，整体走「桌面浏览器响应式」形态（不再做官方
+  // mobileShell 的整页切换）；抽屉默认收起，首屏即新建任务空会话。
   const isMobileViewport = useIsMobileViewport();
-  // 移动端首屏 = 项目/任务选择页（官方 remote 语义，initialWebRemoteControl
-  // MobileNavigationIntent 对应行为）：无活跃会话时停留在全屏列表；一旦有
-  // 活跃会话（含"在新窗口打开"领取的初始会话）自动收起进入对话。仅自动
-  // 一次，用户手动开合不再干预。
-  const mobileAutoEnteredConversationRef = useRef(false);
-  useEffect(() => {
-    if (!isMobileViewport || mobileAutoEnteredConversationRef.current) return;
-    if (activeTaskId) {
-      mobileAutoEnteredConversationRef.current = true;
-      if (isSidebarPanelVisible) handleToggleSidebar();
-    }
-  }, [isMobileViewport, activeTaskId, handleToggleSidebar, isSidebarPanelVisible]);
   const {
     panelRef: terminalPanelRef,
     panelElementRef: terminalPanelElementRef,
@@ -1555,14 +1543,21 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
         style={workspaceShellSplitStyle}
         className={cn(
           "relative flex h-full min-h-0 w-full overflow-hidden",
-          // 官方 remote 的移动端是列式布局（max-md:flex-col）：侧栏在上方、
-          // 对话在下方，二者是页面切换而非浮层叠加。
-          isMobileViewport && "flex-col",
           // 窗口原生 resize 时，外层 react-resizable-panels 会把每一帧
           // 都写进 layout store，连带侧栏 tooltip/menu 子树反复 commit。这里改成
           // CSS 变量驱动的专用 split，普通窗口 resize 只走浏览器布局，不触发 React 状态。
         )}
       >
+        {/* 移动视口抽屉背板：侧栏打开时盖住会话区，点击收起。
+            放在侧栏（z-40）之下、内容之上。 */}
+        {isMobileViewport && isSidebarPanelVisible ? (
+          <button
+            type="button"
+            aria-label={intl.formatMessage({ id: "workspaceSidebar.hideSidebar" })}
+            className="absolute inset-0 z-30"
+            onClick={handleToggleSidebar}
+          />
+        ) : null}
         <div
           ref={workspaceSidebarPanelElementRef}
           data-panel=""
@@ -1571,13 +1566,12 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           className={cn(
             isMobileViewport
               ? cn(
-                  // 官方语义：侧栏即整页（不透明 bg-sidebar + 底边框）。打开时
-                  // 占满全部高度把对话挤到 0；关闭时 h-0 完全让位给对话页。
-                  // 绝不做成浮在对话上的半透明抽屉。
-                  "w-full max-w-none flex-none overflow-hidden",
+                  // 移动视口：侧栏 = 从左滑出的抽屉（桌面浏览器响应式，不占布局流）。
+                  // 灰色背板随抽屉一起滑出，侧栏自身无需专门设不透明背景。
+                  "absolute inset-y-0 left-0 z-40 flex-none overflow-hidden transition-transform duration-200 ease-out w-[min(85vw,20rem)] max-w-none",
                   isSidebarPanelVisible
-                    ? "h-full min-h-0 basis-auto border-b border-border bg-sidebar"
-                    : "h-0 min-h-0 basis-0",
+                    ? "translate-x-0"
+                    : "pointer-events-none -translate-x-full",
                 )
               : cn(
                   "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
@@ -1587,9 +1581,11 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                 ),
           )}
         >
+          {/* 抽屉灰色背板：与侧栏同一容器内一起滑出/滑入，保证下方会话内容不透视。 */}
+          {isMobileViewport ? <div aria-hidden className="absolute inset-0 bg-header" /> : null}
           <aside
             ref={sidebarContainerRef}
-            className="h-full overflow-hidden select-none"
+            className="relative h-full overflow-hidden select-none"
             aria-hidden={!isSidebarPanelVisible}
           >
             <ScopedErrorBoundary
@@ -1649,6 +1645,8 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     onOpenPluginStore={handleOpenPluginStore}
                     pluginStoreActive={workspaceMainView === "plugin-store"}
                     onFileTreeOpenChange={setIsSidebarFileTreeOpen}
+                    // 移动抽屉里没有顶部浮层，侧栏不再为它预留 h-12 空条。
+                    hideTopOverlaySpacer={isMobileViewport}
                   />
                 </WorkflowRunOpenProvider>
               </V4SplitPaneEntryProvider>
@@ -1656,7 +1654,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           </aside>
         </div>
 
-        {isSidebarVisible ? (
+        {isSidebarVisible && !isMobileViewport ? (
           <div
             role="separator"
             tabIndex={0}
@@ -1733,26 +1731,15 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     )}
                   >
                     {shouldRenderWorkspaceHeader ? (
-                      isMobileViewport ? (
-                        // 移动视口用官版 mobileShell 的 chat 页头部：返回首页 + 静态标题 + 主题菜单，
-                        // 桌面 WorkspaceHeader 的整排操作不进手机。
-                        <ScopedErrorBoundary
-                          scope="mobile-chat-header"
-                          resetKeys={workspaceOnlyResetKeys}
-                          variant="compact"
-                          className="border-b"
-                        >
-                          <MobileChatHeader onBackHome={handleToggleSidebar} />
-                        </ScopedErrorBoundary>
-                      ) : (
-                        <ScopedErrorBoundary
-                          scope="workspace-header"
-                          resetKeys={workspaceOnlyResetKeys}
-                          variant="compact"
-                          className="border-b"
-                        >
+                      <ScopedErrorBoundary
+                        scope="workspace-header"
+                        resetKeys={workspaceOnlyResetKeys}
+                        variant="compact"
+                        className="border-b"
+                      >
                         <WorkspaceHeader
                           reserveWindowControls={!isSidePaneVisible}
+                          onToggleSidebar={handleToggleSidebar}
                           variant={activeTaskId === null ? "draft" : "task"}
                           draftDropTargetController={
                             activeTaskId === null ? draftHeaderDropTargetController : undefined
@@ -1801,8 +1788,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           onOpenWorkspace={onOpenWorkspace}
                           allowOpenWorkspace={allowOpenWorkspace}
                         />
-                        </ScopedErrorBoundary>
-                      )
+                      </ScopedErrorBoundary>
                     ) : null}
                     <div className="min-h-0 flex-1 overflow-hidden">
                       {workspaceMainView === "automations" ? (
@@ -1995,9 +1981,9 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             {sidePanePanel}
           </ResizablePanelGroup>
         </div>
-        {/* 移动视口会话页由 MobileChatHeader 承担导航（返回首页），顶部浮层只在
-            首页（侧栏可见）渲染；桌面两态都渲染。 */}
-        {(!isMobileViewport || isSidebarVisible) ? (
+        {/* 移动视口：顶部浮层（logo/前进后退/新建）会让位给 header 里的侧栏
+            展开按钮，浮层不进手机；桌面两态照旧。 */}
+        {!isMobileViewport ? (
         <ScopedErrorBoundary
           scope="desktop-top-overlay"
           resetKeys={workspaceSidebarVisibilityResetKeys}
@@ -2023,8 +2009,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             canTaskNavForward={canTaskNavForward}
             canGoBack={canGoBack}
             canGoForward={canGoForward}
-            // 移动视口任务间导航走侧栏列表，不在顶栏放前进/后退（官方 remote 同款取舍）。
-            hideTaskNavigationButtons={isMobileViewport}
             showNewTaskButton={showTopOverlayNewTaskButton}
             appLogoUrl={appLogoUrl}
             platform={platform}

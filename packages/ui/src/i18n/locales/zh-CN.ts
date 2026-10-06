@@ -6530,10 +6530,6 @@ const zhCN: Record<string, string> = {
   "taskList.forkCompactHistory": "分叉压缩历史会话",
   "taskList.openInNewWindow": "在新窗口打开",
   "taskList.openInNewWindowFailed": "在新窗口打开会话失败：{error}",
-  // 移动视口会话页头部（对齐官方 web-remote mobileShell 文案）
-  "zcodeGoMobile.backHome": "返回任务首页",
-  "zcodeGoMobile.chatTitle": "任务会话",
-  "zcodeGoMobile.themeMenu": "选择主题",
 };
 
 export default zhCN;

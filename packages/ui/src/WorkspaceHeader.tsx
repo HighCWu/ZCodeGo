@@ -9,8 +9,12 @@ import type {
 } from "@zcode/shared";
 import { useState } from "react";
 import { TID_WORKSPACE_HEADER } from "@zcode/shared";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import { cn } from "@/components/lib/utils.js";
+import { Button } from "@/components/ui/button.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 import {
   WorkspaceHeaderActionSection,
   type WorkspaceHeaderState,
@@ -53,6 +57,7 @@ export function WorkspaceHeader({
   isDesktop,
   simplifyForNarrowRemote = false,
   isSidebarVisible,
+  onToggleSidebar,
   isTerminalOpen,
   isSidePaneOpen,
   onRefreshGit,
@@ -97,6 +102,8 @@ export function WorkspaceHeader({
   isDesktop?: boolean;
   simplifyForNarrowRemote?: boolean;
   isSidebarVisible: boolean;
+  /** 移动视口抽屉形态下由标题区左侧按钮展开侧栏；桌面为空（浮层已有开关）。 */
+  onToggleSidebar?: () => void;
   isTerminalOpen: boolean;
   isSidePaneOpen: boolean;
   onRefreshGit: () => void;
@@ -115,6 +122,13 @@ export function WorkspaceHeader({
   allowOpenWorkspace?: boolean;
 }) {
   const [selectedEditor, setSelectedEditor] = useState<EditorInfo | null>(null);
+  const { intl } = useZCodeIntl();
+  // 移动视口抽屉形态：顶部浮层不进手机，header 最左侧（folder 按钮之左）补一个
+  // 侧栏展开开关；task/draft 两种 variant 都需要它（草稿态没有 TitleSection）。
+  // 桌面窗口由浮层 logo 开关承担，不重复渲染。
+  const isMobileViewport = useIsMobileViewport();
+  const SidebarToggleIcon = isSidebarVisible ? PanelLeftClose : PanelLeftOpen;
+  const showMobileSidebarToggle = isMobileViewport && onToggleSidebar;
   const shouldOffsetHeaderForWindowControls = !isSidebarVisible;
   // Linux 与 Windows 共用内联窗控，不再预留旧悬浮窗控的标题栏区域。
   const usesInlineWindowControls = Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop));
@@ -159,6 +173,20 @@ export function WorkspaceHeader({
           headerWindowControlsPaddingClass,
         )}
       >
+        {showMobileSidebarToggle ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-md"
+            data-testid="workspace-sidebar-toggle"
+            aria-label={intl.formatMessage({
+              id: isSidebarVisible ? "workspaceSidebar.hideSidebar" : "workspaceSidebar.showSidebar",
+            })}
+            onClick={onToggleSidebar}
+          >
+            <SidebarToggleIcon className="size-4" />
+          </Button>
+        ) : null}
         {variant === "task" ? (
           <WorkspaceHeaderTitleSection
             variant={variant}
