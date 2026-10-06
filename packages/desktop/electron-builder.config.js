@@ -607,6 +607,22 @@ export default {
           },
         ]
       : []),
+    ...(desktopProductIdentity.flavor === "standalone"
+      ? [
+          {
+            // zcode-go 独立版标记：主进程据此设 ZCODE_GO_STANDALONE=1（CLI 解析链
+            // 硬隔离官方 runtime）。空文件，仅作存在性门控。
+            from: "build/zcode-go-standalone.marker",
+            to: "zcode-go-standalone",
+          },
+          {
+            // 品牌图标（B5：官方 logo 圆角方形 + Go 徽章）：runtime 的
+            // icon-zcode-go.png 门控检测到即作为窗口/Dock 图标。
+            from: "build/zcode-go-icon.png",
+            to: "icon-zcode-go.png",
+          },
+        ]
+      : []),
     {
       // Windows 独立图标：开发态和打包态都统一走同一套任务栏/窗口图标资源。
       from: "build/icon_windows.png",
@@ -702,6 +718,11 @@ export default {
     // hicolor 图标，最终回退成系统齿轮。这里固定成稳定的小写名称，让 Icon=zcode
     // 与 /usr/share/icons/hicolor/*/apps/zcode.png 保持一致。
     executableName: desktopProductIdentity.linuxExecutableName,
+    // 独立版用品牌图标集（B5，icon name = zcode-go，与 executableName 对齐；
+    // desktop entry 的 Name/Icon 由 productName/executableName 派生）。
+    ...(desktopProductIdentity.flavor === "standalone"
+      ? { icon: "build/icons-zcode-go" }
+      : {}),
     category: "Development",
     maintainer: "ZCode <dev@zcode.z.ai>",
   },

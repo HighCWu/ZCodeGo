@@ -1,9 +1,17 @@
 /**
  * 构建期开关：为真时安装包使用 Preview 身份，而后端环境仍由 `ZCODE_ENV` 单独决定。
- * 典型用法是 `ZCODE_ENV=production ZCODE_PREVIEW_IDENTITY=1`，得到一个连接生产后端、
+ * 典型用法 `ZCODE_ENV=production ZCODE_PREVIEW_IDENTITY=1`，得到一个连接生产后端、
  * 可与正式版并排安装的 `ZCode Preview`。
  */
 export const ZCODE_PREVIEW_IDENTITY_ENV = "ZCODE_PREVIEW_IDENTITY";
+
+/**
+ * 构建期开关：为真时打出 zcode-go 独立完整桌面版（自带随包 CLI runtime，
+ * 运行时硬隔离官方 runtime/遥测，见 resolveDefaultZCodeAgentCommand 的
+ * ZCODE_GO_STANDALONE 门控）。与插件/接管模式（骑官方 Electron + 官方
+ * runtime）并存：同一代码库，两种发行形态。
+ */
+export const ZCODE_GO_STANDALONE_IDENTITY_ENV = "ZCODE_GO_STANDALONE_IDENTITY";
 
 const PRODUCTION_IDENTITY = Object.freeze({
   flavor: "production",
@@ -23,9 +31,19 @@ const PREVIEW_IDENTITY = Object.freeze({
   cuaHelperInstallVariant: "preview",
 });
 
+const STANDALONE_IDENTITY = Object.freeze({
+  flavor: "standalone",
+  appId: "dev.zcodego.app",
+  productName: "ZCode Go",
+  linuxExecutableName: "zcode-go",
+  linuxPackageName: "zcode-go",
+  cuaHelperInstallVariant: null,
+});
+
 export const desktopProductIdentities = Object.freeze({
   production: PRODUCTION_IDENTITY,
   preview: PREVIEW_IDENTITY,
+  standalone: STANDALONE_IDENTITY,
 });
 
 function normalizeDesktopZCodeEnv(env) {
@@ -50,6 +68,20 @@ export function isPreviewIdentityRequested(env = process.env) {
   );
 }
 
+/** 与 preview 同一套严格拼写语义（仅 1/0，其它值构建期硬失败）。 */
+export function isStandaloneIdentityRequested(env = process.env) {
+  const value = env[ZCODE_GO_STANDALONE_IDENTITY_ENV]?.trim() ?? "";
+  if (value === "1") {
+    return true;
+  }
+  if (value === "" || value === "0") {
+    return false;
+  }
+  throw new Error(
+    `invalid ${ZCODE_GO_STANDALONE_IDENTITY_ENV}=${env[ZCODE_GO_STANDALONE_IDENTITY_ENV]}; expected 1 or 0`,
+  );
+}
+
 /**
  * 产品身份（flavor）与后端环境（`ZCODE_ENV`）是两个轴：
  * - `ZCODE_ENV=test` 一律是 Preview，测试后端不能顶着正式 `ZCode` 身份覆盖用户的正式安装；
@@ -57,6 +89,9 @@ export function isPreviewIdentityRequested(env = process.env) {
  * 未知 `ZCODE_ENV` 继续按 test 处理，和共享层 normalizeZCodeEnv 的 fail-safe 默认值一致。
  */
 export function resolveDesktopProductFlavor(env = process.env) {
+  if (isStandaloneIdentityRequested(env)) {
+    return "standalone";
+  }
   if (isPreviewIdentityRequested(env)) {
     return "preview";
   }
@@ -86,7 +121,7 @@ export function resolveWindowsAppUserModelIdForFlavor(flavor, runtime = { isPack
   if (runtime.isPackaged === false) {
     return "cn.aminer.zcode";
   }
-  return desktopProductIdentities[flavor === "preview" ? "preview" : "production"].appId;
+  return desktopProductIdentities[flavor ?? "production"].appId;
 }
 
 export function resolveWindowsAppUserModelId(env = process.env, runtime = { isPackaged: true }) {
