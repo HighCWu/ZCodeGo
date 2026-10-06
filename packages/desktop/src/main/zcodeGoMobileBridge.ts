@@ -379,8 +379,9 @@ async function pregenerateOffer(iceServers) {
         }
       };
       peer.addEventListener("icegatheringstatechange", check);
-      // 兜底超时：srflx 慢或不可达时 8s 后带现有候选收工。
-      setTimeout(resolve, 8000);
+      // 兜底超时：srflx 慢或不可达时 12s 后带现有候选收工（STUN 冷启动偶发
+      // 超 8s；缺 srflx 的 offer 对蜂窝客户端必然连不上）。
+      setTimeout(resolve, 12000);
     });
     var local = peer.localDescription;
     if (!local) throw new Error("missing local description");
@@ -492,6 +493,10 @@ var WIN_CHANNELS = {
   ScopedServicePortReady: "zcode:scoped-service-port-ready",
 };
 var portStreams = new Map();
+// 已收养端口登记（streamId → {portType, payload}）：远端 request-port 时全量
+// 重发 port-open（远端按 streamId 去重，幂等）——scoped 会话端口丢失会让
+// 远端模型列表/发消息静默失效，不止 boot 端口需要可补投。
+var portRegistry = new Map();
 var rpcOutbox = [];
 var portSeq = 0;
 var adoptedPorts = typeof WeakSet === "function" ? new WeakSet() : null;
@@ -536,6 +541,7 @@ function adoptPort(port, payload, portType, info) {
   }
   var streamId = ++portSeq;
   portStreams.set(streamId, port);
+  portRegistry.set(streamId, { portType: portType, payload: payload });
   if (info) info.streamId = streamId;
   port.onmessage = function (e) {
     rpcReply({ kind: "port-msg", streamId: streamId, data: encodePortData(e.data) });
@@ -663,16 +669,20 @@ async function handleRpcMessage(raw) {
     return;
   }
   if (msg.kind === "request-port") {
-    // 远端 shim 报告从未收到 port-open（WebKit 丢弃早期 DC 消息）——重发。
-    // 同 streamId：端口本体一直在 portStreams，重发只影响远端建仿真端口。
-    if (bootPortInfo && bootPortInfo.streamId) {
+    // 远端 shim 请求补投（早期 DC 消息丢弃 / 弱网）。重发全部已收养端口的
+    // port-open——远端按 streamId 去重，重复投递无副作用；scoped 会话端口
+    // 丢失会让远端模型列表/发消息静默失效，一并补投可自愈。
+    var sentPorts = 0;
+    portRegistry.forEach(function (reg, regId) {
       rpcReply({
         kind: "port-open",
-        streamId: bootPortInfo.streamId,
-        portType: "service",
-        payload: bootPortInfo.payload,
+        streamId: regId,
+        portType: reg.portType,
+        payload: reg.payload,
       });
-    } else {
+      sentPorts += 1;
+    });
+    if (!sentPorts) {
       rpcReply({ kind: "no-port", reason: bootPortInfo ? "adopting" : "not-attached" });
     }
     return;

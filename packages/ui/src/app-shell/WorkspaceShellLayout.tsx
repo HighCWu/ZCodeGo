@@ -408,6 +408,20 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   // mobileShell 的整页切换）；抽屉默认收起，首屏即新建任务空会话。
   const isMobileViewport = useIsMobileViewport();
 
+  // 抽屉表面是否仍在屏幕上：关闭瞬间退出动画（duration-200）还在进行时，抽屉
+  // 依然盖在会话区上方。此时若立即 pointer-events-none / 卸下 scrim，用户在
+  // 残影上点「设置」等按钮会穿透到下层 composer（偶发命中思考强度控件）。
+  // 指针屏蔽与 scrim 卸载延迟到退出过渡结束后再生效。
+  const [isDrawerSurfaceActive, setIsDrawerSurfaceActive] = useState(isSidebarPanelVisible);
+  useEffect(() => {
+    if (isSidebarPanelVisible) {
+      setIsDrawerSurfaceActive(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setIsDrawerSurfaceActive(false), 240);
+    return () => window.clearTimeout(timer);
+  }, [isSidebarPanelVisible]);
+
   // 移动抽屉 a11y：打开时焦点移入并在抽屉内循环（Tab/Shift+Tab 环绕），
   // Escape 收起，关闭后焦点归还头部开关按钮。桌面内联侧栏不参与。
   useEffect(() => {
@@ -1595,11 +1609,19 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
         {/* 移动视口抽屉背板：侧栏打开时盖住会话区（半透明+毛玻璃，官版侧面板
             同款视觉——暗示「点空白收起」并把焦点收向抽屉），点击收起。
             放在侧栏（z-40）之下、内容之上。 */}
-        {isMobileViewport && isSidebarPanelVisible ? (
+        {isMobileViewport && isDrawerSurfaceActive ? (
           <button
             type="button"
+            aria-hidden={!isSidebarPanelVisible}
             aria-label={intl.formatMessage({ id: "workspaceSidebar.hideSidebar" })}
-            className="absolute inset-0 z-30 bg-background/60 backdrop-blur"
+            className={cn(
+              "absolute inset-0 z-30 bg-background/60 transition-opacity duration-200 ease-out",
+              // 关闭过渡期保留 scrim 拦截指针（tabIndex 不可达），淡出后再卸载。
+              isSidebarPanelVisible
+                ? "opacity-100 backdrop-blur"
+                : "pointer-events-none opacity-0",
+            )}
+            tabIndex={-1}
             onClick={handleToggleSidebar}
           />
         ) : null}
@@ -1614,9 +1636,13 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                   // 移动视口：侧栏 = 从左滑出的抽屉（桌面浏览器响应式，不占布局流）。
                   // 灰色背板随抽屉一起滑出，侧栏自身无需专门设不透明背景。
                   "absolute inset-y-0 left-0 z-40 flex-none overflow-hidden transition-transform duration-200 ease-out w-[min(85vw,20rem)] max-w-none",
+                  // 指针屏蔽等退出过渡结束（isDrawerSurfaceActive）：期间抽屉仍盖在
+                  // 会话区上，立即放行会把点击穿透到下层 composer。
                   isSidebarPanelVisible
                     ? "translate-x-0"
-                    : "pointer-events-none -translate-x-full",
+                    : isDrawerSurfaceActive
+                      ? "-translate-x-full"
+                      : "pointer-events-none -translate-x-full",
                 )
               : cn(
                   "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",

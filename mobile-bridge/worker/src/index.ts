@@ -202,10 +202,10 @@ function containerPage(origin: string): string {
   }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .mark {
-    width: 28px; height: 28px; border-radius: 8px; flex: none;
-    background: #fff; color: #161616; font-size: 15px; font-weight: 700;
+    width: 28px; height: 28px; flex: none;
     display: flex; align-items: center; justify-content: center;
   }
+  .mark img { width: 28px; height: 28px; display: block; }
   h1 { font-size: 16px; font-weight: 600; margin: 0; color: #fff; }
   .sub { font-size: 12px; color: rgba(255,255,255,.45); margin-top: 1px; }
   p { margin: 6px 0; color: rgba(255,255,255,.55); font-size: 13px; }
@@ -235,7 +235,7 @@ function containerPage(origin: string): string {
 <body>
 <div class="card" id="card">
   <div class="brand">
-    <div class="mark">Z</div>
+    <div class="mark"><img alt="ZCode Go" src="data:image/png;base64,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"></div>
     <div>
       <h1>ZCode Go</h1>
       <div class="sub" id="subtitle">移动端连接</div>
@@ -271,6 +271,8 @@ function containerPage(origin: string): string {
       fetching: "正在获取界面资源…",
       progress: "已获取 {n} 项 · {s}",
       p2pFailed: "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
+      retryAttempt: "连接超时，自动重试（{n}/2）…蜂窝网络下协商可能较慢",
+      stallSlow: "弱网加载中：已获取 {n} 项 · {s}，仍在继续，请稍候…",
       desktopOffline: "桌面端不在线（信令断开或已停止配对）。请确认电脑端配对窗口仍开着，或重新生成二维码。",
       tooManyClients: "该配对码的连接数已达上限，请关闭本配对码的其它页面后重试。",
       peerLeft: "桌面端已断开。请回到桌面端重新生成。",
@@ -294,6 +296,8 @@ function containerPage(origin: string): string {
       fetching: "Fetching UI resources…",
       progress: "{n} items · {s} received",
       p2pFailed: "Could not establish a P2P connection. Your network may restrict WebRTC — try switching Wi-Fi / cellular or disabling VPN.",
+      retryAttempt: "Connection timed out, retrying ({n}/2)… negotiation can be slower on cellular",
+      stallSlow: "Slow network: fetched {n} items · {s}, still loading…",
       desktopOffline: "Desktop is offline (signaling dropped or pairing stopped). Make sure the desktop pairing window is still open, or regenerate the QR code.",
       tooManyClients: "Too many connections for this pairing code. Close other pages using it and retry.",
       peerLeft: "Desktop disconnected. Generate a new QR code on desktop.",
@@ -402,6 +406,31 @@ function containerPage(origin: string): string {
     if (pc) { try { pc.close(); } catch (e) {} }
   }
 
+  // ── 连接失败自动重试 ──
+  // 5G/CGNAT 下 non-trickle 全量候选协商有运气成分（手机侧 STUN binding 慢时
+  // answer 只带 host 候选，必然超时）。失败不立即判死：重连信令请求一个全新
+  // offer（桌面按请求另配桥窗口重新 gathering，候选重抽），最多重试 2 次。
+  var retryCount = 0;
+  function retryOrFail() {
+    if (done) return;
+    if (retryCount >= 2) { cleanup(); fail(T.p2pFailed); return; }
+    retryCount += 1;
+    cleanup();
+    setStatus(T.retryAttempt.replace("{n}", String(retryCount)));
+    iceTimer = setTimeout(function () { retryOrFail(); }, ICE_TIMEOUT_MS);
+    ws = connectSignaling();
+    ws.addEventListener("open", function () {
+      if (done) return;
+      setStage("req-offer");
+      var rid = "";
+      try { rid = crypto.randomUUID(); } catch (e) { rid = String(Date.now()) + Math.random(); }
+      REQ_ID = rid;
+      try {
+        ws.send(JSON.stringify({ t: "req-offer", p: SECRET, i: OFFER_ID || ACTIVE_OFFER_ID || "", r: rid }));
+      } catch (e) {}
+    }, { once: true });
+  }
+
   // ── SW 注册 + /app 挂载 ──
   // 关键：本页持有 PC/DC，绝不能导航离场（location.href 会销毁连接）——
   // 一律全屏 iframe 挂载 /app/；SW 激活并 claim 本页后挂载可避免 /app/ 请求
@@ -498,16 +527,24 @@ function containerPage(origin: string): string {
         if (!w || !d) return;
         if (!d.querySelector("[data-testid=root-startup-loading]")) return;
         var dbg = w.__zcodeShimDebug || {};
-        var text = T.stall
-          .replace("{a}", String(dbg.statesDelivered || 0))
-          .replace("{b}", String(dbg.portOpens || 0))
-          .replace("{c}", String(dbg.controlSeen || 0))
-          .replace("{d}", String(dbg.portRequests || 0))
-          .replace("{e}", String(dbg.portDuplicates || 0));
         var banner = document.createElement("div");
-        banner.textContent = text;
-        banner.style.cssText =
-          "position:fixed;left:0;right:0;bottom:0;z-index:10000;padding:10px 14px;background:#2a1f1f;color:#ffb4b4;font:12px/1.5 system-ui;border-top:1px solid #5a3030";
+        // 资源仍在到货 = 弱网慢而非停滞：中性色 + 进度提示，避免用户误判放弃。
+        if (resFetched > 0) {
+          banner.textContent = T.stallSlow
+            .replace("{n}", String(resFetched))
+            .replace("{s}", fmtSize(resBytes));
+          banner.style.cssText =
+            "position:fixed;left:0;right:0;bottom:0;z-index:10000;padding:10px 14px;background:#22251f;color:#cfe6b4;font:12px/1.5 system-ui;border-top:1px solid #3f4a30";
+        } else {
+          banner.textContent = T.stall
+            .replace("{a}", String(dbg.statesDelivered || 0))
+            .replace("{b}", String(dbg.portOpens || 0))
+            .replace("{c}", String(dbg.controlSeen || 0))
+            .replace("{d}", String(dbg.portRequests || 0))
+            .replace("{e}", String(dbg.portDuplicates || 0));
+          banner.style.cssText =
+            "position:fixed;left:0;right:0;bottom:0;z-index:10000;padding:10px 14px;background:#2a1f1f;color:#ffb4b4;font:12px/1.5 system-ui;border-top:1px solid #5a3030";
+        }
         document.body.appendChild(banner);
       } catch (e) {}
     }, 30000);
@@ -619,7 +656,7 @@ function containerPage(origin: string): string {
     };
     pc.onconnectionstatechange = function () {
       setStage("pc-" + pc.connectionState);
-      if (pc.connectionState === "failed") { cleanup(); fail(T.p2pFailed); }
+      if (pc.connectionState === "failed") { retryOrFail(); }
     };
     await pc.setRemoteDescription(offer);
     var answer = await pc.createAnswer();
@@ -634,7 +671,9 @@ function containerPage(origin: string): string {
         }
       };
       pc.addEventListener("icegatheringstatechange", check);
-      setTimeout(resolve, 6000);
+      // 蜂窝网络 STUN binding 可达数秒：6s 收工会发出仅 host 候选的 answer，
+      // 桌面侧必然连不上（5G 重扫超时实测）。放宽到 10s。
+      setTimeout(resolve, 10000);
     });
     var fullAnswer = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
     if (MODE === "direct" || MODE === "mailbox") {
@@ -666,7 +705,7 @@ function containerPage(origin: string): string {
         // mailbox 取回（QR 路径）。记住实际分配的 offer id——多客户端并发时
         // 它不同于 URL 里的 primary id，answer 必须据此路由回正确的桥窗口。
         if (typeof m.i === "string" && m.i) ACTIVE_OFFER_ID = m.i;
-        try { await negotiate(m.data); } catch (e) { cleanup(); fail(T.p2pFailed); }
+        try { await negotiate(m.data); } catch (e) { retryOrFail(); }
       } else if (m.t === "error") {
         var code = m.data && m.data.code;
         if (code === "session_conflict") fail(T.conflict);
@@ -692,7 +731,7 @@ function containerPage(origin: string): string {
     if (!TOKEN) { setStage("no-token"); fail(T.noToken); return; }
     setStatus(T.connecting);
     $("hint").textContent = T.connecting;
-    iceTimer = setTimeout(function () { if (!done) { cleanup(); fail(T.p2pFailed); } }, ICE_TIMEOUT_MS);
+    iceTimer = setTimeout(function () { if (!done) retryOrFail(); }, ICE_TIMEOUT_MS);
 
     if (MODE === "direct" || MODE === "direct-compressed") {
       // 最快路径：URL 里的完整 offer，本地解出即刻协商；answer 走 mailbox。
@@ -714,7 +753,7 @@ function containerPage(origin: string): string {
           connectSignaling();
           await negotiate(offer);
         } catch (e) {
-          fail(T.p2pFailed);
+          retryOrFail();
         }
       })();
       return;
@@ -914,12 +953,16 @@ const SHIM_JS = String.raw`
       var dbg = window.__zcodeShimDebug;
       var needPort = !dbg.portOpens;
       var needState = !dbg.statesDelivered;
-      if ((!needPort && !needState) || bootWatchdogTries > 15) {
+      // 应用存活（发出过 startup-control）时周期性补投端口：不止 boot 端口——
+      // 会话 scoped 端口也可能在通道初期丢失（弱网实测后果：模型列表不加载、
+      // 无法发消息）。桌面按 registry 全量重发 port-open，本端 streamId 去重。
+      var heal = needPort || needState || dbg.controlSeen;
+      if (!heal || bootWatchdogTries > 15) {
         clearInterval(bootWatchdog);
         return;
       }
       try {
-        if (needPort) {
+        if (needPort || dbg.controlSeen) {
           dbg.portRequests += 1;
           rpcSend({ kind: "request-port" });
         }
