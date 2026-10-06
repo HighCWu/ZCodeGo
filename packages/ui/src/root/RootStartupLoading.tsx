@@ -69,6 +69,20 @@ function ZCodeStartupLogo({
         fill="currentColor"
         d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
       />
+      {/* zcode-go Go 徽章：B5 品牌同款金属渐变+白描边，挂在 Z 底横右段 */}
+      <g>
+        <rect x="156" y="146" width="92" height="66" rx="33" fill="url(#zgoStartupBadge)" stroke="white" strokeWidth="6" />
+        <text x="202" y="194" textAnchor="middle" fill="white"
+          fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontSize="40" fontWeight="700" letterSpacing="1">Go</text>
+      </g>
+      <defs>
+        <linearGradient id="zgoStartupBadge" x1="202" y1="146" x2="202" y2="212" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#9AA5B1" />
+          <stop offset="0.38" stopColor="#5C6673" />
+          <stop offset="0.62" stopColor="#3F4854" />
+          <stop offset="1" stopColor="#5B6572" />
+        </linearGradient>
+      </defs>
     </svg>
   );
 }
