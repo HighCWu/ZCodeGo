@@ -452,7 +452,8 @@ export function resolveDefaultZCodeAgentCommand(
   }
 
   // 顺序：env 显式覆盖 → zcode-go 官方运行时重定向（~/.zcode-go/official.json，与打包态
-  // 官方完全同构：ELECTRON_RUN_AS_NODE=1 跑官方 zcode.cjs，保 150% 额度签名路径）→
+  // 官方完全同构：ELECTRON_RUN_AS_NODE=1 跑官方 zcode.cjs，保 150% 额度签名路径；
+  // ZCODE_GO_STANDALONE=1 时硬隔离跳过——独立版只用随包自建 runtime，脱离官方遥测）→
   // monorepo dev 源码/dist（dev 改源码立刻生效，不会被远端历史装的 native binary
   // 抢先匹配）→ 桌面打包态 Electron Node runtime 跑 zcode.cjs → 已部署 native binary（远端 SSH 兜底）。
   const bundled =
@@ -477,6 +478,12 @@ export function resolveDefaultZCodeAgentCommand(
 function resolveZcodeGoOfficialRuntimeCommand(
   context: ZCodeAgentCommandResolverContext,
 ): ZCodeAgentCommand | null {
+  if (process.env.ZCODE_GO_STANDALONE === "1") {
+    // 独立版（standalone）：硬隔离官方运行时。独立版的使用目的就是脱离官方
+    // 遥测/额度体系，只允许随包构建的自有 runtime——即使机器上存在插件模式
+    // 留下的 ~/.zcode-go/official.json 也绝不命中。
+    return null;
+  }
   if (!process.versions.electron) {
     // 纯 Node 宿主（测试/CLI 场景）没有可复用的 Electron Node runtime，保持原链条。
     return null;

@@ -297,6 +297,17 @@ process.on("unhandledRejection", (reason) => {
   logger.error("unhandledRejection:", reason);
 });
 
+// zcode-go 独立版（standalone）标记：打包时在 resources 放 zcode-go-standalone
+// 空标记文件即生效——运行时据此设 ZCODE_GO_STANDALONE=1（CLI 解析链硬隔离
+// 官方 runtime，只用随包自建版本，脱离官方遥测）。与品牌图标同一「新文件
+// 门控」模式；插件/接管安装不含此文件，行为不变。
+if (
+  app.isPackaged &&
+  process.env.ZCODE_GO_STANDALONE === undefined &&
+  existsSync(join(process.resourcesPath, "zcode-go-standalone"))
+) {
+  process.env.ZCODE_GO_STANDALONE = "1";
+}
 // zcode-go 品牌图标（低侵入门控）：安装器把 B5 资产（官方 logo 圆角方形 +
 // Go 徽章）放入 resources/icon-zcode-go.png，存在即优先用于窗口/Dock/协议
 // 注册；删除该文件或设 ZCODE_GO_OFFICIAL_ICON=1 即回退官方图标链。
