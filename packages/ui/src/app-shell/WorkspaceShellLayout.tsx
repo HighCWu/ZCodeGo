@@ -32,6 +32,7 @@ import { usePaneSessionPersistence } from "@/v4/usePaneSessionPersistence.js";
 import { requestV4ComposerDraftWorkspaceTransfer } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { ChatEmptyWorkspacePreviewMenu } from "@/ChatEmptyState.js";
 import { DesktopTopOverlay } from "@/DesktopTopOverlay.js";
+import { MobileChatHeader } from "@/app-shell/MobileChatHeader.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { WorkspacePluginPreview } from "@/WorkspacePluginPreview.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -1732,12 +1733,24 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     )}
                   >
                     {shouldRenderWorkspaceHeader ? (
-                      <ScopedErrorBoundary
-                        scope="workspace-header"
-                        resetKeys={workspaceOnlyResetKeys}
-                        variant="compact"
-                        className="border-b"
-                      >
+                      isMobileViewport ? (
+                        // 移动视口用官版 mobileShell 的 chat 页头部：返回首页 + 静态标题 + 主题菜单，
+                        // 桌面 WorkspaceHeader 的整排操作不进手机。
+                        <ScopedErrorBoundary
+                          scope="mobile-chat-header"
+                          resetKeys={workspaceOnlyResetKeys}
+                          variant="compact"
+                          className="border-b"
+                        >
+                          <MobileChatHeader onBackHome={handleToggleSidebar} />
+                        </ScopedErrorBoundary>
+                      ) : (
+                        <ScopedErrorBoundary
+                          scope="workspace-header"
+                          resetKeys={workspaceOnlyResetKeys}
+                          variant="compact"
+                          className="border-b"
+                        >
                         <WorkspaceHeader
                           reserveWindowControls={!isSidePaneVisible}
                           variant={activeTaskId === null ? "draft" : "task"}
@@ -1773,7 +1786,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           isWindowsDesktop={isWindowsDesktop}
                           windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
                           isDesktop={isDesktop}
-                          simplifyForNarrowRemote={isMobileViewport}
                           isSidebarVisible={isSidebarVisible}
                           isTerminalOpen={isTerminalOpen}
                           isSidePaneOpen={isSidePaneOpen}
@@ -1789,7 +1801,8 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           onOpenWorkspace={onOpenWorkspace}
                           allowOpenWorkspace={allowOpenWorkspace}
                         />
-                      </ScopedErrorBoundary>
+                        </ScopedErrorBoundary>
+                      )
                     ) : null}
                     <div className="min-h-0 flex-1 overflow-hidden">
                       {workspaceMainView === "automations" ? (
@@ -1982,6 +1995,9 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             {sidePanePanel}
           </ResizablePanelGroup>
         </div>
+        {/* 移动视口会话页由 MobileChatHeader 承担导航（返回首页），顶部浮层只在
+            首页（侧栏可见）渲染；桌面两态都渲染。 */}
+        {(!isMobileViewport || isSidebarVisible) ? (
         <ScopedErrorBoundary
           scope="desktop-top-overlay"
           resetKeys={workspaceSidebarVisibilityResetKeys}
@@ -2018,6 +2034,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             onGoForward={handleTaskNavForward}
           />
         </ScopedErrorBoundary>
+        ) : null}
       </div>
     </DesktopWindowFrame>
   );

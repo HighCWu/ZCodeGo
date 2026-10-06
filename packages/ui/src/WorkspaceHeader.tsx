@@ -17,7 +17,6 @@ import {
   WorkspaceHeaderTitleSection,
 } from "@/WorkspaceHeaderSections.js";
 import type { WorkspaceHeaderVariant } from "@/WorkspaceHeaderSections/shared.js";
-import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 
 export function WorkspaceHeader({
   variant = "task",
@@ -116,20 +115,13 @@ export function WorkspaceHeader({
   allowOpenWorkspace?: boolean;
 }) {
   const [selectedEditor, setSelectedEditor] = useState<EditorInfo | null>(null);
-  // 移动视口（官方 remote 手机形态）：无原生窗控也无桌面窗控需求。
-  // 会话页左上角仍有顶部浮层（侧栏切换 + 新建任务，约 73px），标题起点
-  // 对齐它而不是桌面窗控预留宽度；内联窗控按钮组不渲染。
-  const isMobileViewport = useIsMobileViewport();
   const shouldOffsetHeaderForWindowControls = !isSidebarVisible;
   // Linux 与 Windows 共用内联窗控，不再预留旧悬浮窗控的标题栏区域。
-  const usesInlineWindowControls =
-    Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop)) && !isMobileViewport;
+  const usesInlineWindowControls = Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop));
 
   let headerWindowControlsPaddingClass: string | false = false;
   if (shouldOffsetHeaderForWindowControls) {
-    if (isMobileViewport) {
-      headerWindowControlsPaddingClass = "pl-20";
-    } else if (isMacDesktop) {
+    if (isMacDesktop) {
       if (hasUpdateReady) {
         headerWindowControlsPaddingClass = isMacFullscreen ? "pl-48" : "pl-66";
       } else {

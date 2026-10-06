@@ -6852,6 +6852,10 @@ const enUS: Record<string, string> = {
   "taskList.forkCompactHistory": "Fork compacted-history session",
   "taskList.openInNewWindow": "Open in new window",
   "taskList.openInNewWindowFailed": "Failed to open session in a new window: {error}",
+  // Mobile-viewport chat header (mirrors official web-remote mobileShell copy)
+  "zcodeGoMobile.backHome": "Back to task home",
+  "zcodeGoMobile.chatTitle": "Task chat",
+  "zcodeGoMobile.themeMenu": "Choose theme",
 };
 
 export default enUS;

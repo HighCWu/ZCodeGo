@@ -38,9 +38,7 @@ export function WorkspaceHeaderActionSection({
         useWindowsCaptionSpacing ? "-my-2 h-12 gap-0" : "gap-0.5",
       )}
     >
-      {variant === "task" && !simplifyForNarrowRemote ? (
-        // 外部 IDE 打开是桌面操作；移动视口（simplifyForNarrowRemote）下与
-        // 帮助/终端一样收进「不可用」集合，避免顶栏图标过载。
+      {variant === "task" ? (
         <WorkspaceEditorButtonGroup
           disabledReason={readOnlyReason}
           workspaceAbsPath={workspaceAbsPath}
