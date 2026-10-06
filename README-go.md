@@ -48,6 +48,14 @@ zcode-go 桌面 spawn 底层运行时的方式与官方打包态**完全相同**
 
 **任务栏图标**：与官方一致的机制——官方在 Linux 上也不设 `_NET_WM_ICON`，任务栏图标靠 `.desktop` 文件按 WM_CLASS 匹配。ensure 脚本会写 `~/.local/share/applications/zcode-go.desktop`（`StartupWMClass=ZCode Go`、`Icon=` 官方 512px 图标）并把官方 `icon.png` 等链入 `resources/`（窗口/Dock 图标源）。若任务栏未即时刷新，切换一次官方↔ZCode Go 或重载面板即可。
 
+## 移动端（手机扫码配对，P2P）
+
+桌面端生成配对二维码 → 手机浏览器打开 Worker 容器页 → WebRTC DataChannel
+P2P 直连（信令经 Cloudflare Worker + Durable Objects，UI 资源经 DataChannel
+从桌面拉取，Worker 不托管任何 UI 资源）。默认信令服务为作者实例
+`https://zcode-go.aimon.win`；自部署（含限频参数与 WAF 防洪配置留档）见
+**[mobile-bridge/worker/DEPLOY.md](mobile-bridge/worker/DEPLOY.md)**。
+
 ## 构建
 
 ```bash
