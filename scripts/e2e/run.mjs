@@ -172,7 +172,11 @@ function hookFeed(prompt) {
   // ── 品牌图标门控（新文件门控链路：仓库资产 → resources → hicolor 主题链）──
   {
     const electronRoot = a?.electronRoot ? String(a.electronRoot) : join(stateDir, "electron");
-    const brandIcon = join(electronRoot, "resources", "icon-zcode-go.png");
+    // mac 为克隆 .app bundle：ensureIcons 装配进 Contents/Resources
+    const resourcesDir = process.platform === "darwin"
+      ? join(electronRoot, "ZCode Go.app", "Contents", "Resources")
+      : join(electronRoot, "resources");
+    const brandIcon = join(resourcesDir, "icon-zcode-go.png");
     check(
       "icon: 品牌图标已装入 resources（icon-zcode-go.png 门控文件）",
       existsSync(brandIcon),
@@ -196,7 +200,9 @@ function hookFeed(prompt) {
   // 精确逻辑由 packages/services 单测覆盖（zcodeGoStandaloneGate.test.ts）；
   // 这里验证契约确实编译进了安装产物（门控被误删/被摇树时此处拦截）。
   {
-    const mainBundle = join(stateDir, "electron", "resources", "app", "out", "main", "index.js");
+    // mac 的 app 在克隆 bundle 内，appDir 由 ensure --json 权威给出
+    const appDir = a?.appDir ? String(a.appDir) : join(stateDir, "electron", "resources", "app");
+    const mainBundle = join(appDir, "out", "main", "index.js");
     let bundle = "";
     try {
       bundle = readFileSync(mainBundle, "utf8");
