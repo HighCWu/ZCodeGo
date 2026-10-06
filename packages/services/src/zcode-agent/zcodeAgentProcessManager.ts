@@ -480,7 +480,7 @@ export function resolveDefaultZCodeAgentCommand(
  * 仅认精确 "1"（与构建期 ZCODE_GO_STANDALONE_IDENTITY 的严格拼写语义一致）。
  */
 export function isZcodeGoStandaloneRuntimeEnv(
-  env: Pick<NodeJS.ProcessEnv, "ZCODE_GO_STANDALONE"> = process.env,
+  env: { ZCODE_GO_STANDALONE?: string | undefined } = process.env,
 ): boolean {
   return env.ZCODE_GO_STANDALONE === "1";
 }

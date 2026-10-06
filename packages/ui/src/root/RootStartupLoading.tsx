@@ -35,7 +35,11 @@ export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean 
           （2px）、Go 字号 52% 徽章高（13px）、贴角 inset 2%。 */}
       <span
         aria-hidden
-        className="absolute right-[2px] bottom-[2px] flex h-[25px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[13px] font-bold leading-none text-white"
+        className={cn(
+          "absolute right-[2px] bottom-[2px] flex h-[25px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[13px] font-bold leading-none text-white",
+          // 跟随 Z 的忽明忽暗：同 begin/dur/values（SMIL 线性 ↔ CSS 线性关键帧）。
+          animated && "[animation:zcode-go-badge-pulse_1.8s_linear_3s_infinite]",
+        )}
       >
         Go
       </span>

@@ -784,7 +784,15 @@ async function discoverPluginCommands(
   const rootDescriptors = await resolvePluginCommandRootDescriptors();
   const commands: PluginCommand[] = [];
   const seenFilePaths = new Set<string>();
+  // zcode-go 接管插件自带的 /zcode-go 命令只对官方 app 有意义（在官方会话里
+  // 触发切进 zcode-go）。zcode-go 自身运行的会话里隐藏，避免命令列表自指。
+  // 官方进程不带这两个 env，不受影响。
+  const runningInsideZcodeGo =
+    process.env.ZCODE_GO_TAKEOVER === "1" || process.env.ZCODE_GO_STANDALONE === "1";
   for (const descriptor of rootDescriptors) {
+    if (runningInsideZcodeGo && descriptor.pluginName === "zcode-go") {
+      continue;
+    }
     await discoverPluginCommandsRecursive(descriptor.rootPath, descriptor.rootPath, commands, {
       descriptor,
       enabledOverrides,

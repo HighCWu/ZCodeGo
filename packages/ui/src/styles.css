@@ -897,6 +897,18 @@ body {
   }
 }
 
+/* zcode-go 启动画面 Go 徽章脉动：与 ZCodeStartupLogo 的 SMIL animate
+   （begin 3s / dur 1.8s / values 1;0.4;1 线性）同步忽明忽暗。 */
+@keyframes zcode-go-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
 @keyframes zcode-stream-text-in {
   0% {
     opacity: 0;

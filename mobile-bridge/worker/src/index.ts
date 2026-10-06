@@ -497,6 +497,8 @@ function containerPage(origin: string): string {
   }
   function waitForAppSurface(frame, cb) {
     var tries = 0;
+    var lastProgress = -1;
+    var stallTries = 0;
     var timer = setInterval(function () {
       tries += 1;
       var ready = false;
@@ -510,8 +512,17 @@ function containerPage(origin: string): string {
           }
         }
       } catch (e) {}
-      // 90s 兜底：不放行，交给回调展示失败态（黑屏比明确报错更糟）。
-      if (ready || tries > 300) {
+      // 弱网自适应：资源仍在到货（resFetched/resBytes 有变化）就不按固定
+      // 预算判死——5G 高延迟链路整包拉取可超 90s 但一直在前进（实测被硬超时
+      // 误杀）。连续 ~30s 无任何新字节才判停滞，总上限 5min 兜底。
+      var progress = resFetched * 4294967296 + resBytes;
+      if (progress !== lastProgress) {
+        lastProgress = progress;
+        stallTries = 0;
+      } else {
+        stallTries += 1;
+      }
+      if (ready || stallTries > 100 || tries > 1000) {
         clearInterval(timer);
         cb(ready);
       }
