@@ -378,8 +378,9 @@ function bumpActivity(sessionId: string): void {
   if (t) t.lastActivityAtMs = Math.max(t.lastActivityAtMs, Date.now());
 }
 
-/** 从 session/goal show 或 readSession 的快照里提取权威 goal 状态。 */
-function authoritativeGoalStatus(snapshot: unknown): string | undefined {
+/** 从 session/goal show 或 readSession 的快照里提取权威 goal 状态。
+ * 导出供单测锚定语义（runtime 原生状态优先于 v4 投影）。 */
+export function authoritativeGoalStatus(snapshot: unknown): string | undefined {
   const s = snapshot as {
     runtime?: { target?: { status?: unknown } | null } | null;
     projection?: { target?: { status?: unknown } | null } | null;

@@ -11,7 +11,12 @@ on:
     paths:
       - "plugin/**"
       - "packages/desktop/src/**"
+      - "packages/desktop/scripts/**"
       - "packages/services/src/zcode-agent/**"
+      - "packages/services/test/**"
+      - "packages/ui/src/**"
+      - "packages/ui/test/**"
+      - "mobile-bridge/**"
       - "scripts/**"
       - ".github/workflows/official-e2e.yml"
   schedule:
@@ -22,6 +27,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── fork 侧单测（无需官方锚点，并行快跑）────────────────────────────────
+  # 覆盖 fork 功能变更的纯逻辑契约：wire 帧提取/分片重组、goal 看门狗权威状态、
+  # standalone 硬隔离开关、移动端行为纯函数（viewport 分层/composer 自动聚焦/
+  # /side 门控）、桌面产品身份（standalone/preview/production 风味解析）。
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --no-frozen-lockfile
+      - name: services 单测（node:test + tsx）
+        run: |
+          npx tsx --test \
+            packages/services/test/zcodeGoStandaloneGate.test.ts \
+            packages/services/test/zcodeGoWireFrame.test.ts \
+            packages/services/test/zcodeGoGoalKeepAlive.test.ts
+      - name: ui 单测（tsx + ui tsconfig 路径别名）
+        run: |
+          npx tsx --tsconfig packages/ui/tsconfig.json --test \
+            packages/ui/test/zcodeGoMobileBehavior.test.ts
+      - name: desktop 身份模块单测（node:test，原生 mjs）
+        run: node --test packages/desktop/scripts/desktop-product-identity.test.mjs
+
+  # ── Worker 容器页冒烟（wrangler dev --local，无需部署凭证）──────────────
+  # 覆盖移动桥 worker 侧变更：容器页 i18n（Accept-Language）、卡片溢出修复
+  # （box-sizing）、资源加载期保留卡片（waitForAppSurface 交接）、/app/ 503
+  # 兜底双语、/api/rooms token 校验。
+  worker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Worker 冒烟（自动 npm install + wrangler dev --local）
+        run: node scripts/e2e/worker-smoke.mjs
+
   anchor:
     runs-on: ubuntu-latest
     outputs:
