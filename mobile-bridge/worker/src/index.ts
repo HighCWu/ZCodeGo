@@ -156,6 +156,7 @@ function containerPage(origin: string): string {
       connected: "已连接到桌面（P2P 已建立），正在加载界面…",
       loading: "正在加载桌面界面…",
       p2pFailed: "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
+      desktopOffline: "桌面端不在线（信令断开或已停止配对）。请确认电脑端配对窗口仍开着，或重新生成二维码。",
       peerLeft: "桌面端已断开。请回到桌面端重新生成。",
       roomExpired: "配对码已过期。请回到桌面端重新生成。",
       conflict: "这个配对码已被其他页面使用，请关闭旧页面后重新扫码。",
@@ -171,6 +172,7 @@ function containerPage(origin: string): string {
       connected: "Connected to desktop (P2P established), loading UI…",
       loading: "Loading desktop UI…",
       p2pFailed: "Could not establish a P2P connection. Your network may restrict WebRTC — try switching Wi-Fi / cellular or disabling VPN.",
+      desktopOffline: "Desktop is offline (signaling dropped or pairing stopped). Make sure the desktop pairing window is still open, or regenerate the QR code.",
       peerLeft: "Desktop disconnected. Generate a new QR code on desktop.",
       roomExpired: "Pairing code expired. Generate a new one on desktop.",
       conflict: "This pairing code is already used by another page. Close it and scan again.",
@@ -316,7 +318,8 @@ function containerPage(origin: string): string {
         var text =
           "界面加载停滞（诊断）：状态已送达 " + (dbg.statesDelivered || 0) +
           "，端口 " + (dbg.portOpens || 0) +
-          "，控制触发 " + (dbg.controlSeen || 0) + "，端口重取 " + (dbg.portRequests || 0);
+          "，控制触发 " + (dbg.controlSeen || 0) + "，端口重取 " + (dbg.portRequests || 0) +
+          "，重复端口 " + (dbg.portDuplicates || 0);
         var banner = document.createElement("div");
         banner.textContent = text;
         banner.style.cssText =
@@ -480,6 +483,7 @@ function containerPage(origin: string): string {
         if (code === "session_conflict") fail(T.conflict);
         else if (code === "room_expired") fail(T.roomExpired);
         else if (code === "bad_secret") fail(T.badSecret);
+        else if (code === "desktop_offline") fail(T.desktopOffline);
         else fail(T.p2pFailed);
         cleanup();
       } else if (m.t === "peer-left") {
@@ -632,7 +636,10 @@ const SHIM_JS = String.raw`
   // 应用发出 startup-control（模块求值完毕、监听器已注册的铁证）时立即补投。
   var deferredDelivery = [];
   var bootPortMessage = null;
-  window.__zcodeShimDebug = { portOpens: 0, portRequests: 0, deferred: 0, flushed: 0, controlSeen: 0, statesDelivered: 0 };
+  // 已开过的端口流（重取竞态去重：request-port 的补投与原始 port-open 可能
+  // 先后到达，重复投递会给应用第二个仿真端口）。
+  var openedPortStreams = new Map();
+  window.__zcodeShimDebug = { portOpens: 0, portRequests: 0, deferred: 0, flushed: 0, controlSeen: 0, statesDelivered: 0, portDuplicates: 0 };
   // 窗口消息审计（诊断用）：应用视角收到的一切带 type 消息。
   window.__winMsgLog = [];
   window.addEventListener("message", function (event) {
@@ -702,6 +709,36 @@ const SHIM_JS = String.raw`
     }
   });
 
+  // ── 启动自愈看门狗 ──
+  // 早期 DC 消息丢失不只发生在 WebKit：高延迟链路（5G 实测）通道 open 而
+  // port-open/启动状态双双丢失——应用停在启动门禁；旧补救依赖应用自己发出
+  // startup-control（其前提恰是端口已到），构成死锁。这里不依赖应用行为：
+  // 每 4s 自查——缺端口就重取（桌面幂等重发，本端 streamId 去重防双端口），
+  // 缺状态就主动向桌面要快照（action=snapshot 触发 main 重放当前状态）。
+  // 两者到齐即停；60s 仍缺则停手（诊断横幅已展示计数）。
+  if (rpc) {
+    var bootWatchdogTries = 0;
+    var bootWatchdog = setInterval(function () {
+      bootWatchdogTries += 1;
+      var dbg = window.__zcodeShimDebug;
+      var needPort = !dbg.portOpens;
+      var needState = !dbg.statesDelivered;
+      if ((!needPort && !needState) || bootWatchdogTries > 15) {
+        clearInterval(bootWatchdog);
+        return;
+      }
+      try {
+        if (needPort) {
+          dbg.portRequests += 1;
+          rpcSend({ kind: "request-port" });
+        }
+        if (needState) {
+          rpcSend({ kind: "startup-control", control: { action: "snapshot" } });
+        }
+      } catch (e) {}
+    }, 4000);
+  }
+
   var WIN_CHANNELS = {
     DatabaseStartupState: "zcode:database-startup-state",
     DatabaseStartupControl: "zcode:database-startup-control",
@@ -763,6 +800,11 @@ const SHIM_JS = String.raw`
           window.postMessage({ type: WIN_CHANNELS.DatabaseStartupState, state: msg.data }, "*");
         });
       } else if (msg.kind === "port-open") {
+        if (openedPortStreams.has(msg.streamId)) {
+          window.__zcodeShimDebug.portDuplicates += 1;
+          return;
+        }
+        openedPortStreams.set(msg.streamId, 1);
         window.__zcodeShimDebug.portOpens += 1;
         bootPortMessage = msg;
         deliverToWindow(deliverBootPort);

@@ -847,7 +847,20 @@ export function startMobileBridgePairing(
             offerId: entry.offerId,
             isPrimary,
           });
+          // 该窗口上排队的 offer 请求重新派发（挂到别的窗口/新开窗口），
+          // 不随窗口陪葬。
+          const orphanedRequests = entry.pendingRequestIds.splice(0);
           destroyEntry(session, entry);
+          if (orphanedRequests.length > 0) {
+            logger.info("[zcode-go-mobile-bridge] 回收窗口的待答请求重新派发", {
+              token,
+              offerId: entry.offerId,
+              count: orphanedRequests.length,
+            });
+            for (const requestId of orphanedRequests) {
+              allocateOfferForRequest(requestId, session.ws);
+            }
+          }
           if (isPrimary && !detached) {
             const now = Date.now();
             session.primaryFailureTimestamps = session.primaryFailureTimestamps.filter(
@@ -951,6 +964,31 @@ export function startMobileBridgePairing(
     });
 
     return entry;
+  };
+
+  /**
+   * 客户端凭 secret 请求 offer 的分配：优先用未用 offer 的窗口；没有则挂到
+   * 预生成中的窗口（含按需新开的辅助窗口，offer-ready 后应答）。窗口回收时
+   * 其 pendingRequestIds 重新经此派发——请求不随窗口陪葬（否则客户端永远
+   * 等不到 offer，卡在「正在建立与桌面的连接」）。
+   */
+  const allocateOfferForRequest = (requestId: string, ws: WebSocket | null): void => {
+    const ready = session.windows.find((w) => w.offer && !w.offerUsed);
+    if (ready) {
+      ready.pendingRequestIds.push(requestId);
+      if (ws) answerPendingRequest(ready, ws);
+      return;
+    }
+    let pending = session.windows.find((w) => !w.offer && w.pendingRequestIds.length === 0);
+    if (!pending && session.windows.length < 5) {
+      pending = createBridgeWindow(false);
+      logger.info("[zcode-go-mobile-bridge] 追加辅助桥窗口", {
+        token,
+        offerId: pending.offerId,
+        total: session.windows.length,
+      });
+    }
+    pending?.pendingRequestIds.push(requestId);
   };
 
   // primary 窗口：随配对启动，offer 预生成供 QR/链接。
@@ -1092,26 +1130,7 @@ export function startMobileBridgePairing(
           }
           const requestId = typeof message.r === "string" ? message.r : "";
           if (message.t === "req-offer" && requestId) {
-            // 客户端凭 secret 请求 offer：优先分配未用 offer 的窗口；没有则
-            // 挂到预生成中的窗口（含按需新开的辅助窗口，offer-ready 后应答）。
-            const ready = session.windows.find((w) => w.offer && !w.offerUsed);
-            if (ready) {
-              ready.pendingRequestIds.push(requestId);
-              answerPendingRequest(ready, ws);
-            } else {
-              let pending = session.windows.find(
-                (w) => !w.offer && w.pendingRequestIds.length === 0,
-              );
-              if (!pending && session.windows.length < 5) {
-                pending = createBridgeWindow(false);
-                logger.info("[zcode-go-mobile-bridge] 追加辅助桥窗口", {
-                  token,
-                  offerId: pending.offerId,
-                  total: session.windows.length,
-                });
-              }
-              pending?.pendingRequestIds.push(requestId);
-            }
+            allocateOfferForRequest(requestId, ws);
           } else if (message.t === "answer") {
             const offerId = typeof message.i === "string" ? message.i : "";
             // 多客户端：offer 按请求分配（i 为实际窗口的 offerId）；direct 链接
