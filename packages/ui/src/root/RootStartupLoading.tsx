@@ -29,6 +29,14 @@ export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean 
   return (
     <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[linear-gradient(180deg,#000000_0%,#151718_100%)] text-[#ffffff] shadow-xl/20 before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:border before:border-[rgba(255,255,255,0.1)] before:content-['']">
       <ZCodeStartupLogo className="h-auto w-14" animated={animated} />
+      {/* zcode-go Go 徽章：锚定容器（圆角方块）右下角——与 B5 图标同构图。
+          不画在 Z 字 SVG 里：Z 只是方块中心的图形，跟 Z 走会悬在方块中部。 */}
+      <span
+        aria-hidden
+        className="absolute right-[3px] bottom-[3px] flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] px-1 text-[10px] font-bold leading-none tracking-wide text-white"
+      >
+        Go
+      </span>
     </div>
   );
 }
@@ -69,20 +77,6 @@ function ZCodeStartupLogo({
         fill="currentColor"
         d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
       />
-      {/* zcode-go Go 徽章：B5 品牌同款金属渐变+白描边，挂在 Z 底横右段 */}
-      <g>
-        <rect x="157.5" y="143.5" width="93" height="70" rx="35" fill="url(#zgoStartupBadge)" stroke="white" strokeWidth="6" />
-        <text x="204" y="193.5" textAnchor="middle" fill="white"
-          fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontSize="42" fontWeight="700" letterSpacing="1">Go</text>
-      </g>
-      <defs>
-        <linearGradient id="zgoStartupBadge" x1="204" y1="143.5" x2="204" y2="213.5" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#9AA5B1" />
-          <stop offset="0.38" stopColor="#5C6673" />
-          <stop offset="0.62" stopColor="#3F4854" />
-          <stop offset="1" stopColor="#5B6572" />
-        </linearGradient>
-      </defs>
     </svg>
   );
 }
