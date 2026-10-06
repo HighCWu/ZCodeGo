@@ -153,9 +153,8 @@ function readConfiguredSignalingOrigin(): string {
 }
 
 function resolveSignalingOrigin(): string {
-  const fromEnv = process.env.ZCODE_GO_SIGNALING_ORIGIN?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  return readConfiguredSignalingOrigin() || DEFAULT_SIGNALING_ORIGIN;
+  // 与 getMobileBridgeSignalingOrigin 同源（env > config > 默认），避免两处漂移。
+  return getMobileBridgeSignalingOrigin().effective;
 }
 
 /** 信令服务器当前生效值与来源（供配对对话框展示/编辑）。 */

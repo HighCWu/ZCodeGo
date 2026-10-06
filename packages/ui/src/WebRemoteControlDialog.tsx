@@ -271,12 +271,14 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
         } else {
           setOriginFeedback({
             kind: "error",
-            id:
-              result.error === "must_be_https" || result.error === "invalid_url"
-                ? "zcodeGoMobileBridge.signalingOrigin.invalidUrl"
-                : "zcodeGoMobileBridge.signalingOrigin.invalidUrl",
+            id: result.error?.startsWith("config_write_failed")
+              ? "zcodeGoMobileBridge.signalingOrigin.saveFailed"
+              : "zcodeGoMobileBridge.signalingOrigin.invalidUrl",
           });
         }
+      })
+      .catch(() => {
+        setOriginFeedback({ kind: "error", id: "zcodeGoMobileBridge.signalingOrigin.saveFailed" });
       })
       .finally(() => setOriginApplying(false));
   }, [signalingOriginInput]);

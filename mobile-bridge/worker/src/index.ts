@@ -278,6 +278,7 @@ function containerPage(origin: string): string {
       conflict: "这个配对码已被其他页面使用，请关闭旧页面后重新扫码。",
       badSecret: "配对密钥不正确。请使用桌面端最新生成的链接或二维码。",
       noSw: "当前浏览器缺少所需能力（Service Worker）。请用系统浏览器（Safari / Chrome）打开本页。",
+      appNotReady: "界面加载超时。请检查网络后重试；若持续失败，请回到桌面端重新生成二维码。",
       retry: "重试",
       stall: "界面加载停滞（诊断）：状态已送达 {a}，端口 {b}，控制触发 {c}，端口重取 {d}，重复端口 {e}",
       stage: { boot: "", "ws-creating": "连接信令", "ws-open": "信令已连接", "req-offer": "获取连接信息", "answer-wait": "等待确认", fetching: "获取资源" },
@@ -300,6 +301,7 @@ function containerPage(origin: string): string {
       conflict: "This pairing code is already used by another page. Close it and scan again.",
       badSecret: "Pairing secret mismatch. Use the latest link or QR from desktop.",
       noSw: "This browser lacks required capabilities (Service Worker). Please open this page in Safari / Chrome.",
+      appNotReady: "UI loading timed out. Check your network and retry; if it keeps failing, regenerate the QR code on desktop.",
       retry: "Retry",
       stall: "UI load stalled (diag): states {a}, port {b}, control {c}, port-req {d}, dup {e}",
       stage: { boot: "", "ws-creating": "connecting signaling", "ws-open": "signaling connected", "req-offer": "fetching offer", "answer-wait": "awaiting confirm", fetching: "fetching" },
@@ -446,7 +448,14 @@ function containerPage(origin: string): string {
     frame.style.cssText =
       "position:fixed;inset:0;width:100vw;height:100vh;border:0;background:transparent;z-index:9999;opacity:0;transition:opacity .35s ease";
     document.body.appendChild(frame);
-    waitForAppSurface(frame, function () {
+    waitForAppSurface(frame, function (ready) {
+      if (!ready) {
+        // 超时：应用未能就绪（资源链路异常）。移除透明 iframe、保留卡片并
+        // 显示失败态——绝不让用户落在黑屏上（诊断横幅另行出现）。
+        frame.remove();
+        fail(T.appNotReady);
+        return;
+      }
       frame.style.background = "#161616";
       frame.style.opacity = "1";
       var card = $("card");
@@ -472,10 +481,10 @@ function containerPage(origin: string): string {
           }
         }
       } catch (e) {}
-      // 90s 兜底放行（诊断横幅会另行出现）。
+      // 90s 兜底：不放行，交给回调展示失败态（黑屏比明确报错更糟）。
       if (ready || tries > 300) {
         clearInterval(timer);
-        cb();
+        cb(ready);
       }
     }, 300);
   }

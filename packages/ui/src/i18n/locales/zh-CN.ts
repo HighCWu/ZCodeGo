@@ -1635,6 +1635,7 @@ const zhCN: Record<string, string> = {
   "zcodeGoMobileBridge.signalingOrigin.apply": "确认变更",
   "zcodeGoMobileBridge.signalingOrigin.applied": "已保存，二维码已刷新",
   "zcodeGoMobileBridge.signalingOrigin.resetHint": "清空后确认可恢复默认服务",
+  "zcodeGoMobileBridge.signalingOrigin.saveFailed": "保存失败，请重试",
   "zcodeGoMobileBridge.signalingOrigin.invalidUrl": "地址需为有效的 https:// URL（本地调试可用 http://localhost）",
   "zcodeGoMobileBridge.signalingOrigin.envOverride": "环境变量 ZCODE_GO_SIGNALING_ORIGIN 覆盖中，配置已保存但未生效",
   "webRemoteControl.qrAlt": "Web 远程控制二维码",

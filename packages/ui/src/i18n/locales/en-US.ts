@@ -1755,6 +1755,7 @@ const enUS: Record<string, string> = {
   "zcodeGoMobileBridge.signalingOrigin.apply": "Apply",
   "zcodeGoMobileBridge.signalingOrigin.applied": "Saved, QR refreshed",
   "zcodeGoMobileBridge.signalingOrigin.resetHint": "Clear and apply to restore the default service",
+  "zcodeGoMobileBridge.signalingOrigin.saveFailed": "Save failed, please retry",
   "zcodeGoMobileBridge.signalingOrigin.invalidUrl": "Enter a valid https:// URL (http://localhost allowed for local testing)",
   "zcodeGoMobileBridge.signalingOrigin.envOverride": "Env ZCODE_GO_SIGNALING_ORIGIN is overriding — saved but not effective",
   "webRemoteControl.qrAlt": "Web remote control QR code",
