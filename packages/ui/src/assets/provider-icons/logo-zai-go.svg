@@ -15,9 +15,9 @@
   <!-- zcode-go Go 徽章（B5 同款金属渐变+白描边；矢量随容器缩放，高 DPI 下文字可辨，
        低分屏下银色胶囊形状本身可见） -->
   <g>
-    <rect x="9.6" y="10.4" width="7.4" height="5.6" rx="2.8" fill="url(#zgoBadgeGradient)" stroke="white" stroke-width="0.55" />
-    <text x="13.3" y="14.55" text-anchor="middle" fill="white"
-      font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="3.4" font-weight="700" letter-spacing="0.06">Go</text>
+    <rect x="7.9" y="10.1" width="9.2" height="7.0" rx="3.5" fill="url(#zgoBadgeGradient)" stroke="white" stroke-width="0.55" />
+    <text x="12.5" y="15.05" text-anchor="middle" fill="white"
+      font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="4.2" font-weight="700" letter-spacing="0.06">Go</text>
   </g>
   <defs>
     <linearGradient id="paint0_linear_11758_79291" x1="8.74999" y1="17.32" x2="8.74999" y2="0.187504"
@@ -26,7 +26,7 @@
       <stop offset="1" stop-color="#151718"
         style="stop-color:#151718;stop-color:color(display-p3 0.0824 0.0902 0.0941);stop-opacity:1;" />
     </linearGradient>
-    <linearGradient id="zgoBadgeGradient" x1="13.3" y1="10.4" x2="13.3" y2="16" gradientUnits="userSpaceOnUse">
+    <linearGradient id="zgoBadgeGradient" x1="12.5" y1="10.1" x2="12.5" y2="17.1" gradientUnits="userSpaceOnUse">
       <stop stop-color="#9AA5B1" />
       <stop offset="0.38" stop-color="#5C6673" />
       <stop offset="0.62" stop-color="#3F4854" />
