@@ -81,6 +81,9 @@ interface BridgeWindowEntry {
   offer: { type: string; sdp: string } | null;
   offerUsed: boolean;
   connected: boolean;
+  /** 粘性：该窗口的 PC 曾成功连接过（断开后不复位——primary 失败分类用，
+   * 区分「从未建起来」（网络禁 WebRTC）与「连上过后正常结束」（远端关页）。 */
+  everConnected: boolean;
   attachTimer: NodeJS.Timeout | null;
   /** 挂起的 req-offer 请求标记（该窗口 offer 就绪后应答）。 */
   pendingRequestIds: string[];
@@ -768,6 +771,7 @@ export function startMobileBridgePairing(
       offer: null,
       offerUsed: false,
       connected: false,
+      everConnected: false,
       attachTimer: null,
       pendingRequestIds: [],
     };
@@ -842,6 +846,7 @@ export function startMobileBridgePairing(
         const state = payload.state as string;
         if (state === "connected" && !entry.connected) {
           entry.connected = true;
+          entry.everConnected = true;
           if (!detached && session.status.state !== "connected") {
             session.status = { ...session.status, state: "connected" };
             emit(session);
@@ -872,11 +877,16 @@ export function startMobileBridgePairing(
             }
           }
           if (isPrimary && !detached) {
+            // 只有「从未连上过」的 primary 失败才算连接失败（offer 被接受但
+            // ICE 建不起来 = 网络禁 WebRTC 的特征）。连上过后再 failed 是远端
+            // 关页/断网的正常生命周期结束，不计入——否则用户 10 分钟内开关
+            // 远程 5 次会误杀整个配对会话（E2E 实测踩中）。
+            const neverConnected = !entry.everConnected;
             const now = Date.now();
             session.primaryFailureTimestamps = session.primaryFailureTimestamps.filter(
               (ts) => now - ts < 600_000,
             );
-            session.primaryFailureTimestamps.push(now);
+            if (neverConnected) session.primaryFailureTimestamps.push(now);
             if (session.primaryFailureTimestamps.length >= 5) {
               teardown(
                 session,
@@ -893,6 +903,7 @@ export function startMobileBridgePairing(
         }
       } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
         entry.connected = true;
+        entry.everConnected = true;
         if (!detached && session.status.state !== "connected") {
           session.status = { ...session.status, state: "connected" };
           emit(session);

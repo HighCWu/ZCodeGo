@@ -415,9 +415,9 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     if (!isMobileViewport || mobileAutoEnteredConversationRef.current) return;
     if (activeTaskId) {
       mobileAutoEnteredConversationRef.current = true;
-      handleToggleSidebar();
+      if (isSidebarPanelVisible) handleToggleSidebar();
     }
-  }, [isMobileViewport, activeTaskId, handleToggleSidebar]);
+  }, [isMobileViewport, activeTaskId, handleToggleSidebar, isSidebarPanelVisible]);
   const {
     panelRef: terminalPanelRef,
     panelElementRef: terminalPanelElementRef,
@@ -991,19 +991,21 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     ],
   );
   // 移动抽屉形态下从侧栏选中/新建任务后自动收起，回到对话主界面。
+  // 幂等收起（不是 toggle）：侧栏可能已被「自动进入对话」收起，toggle 会在
+  // 该状态下把侧栏重新拉起；选/建任务的落点永远是对话页。
   const handleSelectTaskFromSidebar = useCallback(
     (...args: Parameters<typeof handleSelectTaskInChat>) => {
-      if (isMobileViewport) handleToggleSidebar();
+      if (isMobileViewport && isSidebarPanelVisible) handleToggleSidebar();
       handleSelectTaskInChat(...args);
     },
-    [handleSelectTaskInChat, handleToggleSidebar, isMobileViewport],
+    [handleSelectTaskInChat, handleToggleSidebar, isMobileViewport, isSidebarPanelVisible],
   );
   const handleCreateTaskFromSidebar = useCallback(
     (...args: Parameters<typeof handleCreateTaskInChat>) => {
-      if (isMobileViewport) handleToggleSidebar();
+      if (isMobileViewport && isSidebarPanelVisible) handleToggleSidebar();
       handleCreateTaskInChat(...args);
     },
-    [handleCreateTaskInChat, handleToggleSidebar, isMobileViewport],
+    [handleCreateTaskInChat, handleToggleSidebar, isMobileViewport, isSidebarPanelVisible],
   );
   // 侧栏运行行：与 composer 徽标
   // 同一跳转——先选中会话，再开 run pane。没有 toolCallId 的 run（不该有）只选中会话。
@@ -1552,19 +1554,14 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
         style={workspaceShellSplitStyle}
         className={cn(
           "relative flex h-full min-h-0 w-full overflow-hidden",
+          // 官方 remote 的移动端是列式布局（max-md:flex-col）：侧栏在上方、
+          // 对话在下方，二者是页面切换而非浮层叠加。
+          isMobileViewport && "flex-col",
           // 窗口原生 resize 时，外层 react-resizable-panels 会把每一帧
           // 都写进 layout store，连带侧栏 tooltip/menu 子树反复 commit。这里改成
           // CSS 变量驱动的专用 split，普通窗口 resize 只走浏览器布局，不触发 React 状态。
         )}
       >
-        {isMobileViewport && isSidebarPanelVisible ? (
-          <button
-            type="button"
-            aria-label={intl.formatMessage({ id: "workspaceSidebar.toggleSidebar" })}
-            className="fixed inset-0 z-40 bg-black/50"
-            onClick={handleToggleSidebar}
-          />
-        ) : null}
         <div
           ref={workspaceSidebarPanelElementRef}
           data-panel=""
@@ -1573,10 +1570,13 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           className={cn(
             isMobileViewport
               ? cn(
-                  "fixed inset-y-0 left-0 z-50 flex-none overflow-hidden transition-transform duration-200 ease-out",
+                  // 官方语义：侧栏即整页（不透明 bg-sidebar + 底边框）。打开时
+                  // 占满全部高度把对话挤到 0；关闭时 h-0 完全让位给对话页。
+                  // 绝不做成浮在对话上的半透明抽屉。
+                  "w-full max-w-none flex-none overflow-hidden",
                   isSidebarPanelVisible
-                    ? "w-full translate-x-0"
-                    : "w-full -translate-x-full pointer-events-none",
+                    ? "h-full min-h-0 basis-auto border-b border-border bg-sidebar"
+                    : "h-0 min-h-0 basis-0",
                 )
               : cn(
                   "w-[var(--workspace-sidebar-panel-width)] max-w-[50%] flex-none overflow-hidden duration-200 ease-out transition-[width,opacity] data-[workspace-sidebar-resizing=true]:transition-opacity",
