@@ -30,11 +30,11 @@ export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean 
     <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[linear-gradient(180deg,#000000_0%,#151718_100%)] text-[#ffffff] shadow-xl/20 before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:border before:border-[rgba(255,255,255,0.1)] before:content-['']">
       <ZCodeStartupLogo className="h-auto w-[66px]" animated={animated} />
       {/* zcode-go Go 徽章：锚定容器（圆角方块）右下角，比例取自 B5 定稿 512px 图实测——
-          Z 占宽 68.4%、徽章含白边 201×151（高 29.5%、宽高比 1.33、白边≈徽章高 6.6%）、
-          贴角 inset 1.9%，徽章左上压住 Z 右下笔画（横向重叠约 25% 容器宽）。 */}
+          Z 占宽 68.4%、徽章外沿 197×140（高 27.3%、宽高比 1.41、白边≈徽章高 7.9%、
+          Go 字号≈徽章高 43%）、贴角 inset 2%，徽章左上压住 Z 右下笔画。 */}
       <span
         aria-hidden
-        className="absolute right-[2px] bottom-[2px] flex h-[28px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[15px] font-bold leading-none text-white"
+        className="absolute right-[2px] bottom-[2px] flex h-[26px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[11px] font-bold leading-none text-white"
       >
         Go
       </span>
