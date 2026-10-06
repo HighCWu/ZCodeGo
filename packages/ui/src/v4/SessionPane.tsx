@@ -5,6 +5,7 @@ import { reportSessionCreate } from "@/lib/sessionCreateTelemetry.js";
 import { getLocalTtftObserver } from "@/v4/telemetry/localTtftObserver.js";
 /* oxlint-disable eslint(max-lines) -- SessionPane 是单 pane 竖切的命令编排收口（订阅/发送/停止/fork/edit/retry/queue/slash 全集），与旧 ChatView 同粒度；HEAD 已超限（693 行计数），拆散命令组会打散 dispatchCommand/snapshotRef 的闭包纪律。 */
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
+import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 import {
   useCallback,
   useEffect,
@@ -556,6 +557,8 @@ export function SessionPane({
     fileRewindPreview,
   } = useV4Conversation();
   const platform = useOptionalPlatform();
+  // 移动视口：`/side` 选中侧聊是桌面分栏概念，手机上不提供（官方 remote 同款）。
+  const isMobileViewport = useIsMobileViewport();
   const { conversationShareService, modelSelectionService, zcodeSessionService, zcodeTaskService } =
     useServices();
   const { intl, locale } = useZCodeIntl();
@@ -2093,7 +2096,7 @@ export function SessionPane({
         isDraft: sessionId === null,
         selectionSideChat,
         readOnly,
-        isMobileViewport: false,
+        isMobileViewport,
       })
     ) {
       return undefined;
@@ -2117,6 +2120,7 @@ export function SessionPane({
     readOnly,
     selectionSideChat,
     sessionId,
+    isMobileViewport,
   ]);
 
   const chatLoadingBlockedByInteraction = hasChatLoadingBlockingInteraction(

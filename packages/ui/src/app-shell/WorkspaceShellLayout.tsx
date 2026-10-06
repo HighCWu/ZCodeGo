@@ -1773,6 +1773,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           isWindowsDesktop={isWindowsDesktop}
                           windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
                           isDesktop={isDesktop}
+                          simplifyForNarrowRemote={isMobileViewport}
                           isSidebarVisible={isSidebarVisible}
                           isTerminalOpen={isTerminalOpen}
                           isSidePaneOpen={isSidePaneOpen}
@@ -2006,6 +2007,8 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             canTaskNavForward={canTaskNavForward}
             canGoBack={canGoBack}
             canGoForward={canGoForward}
+            // 移动视口任务间导航走侧栏列表，不在顶栏放前进/后退（官方 remote 同款取舍）。
+            hideTaskNavigationButtons={isMobileViewport}
             showNewTaskButton={showTopOverlayNewTaskButton}
             appLogoUrl={appLogoUrl}
             platform={platform}

@@ -49,6 +49,7 @@ import { SlashCommandPlugin } from "./SlashCommandPlugin.js";
 import type { AppSlashCommand } from "./slashCommandHelpers.js";
 import { MentionPlugin } from "./mentions/MentionPlugin.js";
 import { useChatViewActiveTaskProvider } from "@/v4/activeTaskProvider.js";
+import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 import {
   $createPromptMentionNode,
   $isPromptMentionNode,
@@ -1367,6 +1368,12 @@ export function LexicalChatInput({
   enableMentionPanel = true,
 }: LexicalChatInputProps) {
   const inputMountedAtRef = useRef(Date.now());
+  // iOS Safari 聚焦 <16px 的可编辑区会强制放大整页（官方 remote 同款规避）：
+  // 移动视口下输入区提到 16px 并放宽行高，桌面保持 text-ui-base。
+  const isMobileViewport = useIsMobileViewport();
+  const inputTypographyClass = isMobileViewport
+    ? "text-mobile-input-safe leading-6"
+    : "text-ui-base leading-5";
   const lastReadyLogKeyRef = useRef<string | null>(null);
   const activeTaskProvider = useChatViewActiveTaskProvider(
     taskId,
@@ -1441,7 +1448,7 @@ export function LexicalChatInput({
         "aria-placeholder": placeholder,
         placeholder: (
           <div
-            className={`pointer-events-none absolute left-0 top-0 ${compactPlaceholder ? "line-clamp-2" : ""} text-ui-base leading-5 text-foreground-subtlest`}
+            className={`pointer-events-none absolute left-0 top-0 ${compactPlaceholder ? "line-clamp-2" : ""} ${inputTypographyClass} text-foreground-subtlest`}
           >
             {placeholder}
           </div>
@@ -1455,7 +1462,7 @@ export function LexicalChatInput({
     <ContentEditable
       // mention node 使用固定行高的 inline-flex chip，普通正文如果继承浏览器 normal line-height，
       // 在 token 后继续输入文字时会按不同 line box 计算基线；这里显式收口正文行高。
-      className="min-h-10 max-h-40 overflow-y-auto text-ui-base leading-5 text-foreground outline-none"
+      className={`min-h-10 max-h-40 overflow-y-auto ${inputTypographyClass} text-foreground outline-none`}
       data-testid={inputTestId}
       onFocus={onFocus}
       {...contentEditableProps}
