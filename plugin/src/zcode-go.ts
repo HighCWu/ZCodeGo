@@ -443,13 +443,16 @@ function runTakeover(): void {
       clearInterval(timer);
       writeFileSync(SHOW_FILE, "", "utf8");
       log(`zcode-go 就绪(pid=${pid}) → SHOW`);
+      process.exit(0);
     } else if (Date.now() > deadline) {
       clearInterval(timer);
       log("等待 zcode-go 就绪超时（90s）");
+      process.exit(0);
     }
   }, 1000);
-  // 不因定时器滞留进程
-  if (typeof timer.unref === "function") timer.unref();
+  // 注意不要 unref：spawn 完成后事件循环为空，unref 的定时器永不触发，
+  // 进程立即退出 → SHOW 信号从未写过（历史日志里所有「拉起」均无「就绪」
+  // 的根因）。改由定时器分支显式退出，最长驻留 90s。
 }
 
 // ── 入口 ────────────────────────────────────────────────────────────────

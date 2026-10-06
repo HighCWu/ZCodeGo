@@ -159,6 +159,7 @@ import {
   startMobileBridgePairing,
   stopMobileBridgePairing,
   getMobileBridgeStatus,
+  isMobileBridgeWindow,
   type MobileBridgeStatus,
 } from "./zcodeGoMobileBridge.js";
 import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
@@ -1486,7 +1487,12 @@ function resolveFocusedDesktopZoomLevel(): number {
 
 function getApplicationWindowsExcludingCuaIndicator(): BrowserWindow[] {
   return BrowserWindow.getAllWindows().filter(
-    (win) => !win.isDestroyed() && !windowsCuaOperationIndicator.ownsWindow(win),
+    (win) =>
+      !win.isDestroyed() &&
+      !windowsCuaOperationIndicator.ownsWindow(win) &&
+      // 移动端桥窗口是无 UI 的无头传输窗（配对保活期间长期存在）——不排除
+      // 会被 second-instance/deep-link 当「应用窗口」聚焦展示成空白画布。
+      !isMobileBridgeWindow(win),
   );
 }
 
@@ -1955,7 +1961,16 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
       win.show();
     }
     win.focus();
+    return;
   }
+  // 没有存活的应用窗口（主窗已关、仅剩 detached 桥窗口保活等场景）：
+  // /zcode-go 的语义是「把 zcode-go 带到眼前」——重建主窗，而不是聚焦到
+  // 无头桥窗口（空白画布）或什么都不做。
+  void primaryWindowCoordinator
+    .ensurePrimaryWindow("second-instance")
+    .catch((error: unknown) => {
+      logger.warn("[second-instance] 重建主窗失败", { error: String(error) });
+    });
 });
 
 app.whenReady().then(async () => {

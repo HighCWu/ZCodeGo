@@ -106,6 +106,15 @@ interface Session {
 let activeSession: Session | null = null;
 /** teardown 用：startMobileBridgePairing 时注入的 logger（teardown 需留痕）。 */
 let sessionLogger: MobileBridgeLogger | null = null;
+/** 全部桥窗口（含 detached 保活的）：无 UI 的无头传输窗口，绝不能被当成
+ * 「应用窗口」展示/聚焦——曾因 second-instance 聚焦到隐藏桥窗口，用户看到
+ * 一个空白画布（标题 zcode go）而非主界面。 */
+const bridgeWindows = new WeakSet<BrowserWindow>();
+
+/** 该窗口是否为移动端桥的无头传输窗口（调用方应将其排除出应用窗口枚举）。 */
+export function isMobileBridgeWindow(win: BrowserWindow): boolean {
+  return bridgeWindows.has(win);
+}
 /** 刷新二维码后保留的 detached 窗口（连接自持）；超限回收最旧，防泄漏。 */
 const detachedEntries: BridgeWindowEntry[] = [];
 const MAX_DETACHED_ENTRIES = 8;
@@ -751,6 +760,7 @@ export function startMobileBridgePairing(
         backgroundThrottling: false,
       },
     });
+    bridgeWindows.add(win);
     const entry: BridgeWindowEntry = {
       offerId,
       win,

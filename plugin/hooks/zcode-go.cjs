@@ -379,12 +379,13 @@ function runTakeover() {
       clearInterval(timer);
       (0, import_node_fs.writeFileSync)(SHOW_FILE, "", "utf8");
       log(`zcode-go \u5C31\u7EEA(pid=${pid}) \u2192 SHOW`);
+      process.exit(0);
     } else if (Date.now() > deadline) {
       clearInterval(timer);
       log("\u7B49\u5F85 zcode-go \u5C31\u7EEA\u8D85\u65F6\uFF0890s\uFF09");
+      process.exit(0);
     }
   }, 1e3);
-  if (typeof timer.unref === "function") timer.unref();
 }
 var mode = process.argv[2] ?? "hook";
 if (mode === "takeover") {
