@@ -62,13 +62,16 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   // zcode-go：信令服务器（自部署 Worker 覆盖；空 = 默认官方服务）。
   const [signalingOriginInput, setSignalingOriginInput] = useState("");
   const [signalingOriginEffective, setSignalingOriginEffective] = useState<string | null>(null);
+  /** config 中已保存的覆盖值（null = 未配置，用默认服务）。 */
+  const [signalingOriginConfigured, setSignalingOriginConfigured] = useState<string | null>(null);
   const [originFeedback, setOriginFeedback] = useState<
     { kind: "saved" } | { kind: "error"; id: string } | null
   >(null);
   const [originApplying, setOriginApplying] = useState(false);
+  // 与「已配置值」比较而非生效值：清空已保存的覆盖（恢复默认）也构成变更——
+  // 否则按钮禁用，「清空后确认可恢复默认」的提示无法兑现。
   const originDirty =
-    signalingOriginInput.trim() !== "" &&
-    signalingOriginInput.trim().replace(/\/$/, "") !== signalingOriginEffective;
+    signalingOriginInput.trim().replace(/\/$/, "") !== (signalingOriginConfigured ?? "");
 
   useEffect(() => {
     if (!open) return;
@@ -102,7 +105,8 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     void bridge?.zcodeGoMobileBridgeGetSignalingOrigin?.().then((info) => {
       if (!info) return;
       setSignalingOriginEffective(info.effective);
-      // 已配置自部署地址则回填输入框；默认服务留空（占位符展示当前生效值）。
+      setSignalingOriginConfigured(info.configured);
+      // 已配置自部署地址则回填输入框；默认/env 来源留空（占位符展示生效值）。
       setSignalingOriginInput(info.source === "config" ? (info.configured ?? "") : "");
     });
     // 注意：关闭对话框不停止配对——会话与已连接客户端保活（preload/桥窗口
@@ -231,6 +235,11 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     const bridge = (
       window as {
         zcode?: {
+          zcodeGoMobileBridgeGetSignalingOrigin?: () => Promise<{
+            effective: string;
+            configured: string | null;
+            source: "env" | "config" | "default";
+          }>;
           zcodeGoMobileBridgeSetSignalingOrigin?: (origin: string | null) => Promise<{
             ok: boolean;
             error?: string;
@@ -247,11 +256,13 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
         if (!result) return;
         if (result.ok) {
           setSignalingOriginEffective(result.effective ?? null);
-          setSignalingOriginInput(
-            result.effective && result.effective !== "https://zcode-go.aimon.win"
-              ? result.effective
-              : "",
-          );
+          // 回填以权威 Get 为准（避免 UI 硬编码默认域名与主进程常量漂移）。
+          void bridge?.zcodeGoMobileBridgeGetSignalingOrigin?.().then((info) => {
+            if (!info) return;
+            setSignalingOriginEffective(info.effective);
+            setSignalingOriginConfigured(info.configured);
+            setSignalingOriginInput(info.source === "config" ? (info.configured ?? "") : "");
+          });
           setOriginFeedback(
             result.error === "overridden-by-env"
               ? { kind: "error", id: "zcodeGoMobileBridge.signalingOrigin.envOverride" }
