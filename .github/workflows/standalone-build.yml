@@ -1,0 +1,105 @@
+name: standalone-build
+
+# zcode-go 独立完整桌面版（standalone 风味）预发布实验。
+# 与插件/接管模式（official-e2e）同一代码库的另一种发行形态：自带 CLI
+# runtime（resources/glm），运行时硬隔离官方运行时/遥测（标记文件门控，
+# 见 packages/desktop/src/main/index.ts 与 resolver 的 ZCODE_GO_STANDALONE）。
+#
+# 触发：手动 workflow_dispatch（产物进 artifacts）；打 zcode-go-v* tag 时
+# 构建并附到 GitHub Prerelease。mac/win 打包待 ③ 后续（本工作流先 Linux）。
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["zcode-go-v*"]
+
+concurrency:
+  group: standalone-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false" # 预发布不签名（mac ad-hoc 流程属 ③）
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 恢复 Electron 下载缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-standalone-${{ runner.os }}-${{ hashFiles('packages/desktop/package.json') }}
+          restore-keys: electron-standalone-${{ runner.os }}-
+
+      - name: 安装依赖
+        run: pnpm install --no-frozen-lockfile
+
+      # 全量构建：prepare:runtime-assets 产出自带 CLI（bundled-agents/glm）+
+      # tsup/vite 以 standalone 身份烘焙（更新入口隐藏等 flavor 门控）。
+      # 跨平台远端资产与 Linux 桌面安装包无关，显式跳过省时。
+      - name: 构建（standalone 身份，全量 runtime 资产）
+        run: |
+          cd packages/desktop
+          ZCODE_SKIP_REMOTE_ASSETS=1 ZCODE_GO_STANDALONE_IDENTITY=1 pnpm build
+
+      - name: 打包 AppImage + deb
+        run: |
+          cd packages/desktop
+          ZCODE_GO_STANDALONE_IDENTITY=1 pnpm exec electron-builder \
+            --config electron-builder.config.js --linux AppImage deb --x64
+
+      # 门控自检：标记文件/品牌图标/自带 CLI 必须都在包里（对应 run.mjs 的
+      # 编译产物级契约断言，这里覆盖打包装配层）。
+      - name: 产物自检（standalone 门控齐备）
+        run: |
+          set -e
+          cd packages/desktop/dist
+          ls -la *.AppImage *.deb
+          rm -rf /tmp/deb-check && mkdir -p /tmp/deb-check
+          dpkg-deb -x ./*.deb /tmp/deb-check
+          OPT_DIR="/tmp/deb-check/opt/ZCode Go"
+          test -f "$OPT_DIR/resources/zcode-go-standalone"
+          test -f "$OPT_DIR/resources/icon-zcode-go.png"
+          test -f "$OPT_DIR/resources/glm/zcode.cjs"
+          grep -q "Icon=zcode-go" /tmp/deb-check/usr/share/applications/zcode-go.desktop
+          echo "standalone 门控（标记/品牌图标/自带 CLI）与 desktop entry 自检通过 ✓"
+
+      - name: 保存 Electron 下载缓存
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-standalone-${{ runner.os }}-${{ hashFiles('packages/desktop/package.json') }}
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: zcode-go-standalone-linux-x64
+          path: |
+            packages/desktop/dist/*.AppImage
+            packages/desktop/dist/*.deb
+          if-no-files-found: error
+
+      # tag（zcode-go-v*）→ 附到 Prerelease；手动触发只出 artifacts。
+      - name: 发布 Prerelease（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/zcode-go-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packages/desktop/dist/*.AppImage
+            packages/desktop/dist/*.deb
+          prerelease: true
+          generate_release_notes: true
