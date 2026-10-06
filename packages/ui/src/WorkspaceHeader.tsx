@@ -129,9 +129,13 @@ export function WorkspaceHeader({
   const isMobileViewport = useIsMobileViewport();
   const SidebarToggleIcon = isSidebarVisible ? PanelLeftClose : PanelLeftOpen;
   const showMobileSidebarToggle = isMobileViewport && onToggleSidebar;
-  const shouldOffsetHeaderForWindowControls = !isSidebarVisible;
-  // Linux 与 Windows 共用内联窗控，不再预留旧悬浮窗控的标题栏区域。
-  const usesInlineWindowControls = Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop));
+  // 桌面侧栏隐藏时头部左侧由顶部浮层（logo/前进/后退/新对话）占据，标题区让位
+  // （pl-38 等窗控预留）。移动端浮层不渲染，让位会把抽屉开关顶到屏中——不留白。
+  const shouldOffsetHeaderForWindowControls = !isSidebarVisible && !isMobileViewport;
+  // Linux 与 Windows 共用内联窗控，不再预留旧悬浮窗控的标题栏区域；
+  // 手机上没有可操控的本地窗口，窗控不进移动头部。
+  const usesInlineWindowControls =
+    Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop)) && !isMobileViewport;
 
   let headerWindowControlsPaddingClass: string | false = false;
   if (shouldOffsetHeaderForWindowControls) {
