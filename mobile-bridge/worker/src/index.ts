@@ -76,10 +76,15 @@ export default {
     // /app/* 是桌面版 UI 的虚拟路径：正常由已注册的 Service Worker 拦截并从
     // 桌面经 DataChannel 取资源；能落到这里说明 SW 未就绪（注册失败/被卸载）。
     if (path.startsWith("/app/")) {
+      // 503 文案按 Accept-Language 就地国际化（此时还没有页面 JS 可用）。
+      const zh = (request.headers.get("accept-language") ?? "").toLowerCase().includes("zh");
+      const body = zh
+        ? "界面资源代理未就绪，请返回配对页重新连接。"
+        : "UI resource proxy not ready. Go back to the pairing page and reconnect.";
       return new Response(
         `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-         <body style="font:15px system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#0b0e14;color:#e6e9ef">
-         <div>界面资源代理未就绪，请返回配对页重新连接。</div></body>`,
+         <body style="font:15px system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#161616;color:#e5e5e5">
+         <div>${body}</div></body>`,
         { status: 503, headers: { "content-type": "text/html; charset=utf-8" } },
       );
     }
@@ -118,25 +123,71 @@ function containerPage(origin: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>ZCode Go</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; font: 15px/1.6 system-ui, sans-serif; display: flex; min-height: 100vh; align-items: center; justify-content: center; background: #0b0e14; color: #e6e9ef; }
-  .card { max-width: 420px; width: calc(100% - 48px); padding: 28px; border-radius: 16px; background: #141925; border: 1px solid #232b3d; box-shadow: 0 12px 40px rgba(0,0,0,.4); }
-  h1 { font-size: 17px; margin: 0 0 6px; }
-  p { margin: 6px 0; color: #9aa4b8; font-size: 13px; }
-  .status { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: #1b2233; font-size: 13px; }
+  /* 视觉对齐 zcode 应用 zai-dark 主题：#161616 底 / #202020 卡片 /
+     白 5% surface / 白 10% 边框 / 品牌白。box-sizing 重置修掉手机端
+     卡片左右溢出（padding+border 曾叠加在 calc 宽度之外）。 */
+  :root { color-scheme: dark; }
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+    display: flex; min-height: 100vh; min-height: 100dvh;
+    align-items: center; justify-content: center;
+    background: #161616; color: #e5e5e5;
+    padding: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    max-width: 420px; width: 100%;
+    padding: 24px; border-radius: 12px;
+    background: #202020; border: 1px solid rgba(255,255,255,.1);
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    transition: opacity .35s ease;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .mark {
+    width: 28px; height: 28px; border-radius: 8px; flex: none;
+    background: #fff; color: #161616; font-size: 15px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  h1 { font-size: 16px; font-weight: 600; margin: 0; color: #fff; }
+  .sub { font-size: 12px; color: rgba(255,255,255,.45); margin-top: 1px; }
+  p { margin: 6px 0; color: rgba(255,255,255,.55); font-size: 13px; }
+  .status {
+    margin-top: 14px; padding: 10px 12px; border-radius: 10px;
+    background: rgba(255,255,255,.05); font-size: 13px;
+    display: flex; align-items: center; gap: 8px; line-height: 1.5;
+  }
   .status.ok { color: #5dd6a8; }
   .status.err { color: #ff8f8f; }
-  .spin { display: inline-block; animation: spin 1s linear infinite; }
+  .ring {
+    width: 13px; height: 13px; border-radius: 50%; flex: none;
+    border: 2px solid rgba(255,255,255,.15); border-top-color: rgba(255,255,255,.75);
+    animation: spin .8s linear infinite;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .retry { margin-top: 14px; width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid #34405e; background: #1d2740; color: #e6e9ef; font-size: 14px; }
-  .meta { margin-top: 10px; font-size: 11px; color: #5a6478; }
+  .progress { margin-top: 10px; font-size: 12px; color: rgba(255,255,255,.4); display: none; }
+  .retry {
+    margin-top: 14px; width: 100%; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.08);
+    color: #fff; font-size: 14px; cursor: pointer;
+  }
+  .retry:active { background: rgba(255,255,255,.14); }
+  .meta { margin-top: 10px; font-size: 11px; color: rgba(255,255,255,.28); word-break: break-all; }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1 id="title">ZCode Go · 移动端连接</h1>
+<div class="card" id="card">
+  <div class="brand">
+    <div class="mark">Z</div>
+    <div>
+      <h1>ZCode Go</h1>
+      <div class="sub" id="subtitle">移动端连接</div>
+    </div>
+  </div>
   <p id="hint">正在建立与桌面的连接…</p>
-  <div class="status" id="status"><span class="spin">◐</span> 连接中…</div>
+  <div class="status" id="status"><span class="ring" id="status-ring"></span><span id="status-text">连接中…</span></div>
+  <div class="progress" id="progress"></div>
   <div class="meta" id="meta"></div>
   <button class="retry" id="retry" style="display:none">重试</button>
 </div>
@@ -144,44 +195,63 @@ function containerPage(origin: string): string {
 (function () {
   var ICE_TIMEOUT_MS = 30000;
   var $ = function (id) { return document.getElementById(id); };
-  var setStatus = function (text, cls) { var el = $("status"); el.textContent = text; el.className = "status" + (cls ? " " + cls : ""); };
+  function setStatus(text, cls) {
+    var el = $("status");
+    $("status-text").textContent = text;
+    el.className = "status" + (cls ? " " + cls : "");
+    $("status-ring").style.display = cls === "err" ? "none" : "inline-block";
+  }
 
   var LOCALE = (navigator.language || "zh").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
   var STRINGS = {
     zh: {
+      docTitle: "ZCode Go · 移动端连接",
+      subtitle: "移动端连接",
       noToken: "缺少配对码。请回到桌面端重新生成二维码。",
       connecting: "正在建立与桌面的连接…",
       waitingDesktop: "已连接信令，等待桌面端…",
       negotiating: "正在协商 P2P 通道…",
-      connected: "已连接到桌面（P2P 已建立），正在加载界面…",
-      loading: "正在加载桌面界面…",
+      connected: "已连接到桌面（P2P 已建立）。",
+      fetching: "正在获取界面资源…",
+      progress: "已获取 {n} 项 · {s}",
       p2pFailed: "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
       desktopOffline: "桌面端不在线（信令断开或已停止配对）。请确认电脑端配对窗口仍开着，或重新生成二维码。",
       peerLeft: "桌面端已断开。请回到桌面端重新生成。",
       roomExpired: "配对码已过期。请回到桌面端重新生成。",
       conflict: "这个配对码已被其他页面使用，请关闭旧页面后重新扫码。",
       badSecret: "配对密钥不正确。请使用桌面端最新生成的链接或二维码。",
+      noSw: "当前浏览器缺少所需能力（Service Worker）。请用系统浏览器（Safari / Chrome）打开本页。",
       retry: "重试",
-      stage: { boot: "", "ws-creating": "连接信令", "ws-open": "信令已连接", "req-offer": "获取连接信息", "answer-wait": "等待确认" },
+      stall: "界面加载停滞（诊断）：状态已送达 {a}，端口 {b}，控制触发 {c}，端口重取 {d}，重复端口 {e}",
+      stage: { boot: "", "ws-creating": "连接信令", "ws-open": "信令已连接", "req-offer": "获取连接信息", "answer-wait": "等待确认", fetching: "获取资源" },
     },
     en: {
+      docTitle: "ZCode Go · Mobile Connect",
+      subtitle: "Mobile Connect",
       noToken: "Missing pairing token. Generate a new QR code on the desktop app.",
       connecting: "Connecting to your desktop…",
       waitingDesktop: "Signaling connected. Waiting for desktop…",
       negotiating: "Negotiating the P2P channel…",
-      connected: "Connected to desktop (P2P established), loading UI…",
-      loading: "Loading desktop UI…",
+      connected: "Connected to desktop (P2P established).",
+      fetching: "Fetching UI resources…",
+      progress: "{n} items · {s} received",
       p2pFailed: "Could not establish a P2P connection. Your network may restrict WebRTC — try switching Wi-Fi / cellular or disabling VPN.",
       desktopOffline: "Desktop is offline (signaling dropped or pairing stopped). Make sure the desktop pairing window is still open, or regenerate the QR code.",
       peerLeft: "Desktop disconnected. Generate a new QR code on desktop.",
       roomExpired: "Pairing code expired. Generate a new one on desktop.",
       conflict: "This pairing code is already used by another page. Close it and scan again.",
       badSecret: "Pairing secret mismatch. Use the latest link or QR from desktop.",
+      noSw: "This browser lacks required capabilities (Service Worker). Please open this page in Safari / Chrome.",
       retry: "Retry",
-      stage: { boot: "", "ws-creating": "connecting signaling", "ws-open": "signaling connected", "req-offer": "fetching offer", "answer-wait": "awaiting confirm" },
+      stall: "UI load stalled (diag): states {a}, port {b}, control {c}, port-req {d}, dup {e}",
+      stage: { boot: "", "ws-creating": "connecting signaling", "ws-open": "signaling connected", "req-offer": "fetching offer", "answer-wait": "awaiting confirm", fetching: "fetching" },
     },
   };
   var T = STRINGS[LOCALE];
+  document.documentElement.lang = LOCALE === "zh" ? "zh-CN" : "en";
+  document.title = T.docTitle;
+  $("subtitle").textContent = T.subtitle;
+  $("retry").textContent = T.retry;
 
   // ── URL 解析（hash/query 双取）──
   var params = new URLSearchParams(location.search);
@@ -207,6 +277,7 @@ function containerPage(origin: string): string {
   function fail(message) {
     setStatus(message, "err");
     $("hint").textContent = "";
+    $("progress").style.display = "none";
     $("retry").style.display = "block";
   }
 
@@ -217,6 +288,17 @@ function containerPage(origin: string): string {
   var resourceRequests = new Map();
   var resourceSeq = 0;
   var rpcCallbacks = [];
+  var resFetched = 0, resBytes = 0;
+
+  function fmtSize(n) {
+    return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+  }
+  function renderProgress() {
+    var el = $("progress");
+    if (!el) return;
+    el.style.display = "block";
+    el.textContent = T.progress.replace("{n}", String(resFetched)).replace("{s}", fmtSize(resBytes));
+  }
 
   // rpc DataChannel → window.__zcodeGoRpc：iframe 里的 shim 经此透传
   // invoke/事件订阅到桌面（同源 window.parent 访问）。
@@ -265,11 +347,9 @@ function containerPage(origin: string): string {
   // 一律全屏 iframe 挂载 /app/；SW 激活并 claim 本页后挂载可避免 /app/ 请求
   // 直落 Worker 503。无 SW 能力的内嵌浏览器（微信等）给出明确指引而非自杀。
   function goToApp() {
-    setStage("loading");
+    setStage("fetching");
     if (!("serviceWorker" in navigator)) {
-      fail(LOCALE === "zh"
-        ? "当前浏览器缺少所需能力（Service Worker）。请用系统浏览器（Safari / Chrome）打开本页。"
-        : "This browser lacks required capabilities (Service Worker). Please open this page in Safari / Chrome.");
+      fail(T.noSw);
       return;
     }
     navigator.serviceWorker
@@ -295,15 +375,51 @@ function containerPage(origin: string): string {
       );
     });
   }
+  // 挂载 /app/ iframe：先全透明覆盖（配对卡片保持在视野中并显示资源进度），
+  // 探到应用启动画面（root-startup-loading）或实际根内容后再淡入交接——
+  // 避免「连接成功后黑屏等资源」的空窗。
   function mountAppFrame() {
     registerProxyPort();
+    setStatus(T.fetching, "ok");
+    renderProgress();
     var frame = document.createElement("iframe");
     frame.src = "/app/";
     frame.title = "ZCode Go";
     frame.style.cssText =
-      "position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#0b0e14;z-index:9999";
+      "position:fixed;inset:0;width:100vw;height:100vh;border:0;background:transparent;z-index:9999;opacity:0;transition:opacity .35s ease";
     document.body.appendChild(frame);
+    waitForAppSurface(frame, function () {
+      frame.style.background = "#161616";
+      frame.style.opacity = "1";
+      var card = $("card");
+      if (card) {
+        card.style.opacity = "0";
+        setTimeout(function () { if (card.parentNode) card.parentNode.removeChild(card); }, 400);
+      }
+    });
     scheduleStallDiagnostics(frame);
+  }
+  function waitForAppSurface(frame, cb) {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      var ready = false;
+      try {
+        var d = frame.contentDocument;
+        if (d) {
+          if (d.querySelector("[data-testid=root-startup-loading]")) ready = true;
+          else {
+            var root = d.getElementById("root");
+            if (root && root.childElementCount > 0) ready = true;
+          }
+        }
+      } catch (e) {}
+      // 90s 兜底放行（诊断横幅会另行出现）。
+      if (ready || tries > 300) {
+        clearInterval(timer);
+        cb();
+      }
+    }, 300);
   }
   // 停滞诊断（真机无控制台）：挂载 30s 后仍未过启动画面，把 shim 计数摘要
   // 显示到状态行——手机上可直接看到卡在哪个环节（状态/端口/控制触发）。
@@ -315,11 +431,12 @@ function containerPage(origin: string): string {
         if (!w || !d) return;
         if (!d.querySelector("[data-testid=root-startup-loading]")) return;
         var dbg = w.__zcodeShimDebug || {};
-        var text =
-          "界面加载停滞（诊断）：状态已送达 " + (dbg.statesDelivered || 0) +
-          "，端口 " + (dbg.portOpens || 0) +
-          "，控制触发 " + (dbg.controlSeen || 0) + "，端口重取 " + (dbg.portRequests || 0) +
-          "，重复端口 " + (dbg.portDuplicates || 0);
+        var text = T.stall
+          .replace("{a}", String(dbg.statesDelivered || 0))
+          .replace("{b}", String(dbg.portOpens || 0))
+          .replace("{c}", String(dbg.controlSeen || 0))
+          .replace("{d}", String(dbg.portRequests || 0))
+          .replace("{e}", String(dbg.portDuplicates || 0));
         var banner = document.createElement("div");
         banner.textContent = text;
         banner.style.cssText =
@@ -328,6 +445,7 @@ function containerPage(origin: string): string {
       } catch (e) {}
     }, 30000);
   }
+
   // 页面把专用端口交给 SW：/app/* 资源请求经此发来。避免 clients.matchAll
   // 在 iframe 场景（多个 window client）选错接收方。
   function registerProxyPort() {
@@ -366,6 +484,10 @@ function containerPage(origin: string): string {
       var bytes = atob(binary);
       var array = new Uint8Array(bytes.length);
       for (var j = 0; j < bytes.length; j += 1) array[j] = bytes.charCodeAt(j);
+      // 资源进度（卡片仍在视野时显示）。
+      resFetched += 1;
+      resBytes += array.length;
+      renderProgress();
       entry.resolve({ body: array.buffer, mime: entry.mime, status: entry.status || 200 });
     } else if (msg.type === "error") {
       resourceRequests.delete(msg.id);
@@ -501,6 +623,7 @@ function containerPage(origin: string): string {
     $("retry").style.display = "none";
     if (!TOKEN) { setStage("no-token"); fail(T.noToken); return; }
     setStatus(T.connecting);
+    $("hint").textContent = T.connecting;
     iceTimer = setTimeout(function () { if (!done) { cleanup(); fail(T.p2pFailed); } }, ICE_TIMEOUT_MS);
 
     if (MODE === "direct" || MODE === "direct-compressed") {
