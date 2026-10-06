@@ -48,6 +48,18 @@ zcode-go 桌面 spawn 底层运行时的方式与官方打包态**完全相同**
 
 **任务栏图标**：与官方一致的机制——官方在 Linux 上也不设 `_NET_WM_ICON`，任务栏图标靠 `.desktop` 文件按 WM_CLASS 匹配。ensure 脚本会写 `~/.local/share/applications/zcode-go.desktop`（`StartupWMClass=ZCode Go`、`Icon=` 官方 512px 图标）并把官方 `icon.png` 等链入 `resources/`（窗口/Dock 图标源）。若任务栏未即时刷新，切换一次官方↔ZCode Go 或重载面板即可。
 
+## 独立版分发（不签名策略）
+
+独立完整桌面版（standalone 构建，见 CI `standalone-build.yml`）按**零成本分发**：
+不做付费代码签名（mac Apple Developer / Windows 代码签名证书），代价与首次运行
+绕过方法如下（正式 Prerelease 说明中应包含）：
+
+- **macOS**（ad-hoc 签名）：首次打开被 Gatekeeper 拦截 → 右键 App →「打开」；
+  或终端 `xattr -cr '/Applications/ZCode Go.app'` 后正常打开。
+- **Windows**（未签名）：安装/运行时 SmartScreen 蓝色警告 →「更多信息」→
+  「仍要运行」。
+- **Linux**（AppImage/deb）：无签名要求；校验完整性用发布附带的 sha256。
+
 ## 移动端（手机扫码配对，P2P）
 
 桌面端生成配对二维码 → 手机浏览器打开 Worker 容器页 → WebRTC DataChannel

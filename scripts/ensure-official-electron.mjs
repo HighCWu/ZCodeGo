@@ -213,31 +213,58 @@ function ensureIcons() {
     copyFileSync(brandSrc, brandDst);
     log(`品牌图标安装：icon-zcode-go.png`);
   }
+  // 全尺寸集（小尺寸用大徽章构图——512 单图缩到任务栏 24px 时 Go 徽章只剩
+  // ~6px 不可辨识）：拷入 resources/icons-zcode-go/，供 hicolor 主题按尺寸
+  // 匹配（Linux 任务栏按 WM_CLASS 查主题，不会用窗口 icon 属性的大图）。
+  const brandSetSrc = join(repoRoot, "packages", "desktop", "build", "icons-zcode-go");
+  const brandSetDst = join(resourcesDir, "icons-zcode-go");
+  if (existsSync(brandSetSrc)) {
+    let installed = 0;
+    for (const size of [16, 24, 32, 48, 64, 96, 128, 256, 512]) {
+      const src = join(brandSetSrc, `${size}x${size}`, "apps", "zcode-go.png");
+      const dst = join(brandSetDst, `${size}.png`);
+      try {
+        mkdirSync(brandSetDst, { recursive: true });
+        if (!existsSync(dst) || statSync(src).mtimeMs > statSync(dst).mtimeMs) {
+          copyFileSync(src, dst);
+          installed += 1;
+        }
+      } catch { /* 单尺寸失败不阻塞 */ }
+    }
+    if (installed > 0) log(`品牌图标尺寸集安装：${installed} 个尺寸`);
+  }
 }
 
-/** hicolor 主题图标（zcode-go）：品牌资产优先，旧链指向官方时刷新。 */
+/** hicolor 主题图标（zcode-go）全尺寸：品牌资产优先（按尺寸匹配——任务栏
+ *  24px 拿 24px 的大徽章构图，而非 512 硬缩），旧链/官方残留时刷新。 */
 function ensureLinuxIconThemeLink() {
   if (process.platform !== "linux") return;
-  const brandIcon = join(resourcesDir, "icon-zcode-go.png");
-  const icon = existsSync(brandIcon) ? brandIcon : join(officialDir, "resources", "icon_512x512.png");
-  const iconThemeDir = join(homedir(), ".local", "share", "icons", "hicolor", "512x512", "apps");
-  mkdirSync(iconThemeDir, { recursive: true });
-  const themeIcon = join(iconThemeDir, "zcode-go.png");
-  let stale = !existsSync(themeIcon);
-  if (!stale) {
+  let changed = false;
+  const officialFallback = join(officialDir, "resources", "icon_512x512.png");
+  for (const size of [16, 24, 32, 48, 64, 96, 128, 256, 512]) {
+    const sized = join(resourcesDir, "icons-zcode-go", `${size}.png`);
+    const target = existsSync(sized) ? sized : size === 512 && existsSync(join(resourcesDir, "icon-zcode-go.png"))
+      ? join(resourcesDir, "icon-zcode-go.png")
+      : officialFallback;
+    if (!existsSync(target)) continue;
+    const themeDir = join(homedir(), ".local", "share", "icons", "hicolor", `${size}x${size}`, "apps");
+    mkdirSync(themeDir, { recursive: true });
+    const themeIcon = join(themeDir, "zcode-go.png");
+    let stale = true;
     try {
-      stale = lstatSync(themeIcon).isSymbolicLink() && readlinkSync(themeIcon) !== icon;
-    } catch {
-      stale = true;
+      stale = !existsSync(themeIcon) || (lstatSync(themeIcon).isSymbolicLink() && readlinkSync(themeIcon) !== target);
+    } catch { /* 视为需要刷新 */ }
+    if (stale) {
+      rmSync(themeIcon, { force: true });
+      symlinkSync(target, themeIcon);
+      changed = true;
     }
   }
-  if (stale) {
-    rmSync(themeIcon, { force: true });
-    symlinkSync(icon, themeIcon);
+  if (changed) {
     try {
       spawnSync("gtk-update-icon-cache", ["-f", "-t", join(homedir(), ".local", "share", "icons", "hicolor")], { stdio: "ignore" });
     } catch { /* 无该工具时忽略 */ }
-    log(`主题图标：zcode-go.png → ${icon}`);
+    log(`主题图标：zcode-go 全尺寸集已链接（hicolor 16-512）`);
   }
 }
 
