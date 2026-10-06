@@ -14,6 +14,14 @@
  *     可见失败 turn——因此停滞恢复采用「快 3 次探测 → 指数退避慢通道（15min
  *     起、×2、封顶 2h、不限次）」，任一次 resume 后会话活动恢复即全部复位。
  *
+ * 手动暂停不续跑（用户语义：自动续跑仅覆盖非人为中断）：v4 投影把手动
+ * paused 与 budget_limited 都压成 "paused"，见 paused 边沿一律先经
+ * verifyPausedIntent 查运行时原生状态（session/goal show →
+ * snapshot.runtime.target.status，失败退 readSession）——budget_limited 才
+ * 进入预算等待；paused = 手动意图，停止追踪；连续 3 次查询失败也放弃
+ * （宁可少续跑，不误拉起手动暂停）。预算通道退避独立计数（budgetRetries），
+ * 且距上次 budget 事件不足一个完整间隔时活动复位不清零（防 60s 循环）。
+ *
  * 活动时间一律取帧里的 lastActivityAt（而非本地 now）：标题变化等与 goal 无关
  * 的 session.upserted 不掩盖停滞；帧值回退（乱序）时取 max 防时钟毛刺。
  *
@@ -117,8 +125,18 @@ interface TrackedGoal {
   lastResumeAtMs: number;
   /** budget_limited 等待额度恢复 */
   budgetWaiting?: boolean;
-  /** 最近一次 budget 重试时刻 */
+  /** budget 轮询重试计时（undefined = 无进行中的预算等待；置位时从当前时刻起等满一个间隔——修复首跳立即重试） */
   lastBudgetRetryMs?: number;
+  /** 预算通道独立重试计数（×2 退避；与停滞通道的 fastResumes 分离，避免互相复位） */
+  budgetRetries?: number;
+  /** 最近一次权威判定为 budget_limited 的时刻 */
+  budgetEpisodeAtMs?: number;
+  /** 预算等待结束后的活动起点——活动持续满一个完整间隔才老化清零 budgetRetries（防「resume→一个 turn→又 budget」的 60s 循环） */
+  budgetActiveSinceMs?: number;
+  /** paused 边沿待权威裁定（v4 投影无法区分手动/budget）；连续裁定失败计数见 pauseVerifyAttempts */
+  pauseNeedsVerify?: boolean;
+  /** 权威裁定连续失败次数（≥3 放弃追踪——宁可不续跑也不误拉起手动暂停） */
+  pauseVerifyAttempts?: number;
 }
 
 let agent: ZcodeGoGoalKeepAliveAgent | null = null;
@@ -128,6 +146,8 @@ let scanTimer: ReturnType<typeof setInterval> | null = null;
 
 /** 本次启动后启用的 goal（active 边沿或 snapshot 注册）。 */
 const tracked = new Map<string, TrackedGoal>();
+/** paused 权威裁定进行中的会话（防帧风暴重复查询）。 */
+const pauseVerifying = new Set<string>();
 
 /** 配置读取带 10s TTL 缓存：readConfig 位于每帧分发路径，同步文件 I/O 不可每帧做。 */
 let configCache: { at: number; value: GoalKeepAliveConfig } | null = null;
@@ -222,18 +242,38 @@ export function observeZcodeGoGoalKeepAliveFrame(workspace: {
         // 活动真实前进：resume 生效判定 + 退避/计数复位；budget 等待结束。
         if (frameActivity > existing.lastActivityAtMs) {
           if (existing.lastResumeAtMs > 0 && frameActivity >= existing.lastResumeAtMs) {
-            // 上一轮 resume 之后产生了新活动——恢复成功。
+            // 上一轮 resume 之后产生了新活动——恢复成功。预算退避不在此清零：
+            // 记录活动起点，活动持续满一个完整间隔（下个 active 帧老化检查）
+            // 才算「预算真正恢复」——「resume→一个 turn→又 budget_limited」的
+            // 会话保持退避，不再 60s 循环。
+            const budgetIntervalMs = readConfig().budgetRetryMinutes * 60_000;
             if (existing.fastResumes > 0 || existing.probeBackoffMs > SLOW_PROBE_BASE_MS || existing.budgetWaiting) {
               logger?.info(trace(), "[zcode-go goal 看门狗] goal 恢复推进，重置重试状态", {
                 sessionId,
+                budgetRetriesKept: existing.budgetRetries ?? 0,
               });
             }
             existing.fastResumes = 0;
             existing.probeBackoffMs = SLOW_PROBE_BASE_MS;
             existing.nextProbeAtMs = 0;
             existing.lastResumeAtMs = 0;
-            existing.budgetWaiting = false;
+            if (existing.budgetWaiting) {
+              existing.budgetWaiting = false;
+              existing.budgetActiveSinceMs = Date.now();
+            }
+            existing.pauseNeedsVerify = false;
+            existing.pauseVerifyAttempts = 0;
+          }
+          // 老化：预算等待结束后活动已持续满一个完整间隔 → 预算真正恢复。
+          if (
+            !existing.budgetWaiting &&
+            existing.budgetActiveSinceMs !== undefined &&
+            Date.now() - existing.budgetActiveSinceMs >= readConfig().budgetRetryMinutes * 60_000
+          ) {
+            existing.budgetRetries = 0;
             existing.lastBudgetRetryMs = undefined;
+            existing.budgetEpisodeAtMs = undefined;
+            existing.budgetActiveSinceMs = undefined;
           }
           existing.lastActivityAtMs = frameActivity;
         }
@@ -264,8 +304,12 @@ export function observeZcodeGoGoalKeepAliveFrame(workspace: {
     const t = tracked.get(sessionId);
     if (!t) continue;
     if (goalStatus === "paused") {
-      t.budgetWaiting = true;
       t.lastActivityAtMs = Math.max(t.lastActivityAtMs, frameActivity);
+      if (!t.budgetWaiting) {
+        // 投影 paused 来源二义（手动暂停 / budget_limited）——交权威裁定。
+        t.pauseNeedsVerify = true;
+        void verifyPausedIntent(workspace, sessionId);
+      }
       continue;
     }
     if (goalStatus === undefined) {
@@ -334,6 +378,109 @@ function bumpActivity(sessionId: string): void {
   if (t) t.lastActivityAtMs = Math.max(t.lastActivityAtMs, Date.now());
 }
 
+/** 从 session/goal show 或 readSession 的快照里提取权威 goal 状态。 */
+function authoritativeGoalStatus(snapshot: unknown): string | undefined {
+  const s = snapshot as {
+    runtime?: { target?: { status?: unknown } | null } | null;
+    projection?: { target?: { status?: unknown } | null } | null;
+  } | null | undefined;
+  const runtimeStatus = s?.runtime?.target?.status;
+  if (typeof runtimeStatus === "string") return runtimeStatus;
+  const projectionStatus = s?.projection?.target?.status;
+  if (typeof projectionStatus === "string") return projectionStatus;
+  return undefined;
+}
+
+/**
+ * paused 边沿的权威裁定。v4 投影把「手动暂停」与「token 预算耗尽
+ * （budget_limited）」都压成 "paused"——见 paused 就续跑会把用户手动暂停的
+ * goal 在一分钟内拉起来（用户明确要求：仅手动中断不续跑）。运行时原生状态
+ * 两者是不同枚举，此处查 session/goal show（失败退 readSession）：
+ *   - budget_limited → 进入预算等待，且首跳从现在起等满一个间隔
+ *     （旧行为 lastBudgetRetryMs 未初始化 → 下一轮扫描立即 resume）；
+ *   - paused → 手动意图，停止追踪（用户 resume / 重设 goal 后经 active
+ *     边沿重新注册，续跑能力不受影响）；
+ *   - 查询失败 → 计数重试（下轮扫描再裁定），连续 3 次失败放弃追踪
+ *     ——宁可少续跑，不误拉起手动暂停。
+ */
+async function verifyPausedIntent(
+  workspace: { workspacePath?: string; workspaceIdentity?: string },
+  sessionId: string,
+): Promise<void> {
+  if (!agent || disposed) return;
+  if (!tracked.get(sessionId)) return;
+  if (pauseVerifying.has(sessionId)) return;
+  pauseVerifying.add(sessionId);
+  try {
+    const target = {
+      sessionId,
+      workspacePath: workspace.workspacePath,
+      workspaceIdentity: workspace.workspaceIdentity,
+    };
+    let status: string | undefined;
+    try {
+      const shown = (await agent.goalSession({ ...target, action: "show" })) as {
+        snapshot?: unknown;
+      } | undefined;
+      status = authoritativeGoalStatus(shown?.snapshot);
+    } catch {
+      status = undefined;
+    }
+    if (status === undefined) {
+      try {
+        const read = (await agent.readSession(target)) as {
+          snapshot?: unknown;
+        } | undefined;
+        status = authoritativeGoalStatus(read?.snapshot);
+      } catch {
+        status = undefined;
+      }
+    }
+    const live = tracked.get(sessionId);
+    if (!live) return;
+    if (status === "budget_limited") {
+      live.pauseNeedsVerify = false;
+      live.pauseVerifyAttempts = 0;
+      live.budgetWaiting = true;
+      live.lastBudgetRetryMs = Date.now();
+      live.budgetEpisodeAtMs = Date.now();
+      live.budgetActiveSinceMs = undefined;
+      logger?.info(
+        trace(),
+        "[zcode-go goal 看门狗] 权威状态 budget_limited，进入预算等待",
+        { sessionId, budgetRetries: live.budgetRetries ?? 0 },
+      );
+      return;
+    }
+    if (status === "paused") {
+      tracked.delete(sessionId);
+      logger?.info(
+        trace(),
+        "[zcode-go goal 看门狗] goal 手动暂停（权威状态 paused），停止自动续跑",
+        { sessionId },
+      );
+      return;
+    }
+    if (status !== undefined) {
+      // active/complete 等其他权威状态：投影滞后，交回常规状态规则处理。
+      live.pauseNeedsVerify = false;
+      live.pauseVerifyAttempts = 0;
+      return;
+    }
+    live.pauseVerifyAttempts = (live.pauseVerifyAttempts ?? 0) + 1;
+    if (live.pauseVerifyAttempts >= 3) {
+      tracked.delete(sessionId);
+      logger?.warn(
+        trace(),
+        "[zcode-go goal 看门狗] paused 权威裁定连续失败，放弃追踪（不自动续跑）",
+        { sessionId },
+      );
+    }
+  } finally {
+    pauseVerifying.delete(sessionId);
+  }
+}
+
 /** 套用 goal 状态（goal 键为 null = 已清除，非终态但停止追踪）。 */
 function applyGoalStatus(
   workspace: { workspacePath?: string; workspaceIdentity?: string },
@@ -353,19 +500,36 @@ function applyGoalStatus(
       if (now > existing.lastActivityAtMs) {
         // 上一轮 resume 之后产生了真实活动——恢复成功，全部复位（与 sessions-index
         // 入口的 active 分支同款；conversation 帧是主力源，漏复位会让恢复后的
-        // goal 永远停留在慢通道状态）。
+        // goal 永远停留在慢通道状态）。预算退避不在此清零：记录活动起点，活动
+        // 持续满一个完整间隔才老化清零（预算反复的会话保持退避）。
         if (existing.lastResumeAtMs > 0 && now >= existing.lastResumeAtMs) {
           if (existing.fastResumes > 0 || existing.probeBackoffMs > SLOW_PROBE_BASE_MS || existing.budgetWaiting) {
             logger?.info(trace(), "[zcode-go goal 看门狗] goal 恢复推进，重置重试状态", {
               sessionId,
+              budgetRetriesKept: existing.budgetRetries ?? 0,
             });
           }
           existing.fastResumes = 0;
           existing.probeBackoffMs = SLOW_PROBE_BASE_MS;
           existing.nextProbeAtMs = 0;
           existing.lastResumeAtMs = 0;
-          existing.budgetWaiting = false;
+          if (existing.budgetWaiting) {
+            existing.budgetWaiting = false;
+            existing.budgetActiveSinceMs = now;
+          }
+          existing.pauseNeedsVerify = false;
+          existing.pauseVerifyAttempts = 0;
+        }
+        // 老化：预算等待结束后活动已持续满一个完整间隔 → 预算真正恢复。
+        if (
+          !existing.budgetWaiting &&
+          existing.budgetActiveSinceMs !== undefined &&
+          now - existing.budgetActiveSinceMs >= readConfig().budgetRetryMinutes * 60_000
+        ) {
+          existing.budgetRetries = 0;
           existing.lastBudgetRetryMs = undefined;
+          existing.budgetEpisodeAtMs = undefined;
+          existing.budgetActiveSinceMs = undefined;
         }
         existing.lastActivityAtMs = now;
       }
@@ -394,7 +558,12 @@ function applyGoalStatus(
   if (!t) return;
   if (status === "paused" || status === "verifying") {
     t.lastActivityAtMs = Math.max(t.lastActivityAtMs, now);
-    if (status === "paused") t.budgetWaiting = true;
+    if (status === "paused" && !t.budgetWaiting) {
+      // 投影 paused 来源二义（手动暂停 / budget_limited）——交权威裁定，
+      // 裁定前不进入预算等待（也不会被扫描通道拉起）。
+      t.pauseNeedsVerify = true;
+      void verifyPausedIntent(workspace, sessionId);
+    }
     return;
   }
   // verified / notSatisfied / failed：终态。
@@ -431,27 +600,40 @@ async function resumeTrackedGoal(g: TrackedGoal, reason: string): Promise<void> 
   }
 }
 
-async function scanAndRecover(): Promise<void> {
+/** 单轮扫描恢复（导出供测试驱动；正常运行由 init 的定时器驱动）。 */
+export async function scanAndRecover(): Promise<void> {
   if (!agent || disposed) return;
   const config = readConfig();
   if (!config.enabled) return;
   const now = Date.now();
   for (const g of [...tracked.values()]) {
-    // ── 通道一：budget_limited（token 预算耗尽，投影 paused）→ 轮询重试，
-    // 间隔 ×2 退避封顶 60 分钟，不限总次数（额度/预算恢复无主动信号）。
-    // resume 生效后由观察函数的活动前进分支复位 budgetWaiting。
+    // paused 权威裁定失败重试（帧边沿已即时裁定过；此处每轮扫描兜底一次，
+    // 连续 3 次失败由 verifyPausedIntent 内部放弃追踪）。
+    if (g.pauseNeedsVerify && !g.budgetWaiting) {
+      void verifyPausedIntent(
+        { workspacePath: g.workspacePath, workspaceIdentity: g.workspaceIdentity },
+        g.sessionId,
+      );
+      continue;
+    }
+    // ── 通道一：budget_limited（token 预算耗尽，权威判定后才进入）→ 轮询
+    // 重试，间隔 ×2 退避封顶 60 分钟，不限总次数（额度/预算恢复无主动信号）。
+    // 进入等待时 lastBudgetRetryMs 已置位 → 首跳等满一个间隔；预算反复的
+    // 会话退避不被活动复位清零。resume 生效后由观察函数的活动前进分支复位。
     if (g.budgetWaiting) {
       const since = now - (g.lastBudgetRetryMs ?? 0);
       const interval = config.budgetRetryMinutes * 60_000;
-      const backoff = g.lastBudgetRetryMs === 0 || g.lastBudgetRetryMs === undefined
-        ? interval
-        : Math.min(interval * Math.pow(2, g.fastResumes), 60 * 60_000);
+      const backoff =
+        g.lastBudgetRetryMs === undefined
+          ? interval
+          : Math.min(interval * Math.pow(2, g.budgetRetries ?? 0), 60 * 60_000);
       if (since < backoff) continue;
       g.lastBudgetRetryMs = now;
-      g.fastResumes += 1;
+      g.budgetRetries = (g.budgetRetries ?? 0) + 1;
       logger?.info(trace(), "[zcode-go goal 看门狗] budget_limited 轮询恢复", {
         sessionId: g.sessionId,
         backoffMinutes: Math.round(backoff / 60_000),
+        attempt: g.budgetRetries,
       });
       await resumeTrackedGoal(g, "budget_limited");
       continue;
