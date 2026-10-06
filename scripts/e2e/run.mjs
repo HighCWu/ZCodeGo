@@ -741,7 +741,8 @@ if (!skipLaunch) {
     const shots = existsSync(shotsDir)
       ? (run("sh", ["-c", `ls -1 '${shotsDir}'`]).stdout ?? "").trim().split("\n").filter(Boolean)
       : [];
-    check("gui: 分步截图产出（≥7 张）", shots.length >= 7, shots.join(", ") || "(无)");
+    // 气泡时代流程（bubble×2 + reentered）移除后为 6 张基线
+    check("gui: 分步截图产出（≥6 张）", shots.length >= 6, shots.join(", ") || "(无)");
   }
 }
 
