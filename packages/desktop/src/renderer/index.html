@@ -66,9 +66,37 @@
       }
 
       .startup-logo {
-        width: 56px;
+        width: 66px;
         height: auto;
         color: #ffffff;
+      }
+
+      /* zcode-go Go 徽章：与 React 期 ZCodeStartupLogoBadge 同款（B5 生成脚本换算：
+         高 26% → 25px、宽比 1.49 → 37px、白边 9% → 2px、字号 52% → 13px、贴角 2px）。 */
+      .startup-logo-badge {
+        position: absolute;
+        right: 2px;
+        bottom: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 37px;
+        height: 25px;
+        border: 2px solid #ffffff;
+        border-radius: 9999px;
+        background: linear-gradient(
+          180deg,
+          #9aa5b1 0%,
+          #5c6673 38%,
+          #3f4854 62%,
+          #5b6572 100%
+        );
+        color: #ffffff;
+        font:
+          700 13px/1 system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
       }
 
       @keyframes startup-logo-pop {
@@ -134,6 +162,7 @@
             d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
           />
         </svg>
+        <span class="startup-logo-badge" aria-hidden="true">Go</span>
       </div>
     </div>
     <script type="module">
