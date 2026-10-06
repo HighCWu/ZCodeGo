@@ -407,6 +407,50 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   // 移动视口：侧栏为左滑抽屉，整体走「桌面浏览器响应式」形态（不再做官方
   // mobileShell 的整页切换）；抽屉默认收起，首屏即新建任务空会话。
   const isMobileViewport = useIsMobileViewport();
+
+  // 移动抽屉 a11y：打开时焦点移入并在抽屉内循环（Tab/Shift+Tab 环绕），
+  // Escape 收起，关闭后焦点归还头部开关按钮。桌面内联侧栏不参与。
+  useEffect(() => {
+    if (!isMobileViewport || !isSidebarPanelVisible) return;
+    const drawerEl = sidebarContainerRef.current;
+    if (!drawerEl) return;
+    const focusables = () =>
+      Array.from(
+        drawerEl.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null);
+    focusables()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleToggleSidebar();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      const inside = active instanceof Node && drawerEl.contains(active);
+      if (event.shiftKey && (!inside || active === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || active === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    drawerEl.addEventListener("keydown", onKeyDown);
+    const toggleButton = document.querySelector<HTMLElement>(
+      '[data-testid="workspace-sidebar-toggle"]',
+    );
+    return () => {
+      drawerEl.removeEventListener("keydown", onKeyDown);
+      toggleButton?.focus();
+    };
+  }, [isMobileViewport, isSidebarPanelVisible, handleToggleSidebar]);
   const {
     panelRef: terminalPanelRef,
     panelElementRef: terminalPanelElementRef,
@@ -1548,13 +1592,14 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
           // CSS 变量驱动的专用 split，普通窗口 resize 只走浏览器布局，不触发 React 状态。
         )}
       >
-        {/* 移动视口抽屉背板：侧栏打开时盖住会话区，点击收起。
+        {/* 移动视口抽屉背板：侧栏打开时盖住会话区（半透明+毛玻璃，官版侧面板
+            同款视觉——暗示「点空白收起」并把焦点收向抽屉），点击收起。
             放在侧栏（z-40）之下、内容之上。 */}
         {isMobileViewport && isSidebarPanelVisible ? (
           <button
             type="button"
             aria-label={intl.formatMessage({ id: "workspaceSidebar.hideSidebar" })}
-            className="absolute inset-0 z-30"
+            className="absolute inset-0 z-30 bg-background/60 backdrop-blur"
             onClick={handleToggleSidebar}
           />
         ) : null}

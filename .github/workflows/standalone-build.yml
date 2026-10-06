@@ -103,3 +103,148 @@ jobs:
             packages/desktop/dist/*.deb
           prerelease: true
           generate_release_notes: true
+
+  # ── macOS（arm64）：dir 产物 + ad-hoc 重签（无 Apple 开发者身份也可本地运行；
+  #    未签 arm64 bundle 无法启动——与插件模式 ensureMacResign 同一约束）。──
+  macos:
+    runs-on: macos-14
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false" # 不做正式签名（预发布实验）
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: 恢复 Electron 下载缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-standalone-macos-${{ hashFiles('packages/desktop/package.json') }}
+          restore-keys: electron-standalone-macos-
+      - name: 安装依赖
+        run: pnpm install --no-frozen-lockfile
+      - name: 构建（standalone 身份）
+        run: |
+          cd packages/desktop
+          ZCODE_SKIP_REMOTE_ASSETS=1 ZCODE_GO_STANDALONE_IDENTITY=1 pnpm build
+      - name: 打包（mac dir 目标）
+        run: |
+          cd packages/desktop
+          ZCODE_GO_STANDALONE_IDENTITY=1 pnpm exec electron-builder \
+            --config electron-builder.config.js --mac dir --arm64
+      - name: ad-hoc 重签（外层封印自洽，arm64 可启动）
+        run: |
+          APP="packages/desktop/dist/mac-arm64/ZCode Go.app"
+          codesign --force -s - "$APP" || codesign --force --deep -s - "$APP"
+          codesign --verify --verbose=1 "$APP" | head -2
+      - name: 产物自检（standalone 门控在包内）
+        run: |
+          set -e
+          APP="packages/desktop/dist/mac-arm64/ZCode Go.app"
+          test -f "$APP/Contents/Resources/zcode-go-standalone"
+          test -f "$APP/Contents/Resources/icon-zcode-go.png"
+          test -f "$APP/Contents/Resources/glm/zcode.cjs"
+          echo "macOS standalone 门控自检通过 ✓"
+      - name: 保存 Electron 下载缓存
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-standalone-macos-${{ hashFiles('packages/desktop/package.json') }}
+      - name: 上传构建产物（zip 化，.app 目录不可直接 artifact）
+        run: |
+          cd packages/desktop/dist/mac-arm64
+          ditto -c -k --keepParent "ZCode Go.app" "ZCodeGo-macos-arm64.zip"
+      - name: 上传 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zcode-go-standalone-macos-arm64
+          path: packages/desktop/dist/mac-arm64/*.zip
+          if-no-files-found: error
+      - name: 发布 Prerelease（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/zcode-go-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packages/desktop/dist/mac-arm64/*.zip
+          prerelease: true
+          generate_release_notes: true
+
+  # ── Windows（x64）：NSIS 安装包，未签名（SmartScreen 会提示，预发布可接受）。──
+  windows:
+    runs-on: windows-2022
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: 恢复 Electron 下载缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-standalone-windows-${{ hashFiles('packages/desktop/package.json') }}
+          restore-keys: electron-standalone-windows-
+      - name: 安装依赖
+        run: pnpm install --no-frozen-lockfile
+      - name: 构建（standalone 身份）
+        run: |
+          cd packages/desktop
+          ZCODE_SKIP_REMOTE_ASSETS=1 ZCODE_GO_STANDALONE_IDENTITY=1 pnpm build
+      - name: 打包（NSIS）
+        run: |
+          cd packages/desktop
+          ZCODE_GO_STANDALONE_IDENTITY=1 pnpm exec electron-builder \
+            --config electron-builder.config.js --win nsis --x64
+      - name: 产物自检（standalone 门控在安装包内）
+        run: |
+          set -e
+          cd packages/desktop/dist
+          ls -la *.exe
+          # NSIS 安装包内容不可直接 dpkg 式检查；win-unpacked 目录随 dir 产物存在
+          # （nsis 构建会先生成 unpacked）——用它断言门控。
+          test -d win-unpacked || exit 0
+          test -f "win-unpacked/resources/zcode-go-standalone"
+          test -f "win-unpacked/resources/icon-zcode-go.png"
+          test -f "win-unpacked/resources/glm/zcode.cjs"
+          echo "Windows standalone 门控自检通过 ✓"
+      - name: 保存 Electron 下载缓存
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-standalone-windows-${{ hashFiles('packages/desktop/package.json') }}
+      - name: 上传 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zcode-go-standalone-windows-x64
+          path: |
+            packages/desktop/dist/*.exe
+          if-no-files-found: error
+      - name: 发布 Prerelease（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/zcode-go-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packages/desktop/dist/*.exe
+          prerelease: true
+          generate_release_notes: true
