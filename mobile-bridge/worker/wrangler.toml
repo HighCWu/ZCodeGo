@@ -16,14 +16,40 @@ type = "ratelimit"
 namespace_id = "1001"
 simple = { limit = 5, period = 60 }
 
+# 信令 WS 连接限频：/api/signal/:token 直达 Durable Object（idFromName 懒创建），
+# 不经 /api/rooms——没有这层，随机 token 可绕过登记限频制造海量 DO（请求/CPU/
+# 持久 storage 刷量）。每 IP 每分钟 30 次连接对真实多客户端场景足够宽。
+[[unsafe.bindings]]
+name = "SIGNAL_CONNECT_LIMIT"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 30, period = 60 }
+
+# 容器页/SW 限频（宽松）：静态响应本身廉价，防的是脚本猛刷 invocation 配额
+# （免费档打光即全员拒服）。每 IP 每分钟 120 次。
+[[unsafe.bindings]]
+name = "PAGE_LIMIT"
+type = "ratelimit"
+namespace_id = "1003"
+simple = { limit = 120, period = 60 }
+
 # 信令房间：Durable Objects + WebSocket Hibernation。
 [[durable_objects.bindings]]
 name = "SIGNAL_ROOM"
 class_name = "SignalRoom"
 
+# 强一致限频 DO（ratelimit binding 生产实测 fail-open，见 src/ratelimit.ts）。
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SignalRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RateLimiter"]
 
 [observability]
 enabled = true

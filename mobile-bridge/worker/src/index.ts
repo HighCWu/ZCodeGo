@@ -12,12 +12,40 @@
  *   GET  /  |  /#:token        容器页
  */
 import { SignalRoom } from "./room.js";
+import { RateLimiter } from "./ratelimit.js";
 
-export { SignalRoom };
+export { SignalRoom, RateLimiter };
 
 interface Env {
   SIGNAL_ROOM: DurableObjectNamespace<SignalRoom>;
+  RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
   ROOM_CREATE_LIMIT: RateLimit;
+  SIGNAL_CONNECT_LIMIT: RateLimit;
+  PAGE_LIMIT: RateLimit;
+}
+
+/**
+ * 强一致限频（RateLimiter DO，按 bucket:ip 分片固定窗）。
+ * 返回 true = 放行。原生 ratelimit binding 在生产实测 fail-open，
+ * 这里是权威判定层（binding 留作外层第二道，若激活则更早拦截）。
+ */
+async function doRateLimit(
+  env: Env,
+  bucket: string,
+  clientIp: string,
+  limit: number,
+  windowSec: number,
+): Promise<boolean> {
+  const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(`${bucket}:${clientIp}`));
+  const res = await stub.fetch(
+    `https://rl/check?bucket=${encodeURIComponent(bucket)}&limit=${limit}&window=${windowSec}`,
+  );
+  try {
+    const data = (await res.json()) as { allowed?: boolean };
+    return data.allowed === true;
+  } catch {
+    return true; // 限频器自身异常时放行（可用性优先；入口另有 binding 层）
+  }
 }
 
 const TOKEN_PATTERN = /^[a-z2-9]{6,12}$/;
@@ -40,6 +68,9 @@ export default {
       const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
       const limited = await env.ROOM_CREATE_LIMIT.limit({ key: clientIp });
       if (!limited.success) {
+        return jsonResponse({ ok: false, error: "rate_limited" }, 429);
+      }
+      if (!(await doRateLimit(env, "rooms", clientIp, 5, 60))) {
         return jsonResponse({ ok: false, error: "rate_limited" }, 429);
       }
       let token = "";
@@ -66,6 +97,18 @@ export default {
 
     const signalMatch = path.match(/^\/api\/signal\/([a-z2-9]{6,12})$/);
     if (signalMatch) {
+      // 信令 WS 限频（防绕过 /api/rooms 登记限频直达 DO）：/api/signal/:token
+      // 经 idFromName 懒创建 Durable Object——没有这层，随机 token 洪泛连接
+      // 即可制造海量 DO（请求/CPU/持久 storage 三重刷量）。30 次/分/IP 对真实
+      // 多客户端（手机 + 浏览器多开 + 断线重连）足够宽。
+      const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const limited = await env.SIGNAL_CONNECT_LIMIT.limit({ key: clientIp });
+      if (!limited.success) {
+        return jsonResponse({ ok: false, error: "rate_limited" }, 429);
+      }
+      if (!(await doRateLimit(env, "signal", clientIp, 30, 60))) {
+        return jsonResponse({ ok: false, error: "rate_limited" }, 429);
+      }
       const stub = env.SIGNAL_ROOM.get(env.SIGNAL_ROOM.idFromName(signalMatch[1]!));
       // WebSocket upgrade 请求必须原样转发给 DO（CF runtime 要求；重建 Request
       // 会破坏 upgrade 语义）。DO 端用 role 查询参数区分角色，ping 探活用
@@ -98,6 +141,19 @@ export default {
           "cache-control": "no-store",
         },
       });
+    }
+
+    if (path === "/" || path === "/index.html" || path === "/sw.js") {
+      // 容器页/SW 宽松限频：响应本身廉价（KB 级静态），防的是脚本猛刷
+      // invocation 配额（免费档打光即全员拒服）。120 次/分/IP。
+      const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      const limited = await env.PAGE_LIMIT.limit({ key: clientIp });
+      if (!limited.success) {
+        return new Response("too many requests", { status: 429 });
+      }
+      if (!(await doRateLimit(env, "page", clientIp, 120, 60))) {
+        return new Response("too many requests", { status: 429 });
+      }
     }
 
     if (path === "/" || path === "/index.html") {
@@ -216,6 +272,7 @@ function containerPage(origin: string): string {
       progress: "已获取 {n} 项 · {s}",
       p2pFailed: "无法建立 P2P 连接。当前网络可能限制了 WebRTC，请尝试切换 Wi-Fi / 蜂窝网络或关闭 VPN。",
       desktopOffline: "桌面端不在线（信令断开或已停止配对）。请确认电脑端配对窗口仍开着，或重新生成二维码。",
+      tooManyClients: "该配对码的连接数已达上限，请关闭本配对码的其它页面后重试。",
       peerLeft: "桌面端已断开。请回到桌面端重新生成。",
       roomExpired: "配对码已过期。请回到桌面端重新生成。",
       conflict: "这个配对码已被其他页面使用，请关闭旧页面后重新扫码。",
@@ -237,6 +294,7 @@ function containerPage(origin: string): string {
       progress: "{n} items · {s} received",
       p2pFailed: "Could not establish a P2P connection. Your network may restrict WebRTC — try switching Wi-Fi / cellular or disabling VPN.",
       desktopOffline: "Desktop is offline (signaling dropped or pairing stopped). Make sure the desktop pairing window is still open, or regenerate the QR code.",
+      tooManyClients: "Too many connections for this pairing code. Close other pages using it and retry.",
       peerLeft: "Desktop disconnected. Generate a new QR code on desktop.",
       roomExpired: "Pairing code expired. Generate a new one on desktop.",
       conflict: "This pairing code is already used by another page. Close it and scan again.",
@@ -606,6 +664,7 @@ function containerPage(origin: string): string {
         else if (code === "room_expired") fail(T.roomExpired);
         else if (code === "bad_secret") fail(T.badSecret);
         else if (code === "desktop_offline") fail(T.desktopOffline);
+        else if (code === "too_many_clients") fail(T.tooManyClients);
         else fail(T.p2pFailed);
         cleanup();
       } else if (m.t === "peer-left") {

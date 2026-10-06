@@ -13,6 +13,19 @@ const ROOM_TTL_MS = 5 * 60_000;
 const ROOM_CREATED_AT_KEY = "createdAt";
 const ROOM_SECRET_KEY = "pairingSecret";
 
+// ── 滥用防护参数 ──
+// 单帧上限：SDP offer 压缩后数 KB、解压后数十 KB，1MB 是极宽裕的上限，
+// 超限即断连（防巨型帧耗 DO CPU/内存）。
+const MAX_MESSAGE_BYTES = 1_000_000;
+// 每连接消息速率：滑窗计数，超限断连（防单连接洪泛 ping/bad_json 刷
+// invocation 计费）。窗口状态存内存——Hibernation 唤醒后清零可接受：
+// 重置后攻击者需重新付出建连成本（入口层已有连接限频）。
+const RATE_WINDOW_MS = 10_000;
+const RATE_MAX_MESSAGES = 120;
+// mobile 并发上限：官方语义多客户端并发（手机 + 浏览器多开）实际是个位数；
+// 知道 token 者开任意多条 WS 会触发 desktop 无限开桥窗口。
+const MAX_MOBILE_CLIENTS = 4;
+
 interface SignalWire {
   t: string;
   // capability secret（防抢答信箱；对端身份认证由 DTLS 承担）
@@ -43,9 +56,34 @@ export class SignalRoom extends DurableObject {
   /** req-offer 的 r 标记 → 请求方 socket（offer 应答按此路由；答后即删）。 */
   private readonly pendingOfferReplies = new Map<string, WebSocket>();
 
+  /** 每连接速率滑窗（socket 序号 → 窗口状态）。内存态，休眠唤醒即清零。 */
+  private readonly rateWindows = new Map<WebSocket, { count: number; resetAt: number }>();
+
   private send(ws: WebSocket, message: SignalWire): void {
     if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify(message));
+  }
+
+  /** 滥用防护：单连接消息速率滑窗。超限 close（4005）。 */
+  private rateLimit(ws: WebSocket): boolean {
+    const now = Date.now();
+    let win = this.rateWindows.get(ws);
+    if (!win || now > win.resetAt) {
+      // 窗口过期回收顺手清理已关闭连接的残留项（防 Map 无界增长）。
+      if (this.rateWindows.size > 128) {
+        for (const [key] of this.rateWindows) {
+          if (key.readyState !== WebSocket.OPEN) this.rateWindows.delete(key);
+        }
+      }
+      win = { count: 0, resetAt: now + RATE_WINDOW_MS };
+      this.rateWindows.set(ws, win);
+    }
+    win.count += 1;
+    if (win.count > RATE_MAX_MESSAGES) {
+      ws.close(4005, "rate limited");
+      return false;
+    }
+    return true;
   }
 
   private socketsFor(role: "desktop" | "mobile"): WebSocket[] {
@@ -80,6 +118,11 @@ export class SignalRoom extends DurableObject {
       }
       const role = url.searchParams.get("role") === "mobile" ? "mobile" : "desktop";
       if (await this.isRoomExpired()) {
+        // 垃圾房间回收：过期且从未有 desktop 注册 secret（随机 token 闯入的
+        // 房间）→ 清空 storage（createdAt 等），防刷随机 token 留下持久存储
+        // 费用；真实房间（有 secret）保留，维持「断网恢复后心跳复活」语义。
+        const secret = await this.ctx.storage.get<string>(ROOM_SECRET_KEY);
+        if (!secret) await this.ctx.storage.deleteAll();
         const expired = new WebSocketPair();
         this.ctx.acceptWebSocket(expired[1], [`${this.ctx.id.name}:${role}`]);
         this.send(expired[1], { t: "error", data: { code: "room_expired" } });
@@ -104,12 +147,18 @@ export class SignalRoom extends DurableObject {
         return new Response(null, { status: 101, webSocket: pair[0] });
       }
 
-      const existingMobile = this.socketsFor("mobile")[0];
-      if (existingMobile && existingMobile.readyState === WebSocket.OPEN) {
-        // 多客户端并发（官方语义：手机 + 桌面浏览器同时连接）——不再拒绝
-        // 第二个页面；desktop 侧按 req-offer 的 r 标记为每个客户端分配独立
-        // 桥窗口/offer，answer 按 offer id 路由到对应窗口。
+      const existingMobile = this.socketsFor("mobile").filter((s) => s.readyState === WebSocket.OPEN);
+      if (existingMobile.length >= MAX_MOBILE_CLIENTS) {
+        // 知道 token 者开任意多条 WS 会触发 desktop 无限开桥窗口——并发封顶。
+        const pair = new WebSocketPair();
+        this.ctx.acceptWebSocket(pair[1], [tag]);
+        this.send(pair[1], { t: "error", data: { code: "too_many_clients" } });
+        pair[1].close(4003, "too many clients");
+        return new Response(null, { status: 101, webSocket: pair[0] });
       }
+      // 多客户端并发（官方语义：手机 + 桌面浏览器同时连接）——不再拒绝
+      // 第二个页面；desktop 侧按 req-offer 的 r 标记为每个客户端分配独立
+      // 桥窗口/offer，answer 按 offer id 路由到对应窗口。
       const pair = new WebSocketPair();
       this.ctx.acceptWebSocket(pair[1], [tag]);
       const desktop = this.socketsFor("desktop")[0];
@@ -127,6 +176,12 @@ export class SignalRoom extends DurableObject {
 
   override webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): void {
     if (typeof raw !== "string") return;
+    if (raw.length > MAX_MESSAGE_BYTES) {
+      // 巨型帧直接断连（SDP 实际数 KB~数十 KB，1MB 上限极宽裕）。
+      ws.close(4004, "message too large");
+      return;
+    }
+    if (!this.rateLimit(ws)) return;
     let message: SignalWire;
     try {
       message = JSON.parse(raw) as SignalWire;
@@ -136,7 +191,10 @@ export class SignalRoom extends DurableObject {
     }
     const tag = this.ctx.getTags(ws)[0] ?? "";
     const isDesktop = tag.endsWith(":desktop");
-    console.log("[room] msg", JSON.stringify({ kind: message.t, from: isDesktop ? "desktop" : "mobile", size: raw.length }));
+    // ping（30s 保活）不打日志：防攻击者刷日志费用，也让信令日志聚焦。
+    if (message.t !== "ping") {
+      console.log("[room] msg", JSON.stringify({ kind: message.t, from: isDesktop ? "desktop" : "mobile", size: raw.length }));
+    }
     switch (message.t) {
       // ── 保活：桌面端每 30s ping，防 NAT 空闲超时把信令 WS 变成半开连接
       //（桌面据此检测 pong 超时并重建连接）。──
@@ -232,6 +290,7 @@ export class SignalRoom extends DurableObject {
   }
 
   override webSocketClose(ws: WebSocket): void {
+    this.rateWindows.delete(ws);
     // 一次性配对：任一方离开即通知另一方（连接由 runtime 自动摘除）。
     const role = (this.ctx.getTags(ws)[0] ?? "").endsWith(":desktop") ? "desktop" : "mobile";
     const peer = (role === "desktop" ? this.socketsFor("mobile") : this.socketsFor("desktop"))[0];
