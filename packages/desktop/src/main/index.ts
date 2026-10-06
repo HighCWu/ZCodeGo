@@ -307,6 +307,11 @@ if (
   existsSync(join(process.resourcesPath, "zcode-go-standalone"))
 ) {
   process.env.ZCODE_GO_STANDALONE = "1";
+  // 防御继承污染：从插件/接管模式的 zcode-go 内部终端启动独立版时，会继承
+  // 其 ZCODE_GO_TAKEOVER=1——独立版不是接管形态，必须显式剥离，否则会误写
+  // 共享状态目录（desktop.pid/takeover-state）并在启动时清理官方进程
+  // （实测：standalone 实验被继承 env 误激活接管模式）。
+  delete process.env.ZCODE_GO_TAKEOVER;
 }
 // zcode-go 品牌图标（低侵入门控）：安装器把 B5 资产（官方 logo 圆角方形 +
 // Go 徽章）放入 resources/icon-zcode-go.png，存在即优先用于窗口/Dock/协议

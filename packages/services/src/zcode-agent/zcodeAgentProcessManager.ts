@@ -475,10 +475,20 @@ export function resolveDefaultZCodeAgentCommand(
  * 命中时以与官方打包态完全相同的方式 spawn（本进程 Electron 以纯 Node 模式
  * 执行官方 zcode.cjs app-server --stdio），不引入任何自建运行时。
  */
+/**
+ * zcode-go 独立版（standalone）运行态判定：硬隔离官方 runtime 的唯一开关。
+ * 仅认精确 "1"（与构建期 ZCODE_GO_STANDALONE_IDENTITY 的严格拼写语义一致）。
+ */
+export function isZcodeGoStandaloneRuntimeEnv(
+  env: Pick<NodeJS.ProcessEnv, "ZCODE_GO_STANDALONE"> = process.env,
+): boolean {
+  return env.ZCODE_GO_STANDALONE === "1";
+}
+
 function resolveZcodeGoOfficialRuntimeCommand(
   context: ZCodeAgentCommandResolverContext,
 ): ZCodeAgentCommand | null {
-  if (process.env.ZCODE_GO_STANDALONE === "1") {
+  if (isZcodeGoStandaloneRuntimeEnv()) {
     // 独立版（standalone）：硬隔离官方运行时。独立版的使用目的就是脱离官方
     // 遥测/额度体系，只允许随包构建的自有 runtime——即使机器上存在插件模式
     // 留下的 ~/.zcode-go/official.json 也绝不命中。

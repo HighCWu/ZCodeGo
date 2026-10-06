@@ -9,11 +9,16 @@
  *
  * 断言组：
  *   core   hook fixtures（放行/status/off/on/停用 bare）、发现（env 注入 → official.json
- *          与 runtimeBundle 推导）、ensure 幂等（--json synced=false）
+ *          与 runtimeBundle 推导）、ensure 幂等（--json synced=false）、品牌图标/主题链
+ *          门控文件、standalone 硬隔离契约（编译产物级）
  *   launch launcher 冷启动 → desktop.pid + “takeover 模式就绪” 日志
  *   runtime host 子进程树中 zcode-cli 的 exe == 官方二进制（ELECTRON_RUN_AS_NODE）
- *   gui    主窗存在；bare /zcode-go → SHOW → 官方窗隐藏 + ZCode Go 可见；close→气泡
- *          → 点气泡回切；全程分步截图至 ~/.zcode-go/e2e-shots/（CI artifact 可拉本地肉眼核对）
+ *   gui    主窗存在；bare /zcode-go → SHOW → enterZCodeGo（定版：显示自己 +
+ *          官方进程全部退出，独占运行）；关闭主窗 → 应用直接退出（无气泡/回切）；
+ *          全程分步截图至 ~/.zcode-go/e2e-shots/（CI artifact 可拉本地肉眼核对）
+ *
+ * 移动端（抽屉/容器页）与 standalone 全链路属本地/真机套件：
+ *   scripts/e2e/mobile-drawer.mjs（需真实 worker 配对，见文件头说明）。
  */
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -163,6 +168,52 @@ function hookFeed(prompt) {
     !!a && !!b && b.synced === false,
     `first.synced=${a?.synced} second.synced=${b?.synced}`,
   );
+
+  // ── 品牌图标门控（新文件门控链路：仓库资产 → resources → hicolor 主题链）──
+  {
+    const electronRoot = a?.electronRoot ? String(a.electronRoot) : join(stateDir, "electron");
+    const brandIcon = join(electronRoot, "resources", "icon-zcode-go.png");
+    check(
+      "icon: 品牌图标已装入 resources（icon-zcode-go.png 门控文件）",
+      existsSync(brandIcon),
+      brandIcon,
+    );
+    if (isLinux) {
+      const themeIcon = join(homedir(), ".local", "share", "icons", "hicolor", "512x512", "apps", "zcode-go.png");
+      let target = "";
+      try {
+        target = (run("readlink", [themeIcon]).stdout ?? "").trim();
+      } catch { /* 非链接则 target 留空 */ }
+      check(
+        "icon: hicolor 主题链指向品牌资产",
+        target === brandIcon,
+        `link=${target || "(无/非链接)"}`,
+      );
+    }
+  }
+
+  // ── standalone 硬隔离契约（编译产物级）：主进程含标记门控与官方 runtime 短路 ──
+  // 精确逻辑由 packages/services 单测覆盖（zcodeGoStandaloneGate.test.ts）；
+  // 这里验证契约确实编译进了安装产物（门控被误删/被摇树时此处拦截）。
+  {
+    const mainBundle = join(stateDir, "electron", "resources", "app", "out", "main", "index.js");
+    let bundle = "";
+    try {
+      bundle = readFileSync(mainBundle, "utf8");
+    } catch { /* 未构建则跳过内容断言 */ }
+    if (bundle) {
+      check(
+        "standalone: 主进程含标记文件门控（zcode-go-standalone）",
+        bundle.includes("zcode-go-standalone"),
+      );
+      check(
+        "standalone: 主进程含品牌图标门控（icon-zcode-go.png）",
+        bundle.includes("icon-zcode-go.png"),
+      );
+    } else {
+      check("standalone: 主进程产物未就绪（本地直跑 core 模式，标注跳过）", true, mainBundle);
+    }
+  }
 }
 
 // ── session：真实官方运行时端到端（补"官方会话输入 /zcode-go"）──────────
@@ -644,68 +695,46 @@ if (!skipLaunch) {
     snapWindow("31-main-window.png", mainWin);
 
     if (mainWin) {
-      // bare /zcode-go → SHOW → enterZCodeGo（官方在跑则其窗口被隐藏）
-      const officialMainPid = run("pgrep", ["-f", `^${officialBin}`]).stdout?.trim().split("\n")[0];
+      // bare /zcode-go → SHOW → enterZCodeGo（定版：显示自己 + 官方进程全部退出）
       const bare = hookFeed("/zcode-go");
       check("gui: bare /zcode-go 即时回复", bare.stdout.includes("正在切换"));
-      const entered = await waitLog("enterZCodeGo 完成");
-      check("gui: SHOW → enterZCodeGo 完成（日志标记）", entered.ok, entered.detail);
+      const entered = await waitLog("enterZCodeGo 完成（原版已退出");
+      check("gui: SHOW → enterZCodeGo 完成（官方进程退出，日志标记）", entered.ok, entered.detail);
       check("gui: SHOW 已被桌面消费", !existsSync(join(stateDir, "SHOW")));
       await settle(600);
       check("gui: ZCode Go 主窗可见", isVisible(mainWin));
-      if (officialMainPid && Number(officialMainPid) > 0) {
-        const officialVisible = xdotool("search", "--pid", officialMainPid, "--onlyvisible");
-        check("gui: 官方窗口已隐藏", (officialVisible ?? "") === "", `可见=${officialVisible}`);
-      }
+
+      // 官方进程独占退出：与 killOfficialProcesses 同一判定口径（exe 精确等于
+      // 官方 bin 才算），/proc 全扫不应残留
+      const officialLeft = (
+        run("sh", [
+          "-c",
+          `for p in /proc/[0-9]*; do [ "\$(readlink \$p/exe 2>/dev/null)" = "${officialBin}" ] && basename \$p; done`,
+        ]).stdout ?? ""
+      ).trim();
+      check(
+        "gui: 官方进程已全部退出（exe 精确匹配无残留）",
+        officialLeft === "",
+        `left=[${officialLeft.replaceAll("\n", ",")}]`,
+      );
       snapWindow("32-entered-main.png", mainWin);
       snapRoot("32-entered-root.png");
 
-      // ── 返回官方 → 气泡（尺寸定位 + X 属性断言）→ 点气泡回切 ──────────
-      // Alt+F4 偶发焦点丢失：激活+按键+等标记，失败重试（最多 3 次）
-      let returned = { ok: false, detail: "未执行" };
-      for (let attempt = 1; attempt <= 3 && !returned.ok; attempt += 1) {
+      // ── 关闭主窗 → 应用退出（定版无气泡/无回切：主进程应结束）──────────
+      // Alt+F4 偶发焦点丢失：激活+按键+轮询进程退出，失败重试（最多 3 次）
+      let exited = false;
+      for (let attempt = 1; attempt <= 3 && !exited; attempt += 1) {
         xdotool("windowactivate", "--sync", mainWin);
         await settle(1000);
         xdotool("key", "Alt+F4");
-        returned = await waitLog("returnToOfficial 完成", 20000);
-        if (!returned.ok) await settle(2000);
+        for (let i = 0; i < 40 && !exited; i += 1) {
+          await settle(500);
+          exited = !alive();
+        }
+        if (!exited) await settle(2000);
       }
-      check("gui: 关闭主窗 → returnToOfficial 完成（日志标记）", returned.ok, returned.detail);
-      await settle(600);
-      check("gui: 主窗已隐藏", !isVisible(mainWin));
-
-      const bubbleWin = findWindowByWidth(110, 140); // 120px 画布（56 圆 + hover/阴影完整余量）
-      check("gui: 气泡窗口出现（按尺寸定位）", bubbleWin !== "", `win=${bubbleWin}`);
-      if (bubbleWin) {
-        check("gui: 气泡可见", isVisible(bubbleWin));
-        const wmType = run("xprop", ["-id", bubbleWin, "_NET_WM_WINDOW_TYPE"]).stdout ?? "";
-        check(
-          "gui: 气泡窗口类型 TOOLBAR（任务栏排除）",
-          wmType.includes("_NET_WM_WINDOW_TYPE_TOOLBAR"),
-          wmType.trim().slice(0, 60),
-        );
-        const wmState = run("xprop", ["-id", bubbleWin, "_NET_WM_STATE"]).stdout ?? "";
-        check(
-          "gui: 气泡 SKIP_TASKBAR 原子",
-          wmState.includes("_NET_WM_STATE_SKIP_TASKBAR"),
-          wmState.trim().slice(0, 80),
-        );
-        snapWindow("33-bubble.png", bubbleWin);
-        run("sh", ["-c", `convert '${join(shotsDir, "33-bubble.png")}' -resize 400% '${join(shotsDir, "33-bubble-4x.png")}' 2>/dev/null || true`]);
-        snapRoot("33-returned-root.png");
-
-        // 坐标点击气泡中心 → 回切
-        const g = windowGeometry(bubbleWin);
-        xdotool("mousemove", "--sync", String(g.x + Math.floor(g.width / 2)), String(g.y + Math.floor(g.height / 2)));
-        await settle(400);
-        xdotool("click", "1");
-        const reentered = await waitLog("enterZCodeGo 完成");
-        check("gui: 点击气泡 → enterZCodeGo 完成（回切覆盖）", reentered.ok, reentered.detail);
-        await settle(600);
-        check("gui: 回切后主窗可见", isVisible(mainWin));
-        check("gui: 回切后气泡隐藏", !isVisible(bubbleWin));
-      }
-      snapWindow("34-reentered-main.png", mainWin);
+      check("gui: 关闭主窗 → 应用退出（无气泡常驻）", exited);
+      snapRoot("33-closed-root.png");
     }
 
     // 截图完整性断言（列名进日志，方便 CI 页面直接看产出了哪些）
