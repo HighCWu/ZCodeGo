@@ -8,11 +8,12 @@ routes = [
   { pattern = "zcode-go.aimon.win", custom_domain = true }
 ]
 
-# 限频 binding（GA 语法 [[ratelimits]]，wrangler ≥ 4.36）。旧 [[unsafe.bindings]]
-# 写法在 GA 后只作为过渡兼容上传、生产实测不再 provision（25 连打 5/min 桶零
-# 拦截，恒 fail-open）——已迁移。这些 binding 是外层第二道：权威判定在
-# RateLimiter DO（src/ratelimit.ts，强一致）；binding 若生效则在 DO 之前拦截，
-# 省 DO 调用。period 仅允许 10 或 60。
+# 限频 binding（GA 语法 [[ratelimits]]，wrangler ≥ 4.36；period 仅允许 10|60）。
+# 定位：外层 early-rejection（官方语义 permissive / 最终一致 / per-location，
+# 突发流量会过冲——不能用 burst 测试证伪它，也不能拿它做精确计数）。
+# 权威判定在 RateLimiter DO（src/ratelimit.ts，强一致精确）。两层协作实测：
+# TEST_LIMIT(2/60s) 间隔请求第 4 拍起 success=false（计数生效）；
+# 突发 8 连打全过冲放行由 DO 精确拦截——正是设计分工。
 [[ratelimits]]
 name = "ROOM_CREATE_LIMIT"
 namespace_id = "1001"
