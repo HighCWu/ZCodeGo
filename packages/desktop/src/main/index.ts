@@ -160,6 +160,8 @@ import {
   startMobileBridgePairing,
   stopMobileBridgePairing,
   getMobileBridgeStatus,
+  getMobileBridgeSignalingOrigin,
+  setMobileBridgeSignalingOrigin,
   isMobileBridgeWindow,
   type MobileBridgeStatus,
 } from "./zcodeGoMobileBridge.js";
@@ -2512,6 +2514,17 @@ app.whenReady().then(async () => {
     return null;
   });
   ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeGetStatus, () => getMobileBridgeStatus());
+  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeGetSignalingOrigin, () =>
+    getMobileBridgeSignalingOrigin(),
+  );
+  ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeSetSignalingOrigin, (_event, payload) =>
+    setMobileBridgeSignalingOrigin(
+      logger,
+      broadcastMobileBridgeStatus,
+      { attach: attachHostToBridgeWindow, deviceMid },
+      typeof payload?.origin === "string" ? payload.origin : null,
+    ),
+  );
   ipcMain.handle(PlatformChannels.ZcodeGoTakeSessionInitial, (event) => {
     const pending = zcodeGoPendingInitialSession.get(event.sender.id);
     if (pending) zcodeGoPendingInitialSession.delete(event.sender.id);

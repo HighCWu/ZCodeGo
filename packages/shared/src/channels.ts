@@ -432,6 +432,8 @@ export const PlatformChannels = {
   ZcodeGoMobileBridgeStop: "zcode:zcode-go-mobile-bridge-stop",
   /** Renderer → Main：移动端远程控制——查询当前状态 */
   ZcodeGoMobileBridgeGetStatus: "zcode:zcode-go-mobile-bridge-get-status",
+  ZcodeGoMobileBridgeGetSignalingOrigin: "zcode:zcode-go-mobile-bridge-get-signaling-origin",
+  ZcodeGoMobileBridgeSetSignalingOrigin: "zcode:zcode-go-mobile-bridge-set-signaling-origin",
   /** Main → Renderer：移动端远程控制状态变化（配对 URL / 连接状态） */
   ZcodeGoMobileBridgeStatusChanged: "zcode:zcode-go-mobile-bridge-status-changed",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
@@ -1220,6 +1222,18 @@ export interface PlatformChannelMap {
       token?: string;
       error?: string;
     };
+  };
+  [PlatformChannels.ZcodeGoMobileBridgeGetSignalingOrigin]: {
+    request: void;
+    response: {
+      effective: string;
+      configured: string | null;
+      source: "env" | "config" | "default";
+    };
+  };
+  [PlatformChannels.ZcodeGoMobileBridgeSetSignalingOrigin]: {
+    request: { origin: string | null };
+    response: { ok: boolean; error?: string; effective?: string };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

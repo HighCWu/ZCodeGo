@@ -285,6 +285,21 @@ contextBridge.exposeInMainWorld("zcode", {
     token?: string;
     error?: string;
   }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeGetStatus),
+  /** zcode-go：移动端远程控制——信令服务器读取（自部署覆盖/默认）。 */
+  zcodeGoMobileBridgeGetSignalingOrigin: (): Promise<{
+    effective: string;
+    configured: string | null;
+    source: "env" | "config" | "default";
+  }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeGetSignalingOrigin),
+  /** zcode-go：移动端远程控制——设置信令服务器（写配置；有会话则重建刷新二维码）。 */
+  zcodeGoMobileBridgeSetSignalingOrigin: (origin: string | null): Promise<{
+    ok: boolean;
+    error?: string;
+    effective?: string;
+  }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeSetSignalingOrigin, {
+      origin,
+    }),
   onZcodeGoMobileBridgeStatusChanged: (
     handler: (status: {
       state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";

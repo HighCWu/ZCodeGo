@@ -130,9 +130,10 @@ function generateToken(length = 8): string {
   return out;
 }
 
-function resolveSignalingOrigin(): string {
-  const fromEnv = process.env.ZCODE_GO_SIGNALING_ORIGIN?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
+/** 默认信令地址（用户自有 Worker 部署，aimon.win zone 托管在 CF）。 */
+const DEFAULT_SIGNALING_ORIGIN = "https://zcode-go.aimon.win";
+
+function readConfiguredSignalingOrigin(): string {
   try {
     const configPath = join(STATE_DIR, "config.json");
     if (existsSync(configPath)) {
@@ -148,8 +149,101 @@ function resolveSignalingOrigin(): string {
   } catch {
     /* 坏配置按未配置处理 */
   }
-  // 默认信令地址（用户自有 Worker 部署，aimon.win zone 托管在 CF）。
-  return "https://zcode-go.aimon.win";
+  return "";
+}
+
+function resolveSignalingOrigin(): string {
+  const fromEnv = process.env.ZCODE_GO_SIGNALING_ORIGIN?.trim();
+  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  return readConfiguredSignalingOrigin() || DEFAULT_SIGNALING_ORIGIN;
+}
+
+/** 信令服务器当前生效值与来源（供配对对话框展示/编辑）。 */
+export function getMobileBridgeSignalingOrigin(): {
+  effective: string;
+  configured: string | null;
+  source: "env" | "config" | "default";
+} {
+  const fromEnv = process.env.ZCODE_GO_SIGNALING_ORIGIN?.trim();
+  if (fromEnv) {
+    return {
+      effective: fromEnv.replace(/\/$/, ""),
+      configured: readConfiguredSignalingOrigin() || null,
+      source: "env",
+    };
+  }
+  const configured = readConfiguredSignalingOrigin();
+  if (configured) return { effective: configured, configured, source: "config" };
+  return { effective: DEFAULT_SIGNALING_ORIGIN, configured: null, source: "default" };
+}
+
+/**
+ * 设置自部署信令服务器：写 ~/.zcode-go/config.json（空串/等价默认值 = 移除
+ * 覆盖，回到官方默认）；有活跃配对会话则重建（token/secret/二维码全部刷新）。
+ * 校验：必须为 https；http 仅允许 localhost/127.0.0.1/[::1]（本地 wrangler
+ * dev 调试）。env 覆盖存在时写入成功但不生效（error=overridden-by-env）。
+ */
+export async function setMobileBridgeSignalingOrigin(
+  logger: MobileBridgeLogger,
+  onStatus: (status: MobileBridgeStatus) => void,
+  host: MobileBridgeHostAttach | undefined,
+  originInput: string | null,
+): Promise<{ ok: boolean; error?: string; effective?: string }> {
+  let normalized = (originInput ?? "").trim();
+  if (normalized) {
+    let parsed: URL;
+    try {
+      parsed = new URL(normalized);
+    } catch {
+      return { ok: false, error: "invalid_url" };
+    }
+    const localHttp =
+      parsed.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+    if (parsed.protocol !== "https:" && !localHttp) {
+      return { ok: false, error: "must_be_https" };
+    }
+    if (!parsed.hostname) {
+      return { ok: false, error: "invalid_url" };
+    }
+    // 只保留 scheme+host+port（worker 路由在根路径；带 path 会拼出 404 二维码）。
+    normalized = parsed.origin;
+  }
+  try {
+    const configPath = join(STATE_DIR, "config.json");
+    mkdirSync(STATE_DIR, { recursive: true });
+    let config: Record<string, unknown> = {};
+    if (existsSync(configPath)) {
+      config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    }
+    const mobileBridge = { ...((config.mobileBridge as Record<string, unknown>) ?? {}) };
+    if (normalized && normalized !== DEFAULT_SIGNALING_ORIGIN) {
+      mobileBridge.signalingOrigin = normalized;
+    } else {
+      delete mobileBridge.signalingOrigin;
+    }
+    if (Object.keys(mobileBridge).length > 0) {
+      config.mobileBridge = mobileBridge;
+    } else {
+      delete config.mobileBridge;
+    }
+    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+    logger.info("[zcode-go-mobile-bridge] 信令服务器已更新", {
+      origin: normalized || "(默认)",
+    });
+  } catch (error) {
+    return { ok: false, error: `config_write_failed:${String(error).slice(0, 120)}` };
+  }
+  const info = getMobileBridgeSignalingOrigin();
+  if (info.source === "env") {
+    return { ok: true, error: "overridden-by-env", effective: info.effective };
+  }
+  // 有活跃会话则重建：resolveSignalingOrigin 每次启动重读，新会话即用新地址。
+  if (activeSession) {
+    stopMobileBridgePairing();
+    startMobileBridgePairing(logger, onStatus, host);
+  }
+  return { ok: true, effective: info.effective };
 }
 
 function emit(session: Session): void {

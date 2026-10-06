@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Check, Copy, Loader2, RefreshCw, Smartphone, Square } from "lucide-react";
+import { Check, Copy, Globe, Loader2, RefreshCw, Smartphone, Square } from "lucide-react";
 import type { BotProvider } from "@zcode/shared";
 import { Bot as BotIcon, MonitorSmartphone, XIcon } from "lucide-react";
 import { BotsDialog } from "@/BotsDialog.js";
 import { ProviderIcon } from "@/BotsDialog/shared.js";
 import { Button } from "@/components/ui/button.js";
+import { Input } from "@/components/ui/input.js";
 import {
   Dialog,
   DialogContent,
@@ -58,6 +59,17 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
   }>({ state: "idle" });
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
+  // zcode-go：信令服务器（自部署 Worker 覆盖；空 = 默认官方服务）。
+  const [signalingOriginInput, setSignalingOriginInput] = useState("");
+  const [signalingOriginEffective, setSignalingOriginEffective] = useState<string | null>(null);
+  const [originFeedback, setOriginFeedback] = useState<
+    { kind: "saved" } | { kind: "error"; id: string } | null
+  >(null);
+  const [originApplying, setOriginApplying] = useState(false);
+  const originDirty =
+    signalingOriginInput.trim() !== "" &&
+    signalingOriginInput.trim().replace(/\/$/, "") !== signalingOriginEffective;
+
   useEffect(() => {
     if (!open) return;
     const bridge = (
@@ -65,6 +77,16 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
         zcode?: {
           zcodeGoMobileBridgeStart?: () => Promise<typeof bridgeStatus>;
           zcodeGoMobileBridgeStop?: () => Promise<void>;
+          zcodeGoMobileBridgeGetSignalingOrigin?: () => Promise<{
+            effective: string;
+            configured: string | null;
+            source: "env" | "config" | "default";
+          }>;
+          zcodeGoMobileBridgeSetSignalingOrigin?: (origin: string | null) => Promise<{
+            ok: boolean;
+            error?: string;
+            effective?: string;
+          }>;
           onZcodeGoMobileBridgeStatusChanged?: (
             handler: (status: typeof bridgeStatus) => void,
           ) => () => void;
@@ -76,6 +98,12 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     });
     void bridge?.zcodeGoMobileBridgeStart?.().then((status) => {
       if (status) setBridgeStatus(status);
+    });
+    void bridge?.zcodeGoMobileBridgeGetSignalingOrigin?.().then((info) => {
+      if (!info) return;
+      setSignalingOriginEffective(info.effective);
+      // 已配置自部署地址则回填输入框；默认服务留空（占位符展示当前生效值）。
+      setSignalingOriginInput(info.source === "config" ? (info.configured ?? "") : "");
     });
     // 注意：关闭对话框不停止配对——会话与已连接客户端保活（preload/桥窗口
     // 自持），只有「刷新二维码」与「停止」按钮才会重建/结束会话。
@@ -197,6 +225,51 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
     });
   }, []);
 
+  // 确认变更信令服务器：写配置（清空 = 恢复默认）；main 侧有活跃会话时重建，
+  // 新二维码经状态事件自动回流。校验在 main 权威重复一次（invalid_url 等）。
+  const handleApplySignalingOrigin = useCallback(() => {
+    const bridge = (
+      window as {
+        zcode?: {
+          zcodeGoMobileBridgeSetSignalingOrigin?: (origin: string | null) => Promise<{
+            ok: boolean;
+            error?: string;
+            effective?: string;
+          }>;
+        };
+      }
+    ).zcode;
+    const value = signalingOriginInput.trim();
+    setOriginApplying(true);
+    setOriginFeedback(null);
+    void bridge?.zcodeGoMobileBridgeSetSignalingOrigin?.(value || null)
+      .then((result) => {
+        if (!result) return;
+        if (result.ok) {
+          setSignalingOriginEffective(result.effective ?? null);
+          setSignalingOriginInput(
+            result.effective && result.effective !== "https://zcode-go.aimon.win"
+              ? result.effective
+              : "",
+          );
+          setOriginFeedback(
+            result.error === "overridden-by-env"
+              ? { kind: "error", id: "zcodeGoMobileBridge.signalingOrigin.envOverride" }
+              : { kind: "saved" },
+          );
+        } else {
+          setOriginFeedback({
+            kind: "error",
+            id:
+              result.error === "must_be_https" || result.error === "invalid_url"
+                ? "zcodeGoMobileBridge.signalingOrigin.invalidUrl"
+                : "zcodeGoMobileBridge.signalingOrigin.invalidUrl",
+          });
+        }
+      })
+      .finally(() => setOriginApplying(false));
+  }, [signalingOriginInput]);
+
   const handleOpenBotEntry = (provider: RemoteControlBotProvider) => {
     setBotEntryProvider(provider);
     setBotsDialogOpen(true);
@@ -262,6 +335,63 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
               data-testid="web-remote-control-scan-card"
               className="flex min-h-[360px] flex-col rounded-xl border border-border bg-card p-4"
             >
+                {/* 自部署信令服务器：输入 + 确认（写配置并刷新二维码），下方
+                    分隔符隔开官方扫码区。 */}
+                <div className="mb-3" data-testid="web-remote-control-signaling-origin">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Globe className="size-4 shrink-0 text-foreground-subtle" />
+                    <Input
+                      value={signalingOriginInput}
+                      onChange={(event) => {
+                        setSignalingOriginInput(event.target.value);
+                        setOriginFeedback(null);
+                      }}
+                      placeholder={
+                        signalingOriginEffective ?? "https://zcode-go.aimon.win"
+                      }
+                      spellCheck={false}
+                      className="h-8 min-w-56 flex-1 font-mono text-ui-base"
+                      aria-label={intl.formatMessage({
+                        id: "zcodeGoMobileBridge.signalingOrigin.title",
+                      })}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="default"
+                      className="shrink-0 gap-2 enabled:cursor-pointer"
+                      onClick={handleApplySignalingOrigin}
+                      disabled={!originDirty || originApplying}
+                    >
+                      {originApplying ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Check className="size-3.5" />
+                      )}
+                      {intl.formatMessage({
+                        id: "zcodeGoMobileBridge.signalingOrigin.apply",
+                      })}
+                    </Button>
+                  </div>
+                  <p
+                    className={`mt-1.5 text-ui-xs ${
+                      originFeedback?.kind === "error"
+                        ? "text-destructive"
+                        : "text-foreground-subtle"
+                    }`}
+                  >
+                    {originFeedback?.kind === "saved"
+                      ? intl.formatMessage({
+                          id: "zcodeGoMobileBridge.signalingOrigin.applied",
+                        })
+                      : originFeedback?.kind === "error"
+                        ? intl.formatMessage({ id: originFeedback.id })
+                        : intl.formatMessage({
+                            id: "zcodeGoMobileBridge.signalingOrigin.description",
+                          })}
+                  </p>
+                </div>
+                <div className="mb-4 border-t border-border" />
                 <div className="mb-4 flex items-start gap-2">
                   <Smartphone className="mt-0.5 size-4 shrink-0 text-foreground-subtle" />
                   <div className="min-w-0 space-y-1">
