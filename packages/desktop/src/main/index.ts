@@ -49,6 +49,7 @@ import {
 import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import {
   createCredentialService,
@@ -296,7 +297,15 @@ process.on("unhandledRejection", (reason) => {
   logger.error("unhandledRejection:", reason);
 });
 
-const iconPath =
+// zcode-go 品牌图标（低侵入门控）：安装器把 B5 资产（官方 logo 圆角方形 +
+// Go 徽章）放入 resources/icon-zcode-go.png，存在即优先用于窗口/Dock/协议
+// 注册；删除该文件或设 ZCODE_GO_OFFICIAL_ICON=1 即回退官方图标链。
+const zcodeGoBrandIconPath = app.isPackaged
+  ? join(process.resourcesPath, "icon-zcode-go.png")
+  : join(import.meta.dirname, "../../build/zcode-go-icon.png");
+const useZcodeGoBrandIcon =
+  process.env.ZCODE_GO_OFFICIAL_ICON !== "1" && existsSync(zcodeGoBrandIconPath);
+const officialIconPath =
   process.platform === "win32"
     ? app.isPackaged
       ? join(process.resourcesPath, "icon_windows.png")
@@ -304,11 +313,14 @@ const iconPath =
     : app.isPackaged
       ? join(process.resourcesPath, "icon.png")
       : join(import.meta.dirname, "../../build/icon.png");
+const iconPath = useZcodeGoBrandIcon ? zcodeGoBrandIconPath : officialIconPath;
 const linuxDesktopIntegrationIconPath =
   process.platform === "linux"
-    ? app.isPackaged
-      ? join(process.resourcesPath, "icon_512x512.png")
-      : join(import.meta.dirname, "../../build/icons/512x512.png")
+    ? useZcodeGoBrandIcon
+      ? zcodeGoBrandIconPath
+      : app.isPackaged
+        ? join(process.resourcesPath, "icon_512x512.png")
+        : join(import.meta.dirname, "../../build/icons/512x512.png")
     : iconPath;
 let currentApplicationLocale: Locale = DEFAULT_LOCALE;
 let closeToTrayOnWindows = true;

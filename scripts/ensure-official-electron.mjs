@@ -28,7 +28,7 @@
  *   --force 重装二进制/克隆与 app 产物（日常重建 out/ 后无需 --force，按 mtime 同步）
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, statSync, readdirSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -204,27 +204,52 @@ function ensureIcons() {
       assembled = true;
     }
   }
+  // zcode-go 品牌图标（B5：官方 logo 圆角方形 + Go 徽章）：独立新文件门控——
+  // 运行时检测到 icon-zcode-go.png 即替换窗口/Dock/任务栏图标，删除即回退
+  // 官方（ZCODE_GO_OFFICIAL_ICON=1 也可强切回）。仓库资产为准，装一次即可。
+  const brandSrc = join(repoRoot, "packages", "desktop", "build", "zcode-go-icon.png");
+  const brandDst = join(resourcesDir, "icon-zcode-go.png");
+  if (existsSync(brandSrc) && !existsSync(brandDst)) {
+    copyFileSync(brandSrc, brandDst);
+    log(`品牌图标安装：icon-zcode-go.png`);
+  }
 }
 
-function ensureLinuxDesktopEntry() {
-  // 任务栏/启动器身份：StartupWMClass 与 app name（"ZCode Go"）匹配，
-  // 图标用官方 512px，Exec 指向启动器（冷启动全链路）。
+/** hicolor 主题图标（zcode-go）：品牌资产优先，旧链指向官方时刷新。 */
+function ensureLinuxIconThemeLink() {
   if (process.platform !== "linux") return;
-  const desktopDir = join(homedir(), ".local", "share", "applications");
-  const entry = join(desktopDir, "zcode-go.desktop");
-  const exec = join(repoRoot, "scripts", "launch-zcode-go.sh");
-  const icon = join(officialDir, "resources", "icon_512x512.png");
-  // 官方机制：Icon 用 hicolor 图标主题名（tasklist 按主题查图标，绝对路径不可靠）。
-  // 把官方 512px 图标链入用户主题目录，主题名 zcode-go。
+  const brandIcon = join(resourcesDir, "icon-zcode-go.png");
+  const icon = existsSync(brandIcon) ? brandIcon : join(officialDir, "resources", "icon_512x512.png");
   const iconThemeDir = join(homedir(), ".local", "share", "icons", "hicolor", "512x512", "apps");
   mkdirSync(iconThemeDir, { recursive: true });
   const themeIcon = join(iconThemeDir, "zcode-go.png");
-  if (!existsSync(themeIcon)) {
+  let stale = !existsSync(themeIcon);
+  if (!stale) {
+    try {
+      stale = lstatSync(themeIcon).isSymbolicLink() && readlinkSync(themeIcon) !== icon;
+    } catch {
+      stale = true;
+    }
+  }
+  if (stale) {
+    rmSync(themeIcon, { force: true });
     symlinkSync(icon, themeIcon);
     try {
       spawnSync("gtk-update-icon-cache", ["-f", "-t", join(homedir(), ".local", "share", "icons", "hicolor")], { stdio: "ignore" });
     } catch { /* 无该工具时忽略 */ }
+    log(`主题图标：zcode-go.png → ${icon}`);
   }
+}
+
+function ensureLinuxDesktopEntry() {
+  // 任务栏/启动器身份：StartupWMClass 与 app name（"ZCode Go"）匹配，
+  // 图标用 512px（品牌资产优先，缺省回退官方），Exec 指向启动器（冷启动全链路）。
+  if (process.platform !== "linux") return;
+  const desktopDir = join(homedir(), ".local", "share", "applications");
+  const entry = join(desktopDir, "zcode-go.desktop");
+  const exec = join(repoRoot, "scripts", "launch-zcode-go.sh");
+  // 官方机制：Icon 用 hicolor 图标主题名（tasklist 按主题查图标，绝对路径不可靠）。
+  ensureLinuxIconThemeLink();
   const content = [
     "[Desktop Entry]",
     "Type=Application",
@@ -338,6 +363,8 @@ try {
     ensureBinary();
     ensureDistAssets();
     ensureIcons();
+    // 主题图标独立刷新（不创建桌面入口——用户反馈过开始菜单多出入口，保持不静默安装）。
+    ensureLinuxIconThemeLink();
   // 桌面入口不再静默安装（用户反馈开始菜单莫名多出 ZCode Go）。如需启动器入口，手动运行本脚本后自行创建，或恢复此调用。
     ensureApp();
   }
