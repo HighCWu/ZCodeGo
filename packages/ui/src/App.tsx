@@ -920,6 +920,35 @@ export function App({
       } catch {
         pending = null;
       }
+      // web 远程「在新窗口打开会话」：本窗口由深链 #zg-task= 打开，shim 解析
+      // 后挂在 window 上——与桌面新窗口的领取式注入走同一条打开路径。
+      if (!pending) {
+        const webInitial = (
+          window as {
+            __ZCODE_GO_INITIAL_TASK__?: {
+              taskId?: unknown;
+              workspacePath?: unknown;
+              workspaceIdentity?: unknown;
+            } | null;
+          }
+        ).__ZCODE_GO_INITIAL_TASK__;
+        if (
+          webInitial &&
+          typeof webInitial.taskId === "string" &&
+          typeof webInitial.workspacePath === "string" &&
+          webInitial.taskId &&
+          webInitial.workspacePath
+        ) {
+          pending = {
+            taskId: webInitial.taskId,
+            workspacePath: webInitial.workspacePath,
+            workspaceIdentity:
+              typeof webInitial.workspaceIdentity === "string" && webInitial.workspaceIdentity
+                ? webInitial.workspaceIdentity
+                : undefined,
+          };
+        }
+      }
       if (cancelled || !pending) return;
       // 冷启动时任务列表/store 可能尚未就绪（tab 恢复与 App 挂载并行）：验证
       // activeTaskId 落位，未落位延迟重试（最多 3 次），避免一次性领取因时序

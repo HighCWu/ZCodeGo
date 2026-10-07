@@ -472,7 +472,13 @@ function containerPage(origin: string): string {
     setStatus(T.fetching, "ok");
     renderProgress();
     var frame = document.createElement("iframe");
-    frame.src = "/app/";
+    // zcode-go「在新窗口打开会话」深链：容器 URL 的 #zg-task= 原样透传给
+    // /app/，shim 解析后交给 App 启动领取（其它 hash 不透传）。
+    var initialHash = "";
+    try {
+      if (window.location.hash.indexOf("#zg-task=") === 0) initialHash = window.location.hash;
+    } catch (e) {}
+    frame.src = "/app/" + initialHash;
     frame.title = "ZCode Go";
     frame.style.cssText =
       "position:fixed;inset:0;width:100vw;height:100vh;border:0;background:transparent;z-index:9999;opacity:0;transition:opacity .35s ease";
@@ -851,6 +857,18 @@ const SHIM_JS = String.raw`
   // Web 远程环境旗标：UI 据此隐藏窗口装饰（最小化/最大化/关闭按钮——
   // 浏览器有自己的窗控，语义也不通）。
   window.__ZCODE_WEB_REMOTE__ = true;
+  // zcode-go「在新窗口打开会话」深链：容器页把 #zg-task= 透传进 /app/，
+  // 这里解析成初始会话对象供 App 启动领取（与桌面 zcodeGoTakeSessionInitial
+  // 同一条路径），随后清掉 hash——刷新页面不重复触发打开。
+  (function () {
+    var h = window.location.hash || "";
+    if (h.indexOf("#zg-task=") === 0) {
+      try {
+        window.__ZCODE_GO_INITIAL_TASK__ = JSON.parse(decodeURIComponent(h.slice(9)));
+      } catch (e) {}
+      try { history.replaceState(null, "", window.location.pathname); } catch (e) {}
+    }
+  })();
   // 圆角外白边修复：应用根节点带圆角且圆角外透明（桌面 vibrancy 透窗背景），
   // 浏览器默认白底会露出白边。应用 styles.css 对 html/body 有
   // background:transparent!important，注入需同类名+!important 反超；颜色取

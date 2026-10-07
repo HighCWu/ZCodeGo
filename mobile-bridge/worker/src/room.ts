@@ -131,6 +131,9 @@ export class SignalRoom extends DurableObject {
       }
 
       const tag = `${this.ctx.id.name}:${role}`;
+      // mobile 连接附唯一 sock tag：DO 休眠会丢全部内存态（含 pendingOfferReplies），
+      // req-offer 的应答路由映射必须落 storage，醒来后凭 tag 重新寻址请求方 socket。
+      const sockTag = role === "mobile" ? `sock:${crypto.randomUUID()}` : "";
       if (role === "desktop") {
         // 新 desktop 顶替旧的（桌面端重新生成配对码复用房间名时兜底）。
         for (const old of this.socketsFor("desktop")) old.close(4002, "replaced");
@@ -160,7 +163,7 @@ export class SignalRoom extends DurableObject {
       // 第二个页面；desktop 侧按 req-offer 的 r 标记为每个客户端分配独立
       // 桥窗口/offer，answer 按 offer id 路由到对应窗口。
       const pair = new WebSocketPair();
-      this.ctx.acceptWebSocket(pair[1], [tag]);
+      this.ctx.acceptWebSocket(pair[1], [tag, sockTag]);
       const desktop = this.socketsFor("desktop")[0];
       this.send(pair[1], {
         t: "joined",
@@ -230,6 +233,13 @@ export class SignalRoom extends DurableObject {
             if (r) {
               if (this.pendingOfferReplies.size > 64) this.pendingOfferReplies.clear();
               this.pendingOfferReplies.set(r, ws);
+              // DO 休眠丢内存：等桌面分配/预生成 offer 期间（多客户端 ~13s）房间
+              // 无事件即被驱逐，醒来 Map 已空。映射同时落 storage（按本 socket 的
+              // 唯一 tag 寻址），offer 到达时内存优先、storage 回落。
+              const myTag = (this.ctx.getTags(ws) || []).find((t) => t.startsWith("sock:"));
+              if (myTag) {
+                void this.ctx.storage.put(`reply:${r}`, myTag);
+              }
             }
             this.send(desktop, { t: "req-offer", i: message.i, r });
           } else {
@@ -257,17 +267,31 @@ export class SignalRoom extends DurableObject {
       }
       case "offer": {
         // desktop → 请求方（req-offer 的回应；r 路由到发起请求的 mobile）。
+        // 休眠安全：内存 Map 命中即用；未命中查 storage（tag 寻址）。
+        // 不回落 mobile[0]：请求方已关时把 offer 发给其它在线客户端，会触发其
+        // 协商逻辑接出鬼连接（实测：第二页的 offer 全被路由到已连接的第一页）。
+        // 找不到请求方就丢弃，桌面侧窗口靠回收机制自清。
         if (!isDesktop) return;
         const r = typeof message.r === "string" ? message.r : "";
-        const requester = r ? this.pendingOfferReplies.get(r) : undefined;
-        if (r) this.pendingOfferReplies.delete(r);
-        const mobile =
-          requester && requester.readyState === WebSocket.OPEN
-            ? requester
-            : this.socketsFor("mobile")[0];
-        if (mobile?.readyState === WebSocket.OPEN) {
-          this.send(mobile, { t: "offer", i: message.i, r, data: message.data });
-        }
+        if (!r) return;
+        const memHit = this.pendingOfferReplies.get(r);
+        this.pendingOfferReplies.delete(r);
+        void this.ctx.storage
+          .get<string>(`reply:${r}`)
+          .then((tag) => {
+            void this.ctx.storage.delete(`reply:${r}`);
+            const deliver = (target: WebSocket | undefined): void => {
+              if (target && target.readyState === WebSocket.OPEN) {
+                this.send(target, { t: "offer", i: message.i, r, data: message.data });
+              }
+            };
+            if (memHit && memHit.readyState === WebSocket.OPEN) {
+              deliver(memHit);
+              return;
+            }
+            deliver(tag ? this.ctx.getWebSockets(tag)[0] : undefined);
+          })
+          .catch(() => {});
         return;
       }
       // ── legacy trickle 转发（A/B 对照，阶段 2 实测后移除）──
