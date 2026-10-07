@@ -73,7 +73,7 @@ for (let i = 0; i < 10; i += 1) {
 }
 console.log("step2 fuse-teardown:", idleSeen);
 
-// ── 3. Start 重建：新 token ──
+// ── 3. Start 重建：token 稳定（持久配对身份——手机保存的链接跨会话再生效）──
 await bridgeCall("zcodeGoMobileBridgeStart()");
 for (let i = 0; i < 12; i += 1) {
   await sleep(1500);
@@ -81,7 +81,7 @@ for (let i = 0; i < 12; i += 1) {
   if (status.pairingUrl) break;
 }
 const token2 = status.token;
-console.log("step3 recreated:", token2 !== token1, "token:", token2);
+console.log("step3 recreated with stable identity:", token2 === token1, "token:", token2);
 
 // ── 4. 真客户端连接 → 信令挂起 ──
 const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", headless: false, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
@@ -119,7 +119,7 @@ for (let i = 0; i < 50; i += 1) {
 console.log("step6 idle-watchdog-teardown:", idle2);
 
 const pass = Boolean(
-  token1 && idleSeen && token2 && token2 !== token1 && connected && suspended && resumed && sameUrl && idle2,
+  token1 && idleSeen && token2 && token2 === token1 && connected && suspended && resumed && sameUrl && idle2,
 );
 console.log(pass ? "BRIDGE-COST-OK ✓" : "BRIDGE-COST-FAIL ✗");
 process.exit(pass ? 0 : 1);

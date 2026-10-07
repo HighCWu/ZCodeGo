@@ -144,6 +144,52 @@ function generateToken(length = 8): string {
 /** 默认信令地址（用户自有 Worker 部署，aimon.win zone 托管在 CF）。 */
 const DEFAULT_SIGNALING_ORIGIN = "https://zcode-go.aimon.win";
 
+/**
+ * 持久配对身份：token/secret 首次生成后存 config.json，桌面重开远程控制/
+ * 刷新二维码时复用同一身份——手机保存的链接/二维码跨会话再生效，无需重新
+ * 扫码（房间 DO 的 secret 持久 + 桌面心跳复活语义本就支持同 token 重注册）。
+ * offerId 仍每次随机（仅指示当前 primary offer，不参与手机链接的寻址语义）。
+ */
+function readOrCreatePairingIdentity(): { token: string; secret: string } {
+  const configPath = join(STATE_DIR, "config.json");
+  try {
+    if (existsSync(configPath)) {
+      const config = JSON.parse(readFileSync(configPath, "utf8")) as {
+        mobileBridge?: { pairingToken?: unknown; pairingSecret?: unknown };
+      };
+      const token =
+        typeof config.mobileBridge?.pairingToken === "string"
+          ? config.mobileBridge.pairingToken.trim()
+          : "";
+      const secret =
+        typeof config.mobileBridge?.pairingSecret === "string"
+          ? config.mobileBridge.pairingSecret.trim()
+          : "";
+      // 防误读字母表外的历史值（或空值）视为无效，走重建。
+      if (/^[a-z2-9]{6,16}$/.test(token) && /^[0-9a-f]{16,}$/.test(secret)) {
+        return { token, secret };
+      }
+    }
+  } catch {
+    /* 损坏配置走重建 */
+  }
+  const identity = { token: generateToken(), secret: randomBytes(16).toString("hex") };
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+    const raw = existsSync(configPath) ? readFileSync(configPath, "utf8") : "{}";
+    const config = JSON.parse(raw) as { mobileBridge?: Record<string, unknown> };
+    config.mobileBridge = {
+      ...config.mobileBridge,
+      pairingToken: identity.token,
+      pairingSecret: identity.secret,
+    };
+    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+  } catch {
+    /* 持久化失败时退化为本次会话临时身份（下次再生成） */
+  }
+  return identity;
+}
+
 function readConfiguredSignalingOrigin(): string {
   try {
     const configPath = join(STATE_DIR, "config.json");
@@ -840,8 +886,7 @@ export function startMobileBridgePairing(
   }
   sessionLogger = logger;
   const origin = resolveSignalingOrigin();
-  const token = generateToken();
-  const secret = randomBytes(16).toString("hex");
+  const { token, secret } = readOrCreatePairingIdentity();
   const offerId = randomBytes(6).toString("hex");
   // 短码 URL 在配对开始即可定（token/secret/offerId 均本地生成）——链接与
   // 二维码同时可用；早到的 req-offer 在 primary 窗口排队，offer 预生成完成
