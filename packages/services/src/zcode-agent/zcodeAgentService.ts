@@ -3731,6 +3731,9 @@ export function createZCodeAgentService(
     },
 
     async readSessionMessages(params: ZCodeAgentReadSessionMessagesParams) {
+      // zcode-go 静默 fork：读取寻址到活跃隐形子会话（标题构建等消费者需要
+      // 最新内容而非陈旧的原会话档案）。
+      params = { ...params, sessionId: resolveZcodeGoSessionId(params.sessionId) };
       const client = await getReadOnlyClient(params);
       const result = await client.request(
         zcodeProtocolMethods.sessionMessages,
@@ -3754,6 +3757,8 @@ export function createZCodeAgentService(
     },
 
     async readSessionEvents(params: ZCodeAgentReadSessionEventsParams) {
+      // zcode-go 静默 fork：事件读取同样寻址到活跃端。
+      params = { ...params, sessionId: resolveZcodeGoSessionId(params.sessionId) };
       const client = await getReadOnlyClient(params);
       const result = await client.request(
         zcodeProtocolMethods.sessionEvents,
@@ -4459,6 +4464,8 @@ export function createZCodeAgentService(
     },
 
     async sendPrompt(params: ZCodeAgentSendPromptParams) {
+      // zcode-go 静默 fork：legacy 发送路径同样寻址到活跃隐形子会话。
+      params = { ...params, sessionId: resolveZcodeGoSessionId(params.sessionId) };
       const startedAt = Date.now();
       const client = await getClient(params);
       const sessionTraceId = params.sessionTraceId?.trim() || getSessionTraceId(params);
