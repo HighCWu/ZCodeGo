@@ -760,11 +760,11 @@ export function spawnHostProcess(
       dependencies.broadcastHub.unregister(windowId);
     }
     unregisterHostProcess(label);
+    // zcode-go 共享 host 多窗：同一 child 可能被多个窗口引用，退出时须全部
+    // 清除——官方单窗时代 break 一个即可；多引用下残留项会让「取第一个
+    // host」的选择器（桥挂接/共享窗挂接）拿到已退出的进程。
     for (const [wcId, process] of dependencies.windowHostProcessMap) {
-      if (process === child) {
-        dependencies.windowHostProcessMap.delete(wcId);
-        break;
-      }
+      if (process === child) dependencies.windowHostProcessMap.delete(wcId);
     }
   });
 

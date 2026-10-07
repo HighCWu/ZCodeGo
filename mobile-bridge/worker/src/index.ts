@@ -725,7 +725,11 @@ function containerPage(origin: string): string {
         try { await negotiate(m.data); } catch (e) { retryOrFail(); }
       } else if (m.t === "error") {
         var code = m.data && m.data.code;
-        if (code === "session_conflict") fail(T.conflict);
+        if (code === "desktop_offline" && retryCount < 2) {
+          // 桌面信令可能恰在恢复中（连接期挂起→Start 触发重连约 1-2s，新窗口
+          // 打开路径存在竞态窗口）：走重试链补投 req-offer，而非立即判死。
+          retryOrFail();
+        } else if (code === "session_conflict") fail(T.conflict);
         else if (code === "room_expired") fail(T.roomExpired);
         else if (code === "bad_secret") fail(T.badSecret);
         else if (code === "desktop_offline") fail(T.desktopOffline);
