@@ -826,9 +826,12 @@ export function startMobileBridgePairing(
     // idle（含空闲收摊）与 error 会话不复活——重建拿新配对码：重开对话框/
     // 网页「在新窗口打开」无需用户手动刷新二维码。
     if (activeSession.status.state !== "idle" && activeSession.status.state !== "error") {
-      // 已连接但信令挂起（零流量模式）：调 Start = 有新配对需求（重开对话框
-      // 展示二维码 / 新标签页要加入）——恢复信令并立即续期房间。
-      if (activeSession.signalingSuspended && anyConnected(activeSession)) {
+      // 信令挂起（零流量模式）下调 Start = 有新配对需求（重开对话框展示
+      // 二维码 / 新标签页要加入）——恢复信令并立即续期房间。不要求
+      // anyConnected：客户端可能已断（status 仍停留在 connected、房间已
+      // 过期），此时更要恢复，否则返回的是指向死房间的配对 URL，扫码必撞
+      // 「配对码已过期」。恢复后的流量由关窗保险丝/空闲看门狗兜底收摊。
+      if (activeSession.signalingSuspended) {
         activeSession.resumeSignaling?.();
       }
       return { ...activeSession.status };
