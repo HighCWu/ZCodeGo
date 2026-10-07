@@ -1741,6 +1741,65 @@ function openUpdateStatusWindow() {
   });
 }
 
+// ── zcode-go 共享 host 多窗口 ────────────────────────────────────────────────
+// 「在新窗口打开会话」的窗口与首窗共用同一个本地 host（与 web 远程桥同构：
+// AttachServicePort 向既有 host 再挂一条 RPC MessagePort）。新窗口由此与首窗
+// 共享同一份 sessions-index / 会话事件流——侧边栏工作状态（运行中 spinner）
+// 与多端同会话对话更新天然实时同步，无需任何跨 host 聚合。
+// 生命周期：windowHostProcessMap 里同一 child 允许多个 wcId 引用（dom-ready
+// 的 set 与 dispose 注入的引用计数拦截配合）：任一窗口关闭/reload 只解除
+// 自己的引用，最后一个引用窗口关闭时才真正回收 host——首窗关闭不影响其它窗。
+const zcodeGoSharedHostWindows = new WeakSet<Electron.BrowserWindow>();
+let zcodeGoSharedHostStartupId: { child: Electron.UtilityProcess; id: string } | null = null;
+const attachServicePortToSharedHostWindow = (
+  win: Electron.BrowserWindow,
+): Electron.UtilityProcess | null => {
+  const child = windowHostProcessMap.values().next().value;
+  if (!child || child.pid === undefined) return null;
+  // relay 的 dispose 会删除 hostStartupIds[child] 而 child 仍存活——凭缓存恢复
+  // 绑定 id（同 web 桥的 bridgeHostStartupId 模式）。
+  const startupPayload =
+    getDatabaseStartupPortPayload(child) ??
+    (zcodeGoSharedHostStartupId && zcodeGoSharedHostStartupId.child === child
+      ? { databaseStartupId: zcodeGoSharedHostStartupId.id }
+      : undefined);
+  if (!startupPayload) return null;
+  zcodeGoSharedHostStartupId = { child, id: startupPayload.databaseStartupId };
+  const { port1, port2 } = new MessageChannelMain();
+  child.postMessage(
+    {
+      type: HostMessageTypes.AttachServicePort,
+      requestId: randomUUID(),
+      attachmentId: randomUUID(),
+      clientMode: "desktop-continuous",
+      scope: { kind: "local" },
+    },
+    [port2],
+  );
+  win.webContents.postMessage(InternalChannels.ServicePort, startupPayload, [port1]);
+  const relay = bindDatabaseStartupRelay(win, child, startupPayload.databaseStartupId);
+  // relay.receive 需接 child 广播（spawn 点在 desktopHostProcess 内做了同样路由）。
+  const onChildMessage = (message: unknown): void => {
+    const parsed = hostResponseMessageSchema.safeParse(message);
+    if (parsed.success && parsed.data.type === HostResponseTypes.DatabaseStartupState) {
+      relay.receive(parsed.data.state);
+    }
+  };
+  child.on("message", onChildMessage);
+  const wcId = win.webContents.id;
+  win.once("closed", () => {
+    child.removeListener("message", onChildMessage);
+    // 共享 host 不会随本窗关闭退出（官方靠 host 退出反注册），这里自行清理广播注册。
+    broadcastHub.unregister(wcId);
+  });
+  broadcastHub.register(wcId, child);
+  logger.info("[zcode-go-shared-host] 新窗口已挂接既有 host", {
+    hostPid: child.pid,
+    windowId: wcId,
+  });
+  return child;
+};
+
 function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
   const runtimeProcessEnvPreparation = takeRuntimeProcessEnvPreparation();
   const win = createWindow({
@@ -1769,6 +1828,9 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
     onHostProcessReady: (windowKey) => cuaPipFocusRouter.refreshWindow(windowKey),
     awaitFirstHostSpawnDecision,
     spawnHostProcess: (win, label, initMessage) =>
+      // zcode-go 共享 host 窗口：挂到既有（首窗）host 而非另起；挂接失败（null）
+      // 回退官方独立 host 路径，窗口功能不降级。
+      (zcodeGoSharedHostWindows.has(win) && attachServicePortToSharedHostWindow(win)) ||
       spawnHostProcess(
         win,
         label,
@@ -1888,8 +1950,18 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
           },
         },
       ),
-    disposeHostProcess: (child, label, forceKillDelayMs) =>
-      disposeHostProcess(
+    disposeHostProcess: (child, label, forceKillDelayMs) => {
+      // zcode-go 共享 host 引用计数：同一 child 被多个窗口引用（同 host 多窗）时，
+      // 任一窗口关闭/reload 只解除自己的引用（官方 close/reload 随后会 delete 对应
+      // map 项），不销毁仍被其它窗口使用的 host；最后一个引用才真正回收。
+      const sharedRefs = [...windowHostProcessMap.values()].filter((c) => c === child).length;
+      if (sharedRefs > 1) {
+        logger.info(
+          `[zcode-go-shared-host] 跳过 host 回收（其余 ${sharedRefs - 1} 个窗口仍在引用, ${label}）`,
+        );
+        return;
+      }
+      return disposeHostProcess(
         child,
         label,
         disposingHostProcessTimers,
@@ -1897,7 +1969,8 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         label.includes("window-closed")
           ? activeAppShutdownPolicy.forceKillDelayMs
           : forceKillDelayMs,
-      ),
+      );
+    },
     syncAutoUpdaterStateToWindow,
     syncReadyUpdateToWindow,
     syncPostUpdateReleaseNotesToWindow,
@@ -2429,6 +2502,8 @@ app.whenReady().then(async () => {
         const win = createWindowInstance({
           initialWorkspacePath: request.workspacePath,
         });
+        // 标记共享 host：dom-ready 时 spawn 注入会改为挂接首窗 host（同 web 桥）。
+        zcodeGoSharedHostWindows.add(win);
         const wcId = win.webContents.id;
         zcodeGoPendingInitialSession.set(wcId, {
           taskId: request.taskId,
