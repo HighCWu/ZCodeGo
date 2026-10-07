@@ -149,7 +149,7 @@ test("legacy（sequence 为空）会话回退 time_created 语义；空会话返
     assert.equal(window.oldestMessageSequence, null);
     assert.equal(window.totalMessages, 5);
     const empty = reader.readTailWindow("sess-none", 10);
-    assert.deepEqual(empty, { parts: [], oldestMessageSequence: null, totalMessages: 0 });
+    assert.deepEqual(empty, { parts: [], messages: [], oldestMessageSequence: null, totalMessages: 0 });
     reader.close();
   } finally {
     cleanup();

@@ -226,8 +226,9 @@ try {
     "--lang=zh-CN",
     `--user-data-dir=${join(ws, PROFILE_TAG)}`,
     `--remote-debugging-port=${CDP_PORT}`,
-    // mac CI VM 的 GPU 栈不稳（官方对照步骤同款规避）
-    ...(process.platform === "darwin" ? ["--disable-gpu"] : []),
+    // linux：生产启动器固定 --no-sandbox（CI 的 chrome-sandbox 无 SUID）；
+    // win/mac CI 的 GPU 栈不稳（官方对照步骤同款规避）
+    ...(process.platform === "linux" ? ["--no-sandbox"] : ["--disable-gpu"]),
   ];
   // 受控 env（不整包继承：宿主 shell 可能携带 ZCODE_* 等会击穿沙箱语义的变量）；
   // win 显式补系统必需（Electron 依赖 SYSTEMROOT/TEMP 等）
@@ -235,7 +236,14 @@ try {
     PATH: process.env.PATH,
     LANG: process.env.LANG ?? "zh_CN.UTF-8",
     HOME: sandboxHome,
-    ...(process.platform === "linux" ? { DISPLAY: E2E_DISPLAY } : {}),
+    ...(process.platform === "linux"
+      ? {
+          DISPLAY: E2E_DISPLAY,
+          // xvfb-run 用临时 XAUTHORITY；受控 env 必须透传，否则
+          // 「Authorization required, but no authorization protocol specified」
+          ...(process.env.XAUTHORITY ? { XAUTHORITY: process.env.XAUTHORITY } : {}),
+        }
+      : {}),
     ...(process.platform === "win32"
       ? {
           USERPROFILE: sandboxHome,
@@ -379,6 +387,10 @@ try {
   pass = compactionSeen && redirectSeen && forkTrimmed && originalIntact;
 } catch (error) {
   console.error("E2E 失败:", error.message);
+  try {
+    const tail = readFileSync(appLog, "utf8").trim().split("\n").slice(-30).join("\n");
+    console.error(`app.log 尾部：\n${tail}`);
+  } catch { /* 无日志 */ }
 } finally {
   try { killAppInstance(); } catch { /* 尽力而为 */ }
   await sleep(1500);

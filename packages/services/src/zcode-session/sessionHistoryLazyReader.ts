@@ -14,7 +14,24 @@
  * - 裸 `part ORDER BY time_created DESC` 实测冷读 4.6s（排序键不在索引，
  *   top-N 也要摸全量行页）——禁止使用，必须走 message 先行。
  */
-import { DatabaseSync } from "node:sqlite";
+// 静态 import node:sqlite 会被 esbuild 外置成裸包名 "sqlite"（对已知内建
+// 剥 node: 前缀）——运行时 ERR_MODULE_NOT_FOUND。与 desktop 侧 merge 模块
+// 同款：getBuiltinModule 字符串查找（type-only import 只留类型）。
+import type { DatabaseSync } from "node:sqlite";
+
+type DatabaseSyncCtor = new (path: string, options?: { readOnly?: boolean }) => DatabaseSync;
+
+function loadDatabaseSync(): DatabaseSyncCtor {
+  const builtin = (
+    process as unknown as {
+      getBuiltinModule?: (id: string) => { DatabaseSync?: DatabaseSyncCtor } | undefined;
+    }
+  ).getBuiltinModule?.("node:sqlite");
+  if (!builtin?.DatabaseSync) {
+    throw new Error("node:sqlite unavailable in this runtime");
+  }
+  return builtin.DatabaseSync;
+}
 
 export interface LazyHistoryPart {
   partId: string;
@@ -27,8 +44,18 @@ export interface LazyHistoryPart {
   data: string;
 }
 
+export interface LazyHistoryMessage {
+  id: string;
+  sequence: number | null;
+  /** message.data 的 role（user/assistant 等）；解析失败为 null。 */
+  role: string | null;
+  timeCreated: number;
+}
+
 export interface LazyHistoryWindow {
   parts: LazyHistoryPart[];
+  /** 窗口内消息元信息（历史顺序升序）；行投影消费 role/timeCreated。 */
+  messages: LazyHistoryMessage[];
   /** 窗口内最旧 message 的序（下一页回填的游标）；会话为空时为 null。 */
   oldestMessageSequence: number | null;
   totalMessages: number;
@@ -46,17 +73,37 @@ export interface SessionHistoryLazyReader {
     beforeMessageSequence: number,
     maxMessages: number,
   ): LazyHistoryWindow;
+  /** 会话消息总数（巨会话判定/滚动条估计）；库/会话缺失返回 0。 */
+  countMessages(sessionId: string): number;
   close(): void;
+}
+
+interface RawMessageRow {
+  id: string;
+  sequence: number | null;
+  time_created: number;
+  data: string | null;
 }
 
 interface MessageRow {
   id: string;
   sequence: number | null;
+  timeCreated: number;
+  role: string | null;
+}
+
+function parseRole(data: string | null | undefined): string | null {
+  if (!data) return null;
+  try {
+    const role = (JSON.parse(data) as { role?: unknown }).role;
+    return typeof role === "string" ? role : null;
+  } catch {
+    return null;
+  }
 }
 
 function toWindow(
-  sessionId: string,
-  messages: MessageRow[],
+  messageRows: MessageRow[],
   parts: LazyHistoryPart[],
   totalMessages: number,
 ): LazyHistoryWindow {
@@ -67,8 +114,8 @@ function toWindow(
     else byMessage.set(part.messageId, [part]);
   }
   const ordered: LazyHistoryPart[] = [];
-  // messages 已倒序；逐消息按 partId 稳定排序后正向输出。
-  for (const message of [...messages].reverse()) {
+  // messageRows 已倒序；逐消息按 partId 稳定排序后正向输出。
+  for (const message of [...messageRows].reverse()) {
     const bucket = (byMessage.get(message.id) ?? []).sort((a, b) =>
       a.partIdWithinMessage < b.partIdWithinMessage
         ? -1
@@ -78,27 +125,36 @@ function toWindow(
     );
     ordered.push(...bucket);
   }
+  const messagesAsc = [...messageRows]
+    .sort((a, b) => a.timeCreated - b.timeCreated || (a.id < b.id ? -1 : 1))
+    .map((m) => ({ id: m.id, sequence: m.sequence, role: m.role, timeCreated: m.timeCreated }));
   return {
     parts: ordered,
+    messages: messagesAsc,
     oldestMessageSequence:
-      messages.length > 0 ? (messages[messages.length - 1]?.sequence ?? null) : null,
+      messageRows.length > 0 ? (messageRows[messageRows.length - 1]?.sequence ?? null) : null,
     totalMessages,
   };
 }
 
+const MESSAGE_COLUMNS = "id, sequence, time_created, data";
+
 export function openSessionHistoryLazyReader(dbPath: string): SessionHistoryLazyReader {
   // mode=ro：绝不写运行中的共享库；WAL 下并发读安全。
-  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const db = new (loadDatabaseSync())(dbPath, { readOnly: true });
 
-  const fetchWindow = (
-    sessionId: string,
-    messageRows: MessageRow[],
-  ): LazyHistoryWindow => {
-    const totalMessageRow = db
-      .prepare("SELECT count(*) AS c FROM message WHERE session_id = ?")
-      .get(sessionId) as { c: number };
+  const countStmt = db.prepare("SELECT count(*) AS c FROM message WHERE session_id = ?");
+
+  const fetchWindow = (sessionId: string, rawRows: RawMessageRow[]): LazyHistoryWindow => {
+    const totalMessages = (countStmt.get(sessionId) as { c: number }).c;
+    const messageRows: MessageRow[] = rawRows.map((r) => ({
+      id: r.id,
+      sequence: r.sequence,
+      timeCreated: r.time_created,
+      role: parseRole(r.data),
+    }));
     if (messageRows.length === 0) {
-      return { parts: [], oldestMessageSequence: null, totalMessages: totalMessageRow.c };
+      return { parts: [], messages: [], oldestMessageSequence: null, totalMessages };
     }
     const placeholders = messageRows.map(() => "?").join(",");
     const partRows = db
@@ -122,18 +178,18 @@ export function openSessionHistoryLazyReader(dbPath: string): SessionHistoryLazy
       timeCreated: row.time_created,
       data: row.data,
     }));
-    return toWindow(sessionId, messageRows, parts, totalMessageRow.c);
+    return toWindow(messageRows, parts, totalMessages);
   };
 
   return {
     readTailWindow(sessionId: string, maxMessages: number): LazyHistoryWindow {
-      const messages = db
+      const rows = db
         .prepare(
-          `SELECT id, sequence FROM message
+          `SELECT ${MESSAGE_COLUMNS} FROM message
             WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT ?`,
         )
-        .all(sessionId, maxMessages) as Array<{ id: string; sequence: number | null }>;
-      return fetchWindow(sessionId, messages);
+        .all(sessionId, maxMessages) as unknown as RawMessageRow[];
+      return fetchWindow(sessionId, rows);
     },
     readPageBefore(
       sessionId: string,
@@ -141,9 +197,9 @@ export function openSessionHistoryLazyReader(dbPath: string): SessionHistoryLazy
       maxMessages: number,
     ): LazyHistoryWindow {
       // message.sequence 会话内单调（官方写入语义）；空序历史回退 time_created 比较。
-      const messages = db
+      const rows = db
         .prepare(
-          `SELECT id, sequence FROM message
+          `SELECT ${MESSAGE_COLUMNS} FROM message
             WHERE session_id = ? AND (
               (sequence IS NOT NULL AND sequence < ?)
               OR (sequence IS NULL AND time_created < (
@@ -159,8 +215,15 @@ export function openSessionHistoryLazyReader(dbPath: string): SessionHistoryLazy
           sessionId,
           beforeMessageSequence,
           maxMessages,
-        ) as Array<{ id: string; sequence: number | null }>;
-      return fetchWindow(sessionId, messages);
+        ) as unknown as RawMessageRow[];
+      return fetchWindow(sessionId, rows);
+    },
+    countMessages(sessionId: string): number {
+      try {
+        return (countStmt.get(sessionId) as { c: number }).c;
+      } catch {
+        return 0;
+      }
     },
     close(): void {
       db.close();

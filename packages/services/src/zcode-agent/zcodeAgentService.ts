@@ -331,6 +331,14 @@ import {
   startZcodeGoSilentForkPeriodicCheck,
   waitForZcodeGoSilentForkGate,
 } from "./zcodeGoSilentForkTrigger.js";
+import {
+  attachRealSubscription,
+  beginSyntheticHistorySubscription,
+  endSyntheticSubscription,
+  isSyntheticSubscriptionId,
+  rewriteSyntheticFrame,
+  syntheticRowsRange,
+} from "../zcode-session/zcodeGoSyntheticHistory.js";
 import { registerMemoryDiagnosticsProvider } from "#src/memoryDiagnostics.js";
 
 const logger = createServiceLogger("zcode-agent-service");
@@ -2134,6 +2142,10 @@ export function createZCodeAgentService(
                 parsed.data = { ...parsed.data, topic: `conversation/${originalSession}` };
               }
             }
+            // zcode-go 懒历史：后台真实订阅的帧重写为合成订阅号（renderer 只认
+            // 合成身份；按 (topic, 真实订阅号) 精确匹配，与 silent-fork 的
+            // topic 回写可叠加）。同时记录 live（后续订阅不再合成）。
+            parsed.data = rewriteSyntheticFrame(parsed.data) as typeof parsed.data;
             getConversationFrameEmitter(workspace).fire(parsed.data);
             observeZcodeGoConversationFrame(workspace, parsed.data);
             observeZcodeGoSilentForkFrame(workspace, parsed.data);
@@ -3375,6 +3387,9 @@ export function createZCodeAgentService(
     return envelope;
   }
 
+  // zcode-go 懒历史拦截需要字面量内部方法引用服务自身（后台真实订阅/退订）；
+  // 字面量自引用是 TDZ，前置 ref + 构造后赋值（运行时调用必然晚于赋值）。
+  let serviceRef: IZCodeAgentService & { disposeAllAndWait(): Promise<void> } | null = null;
   const result: IZCodeAgentService & { disposeAllAndWait(): Promise<void> } = {
     async prepareStorage(params) {
       const client = await processManager.getClient(params);
@@ -4994,6 +5009,42 @@ export function createZCodeAgentService(
     },
 
     async subscribeConversationV4(params: ZCodeAgentConversationSubscribeParams) {
+      // zcode-go 巨会话冷打开：本地 + 巨会话 + 近期无 live 帧 → 立即返回合成
+      // 尾窗快照（DB 懒读 + 行投影），真实 runtime 订阅后台建立，其帧经中继
+      // 重写订阅号无缝接管。__skipSyntheticHistory 为后台递归旁路。
+      if (!("__skipSyntheticHistory" in params)) {
+        const synthetic = beginSyntheticHistorySubscription(
+          params as Parameters<typeof beginSyntheticHistorySubscription>[0],
+        );
+        if (synthetic) {
+          const { subscriptionId, frame } = synthetic;
+          logger.info(undefined, "[zcode-go 懒历史] 巨会话合成订阅（尾窗即时，后台拉起 runtime）", {
+            sessionId: params.sessionId,
+            subscriptionId,
+          });
+          getConversationFrameEmitter(params).fire(frame as never);
+          void (async () => {
+            try {
+              const real = await serviceRef!.subscribeConversationV4({
+                ...params,
+                __skipSyntheticHistory: true,
+              } as ZCodeAgentConversationSubscribeParams);
+              attachRealSubscription(subscriptionId, real.ack.subscriptionId, (realId) =>
+                serviceRef!.unsubscribeConversationV4({
+                  ...params,
+                  subscriptionId: realId,
+                } as ZCodeAgentConversationUnsubscribeParams),
+              );
+            } catch (error) {
+              logger.warn(undefined, "[zcode-go 懒历史] 后台真实订阅失败（合成视图继续，live 帧缺席）", {
+                sessionId: params.sessionId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
+          return { ack: { subscriptionId, mode: "snapshot" as const, logEpoch: "zcode-go-synthetic" } };
+        }
+      }
       const subscribeStartedAt = performance.now();
       const existingClient = processManager.getExistingClient(params);
       const cliProcessState: "reused" | "spawned" =
@@ -5093,6 +5144,15 @@ export function createZCodeAgentService(
     },
 
     async unsubscribeConversationV4(params: ZCodeAgentConversationUnsubscribeParams) {
+      if (isSyntheticSubscriptionId(params.subscriptionId)) {
+        endSyntheticSubscription(params.subscriptionId, (realId) =>
+          serviceRef!.unsubscribeConversationV4({
+            ...params,
+            subscriptionId: realId,
+          } as ZCodeAgentConversationUnsubscribeParams),
+        );
+        return;
+      }
       await unsubscribeV4Route(params, "conversation/");
     },
 
@@ -5359,6 +5419,13 @@ export function createZCodeAgentService(
 
     // 行分页：只读 query 透传（超时重发安全，无订阅状态）。
     async conversationRowsRangeV4(params: ZCodeAgentConversationRowsRangeParams) {
+      // zcode-go 懒历史：合成订阅活跃时由 DB 直答回填页（runtime 未恢复也能翻历史）
+      const syntheticPage = syntheticRowsRange({
+        sessionId: params.sessionId,
+        ...(typeof params.beforeRowId === "number" ? { beforeRowId: params.beforeRowId } : {}),
+        ...(typeof params.limit === "number" ? { limit: params.limit } : {}),
+      });
+      if (syntheticPage) return syntheticPage;
       const trusted = readTrustedZCodeAgentV4Connection(params);
       if (!trusted) throw new Error("fault.conversation.rowsRangeConnectionUntrusted");
       const client = await getReadOnlyClient(params);
@@ -5744,6 +5811,8 @@ export function createZCodeAgentService(
       disposeLocalState();
     },
   };
+
+  serviceRef = result;
 
   // zcode-go 静默 fork 第二批：注入 quiescence 检查 + host→main 信号通道。
   // 在 service 对象构造完成后设置（方法内部引用自身需要闭包捕获）。

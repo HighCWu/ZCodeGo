@@ -52,7 +52,8 @@ jobs:
             packages/services/test/zcodeGoSessionRedirect.test.ts \
             packages/services/test/zcodeGoSilentForkTrigger.test.ts \
             packages/services/test/zcodeGoGoalVerify.test.ts \
-            packages/services/test/sessionHistoryLazyReader.test.ts
+            packages/services/test/sessionHistoryLazyReader.test.ts \
+            packages/services/test/zcodeGoSyntheticHistory.test.ts
       - name: desktop 静默 fork 归并单测（node:test + tsx）
         run: |
           npx tsx --test \
@@ -353,9 +354,20 @@ jobs:
           APP_BIN="$(node -e '
             const os = require("node:os"), path = require("node:path");
             const root = path.join(os.homedir(), ".zcode-go", "electron");
-            if (process.platform === "darwin") console.log(path.join(root, "ZCode Go.app", "Contents", "MacOS", "zcode"));
-            else console.log(path.join(root, process.platform === "win32" ? "zcode.exe" : "zcode"));
+            if (process.platform === "darwin") {
+              // 官方产物按构建身份命名（preview = "ZCode Preview"）——克隆 .app
+              // 保留原名，二进制名取 officialBin 的 basename
+              const exe = path.basename(process.env.ZCODE_OFFICIAL_BIN ?? "zcode");
+              console.log(path.join(root, "ZCode Go.app", "Contents", "MacOS", exe));
+            } else {
+              console.log(path.join(root, process.platform === "win32" ? "zcode.exe" : "zcode"));
+            }
           ')"
+          if [ ! -f "$APP_BIN" ]; then
+            echo "::error::E2E app 不存在：$APP_BIN（ensure 产物异常；officialBin=$ZCODE_OFFICIAL_BIN）"
+            ls -la "$(dirname "$(dirname "$(dirname "$(dirname "$APP_BIN")")")")" 2>/dev/null || true
+            exit 1
+          fi
           export ZCODE_GO_E2E_APP_BIN="$APP_BIN"
           echo "APP_BIN=$APP_BIN"
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -419,5 +431,7 @@ jobs:
             ~/Library/Logs/DiagnosticReports/
             /tmp/zg-goal-e2e-*/
             /tmp/zg-sfk-e2e-*/
+            ~/AppData/Local/Temp/zg-goal-e2e-*/
+            ~/AppData/Local/Temp/zg-sfk-e2e-*/
           if-no-files-found: ignore
           include-hidden-files: true
