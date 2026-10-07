@@ -277,6 +277,9 @@ contextBridge.exposeInMainWorld("zcode", {
   /** zcode-go：移动端远程控制——停止。 */
   zcodeGoMobileBridgeStop: (): Promise<void> =>
     ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeStop),
+  /** zcode-go：移动端远程控制——对话框可见性（关闭且无连接时触发空闲收摊保险丝）。 */
+  zcodeGoMobileBridgeSetDialogVisible: (visible: boolean): Promise<void> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoMobileBridgeSetDialogVisible, visible),
   /** zcode-go：移动端远程控制——状态查询。 */
   zcodeGoMobileBridgeGetStatus: (): Promise<{
     state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";

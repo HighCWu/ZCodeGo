@@ -109,10 +109,21 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
       // 已配置自部署地址则回填输入框；默认/env 来源留空（占位符展示生效值）。
       setSignalingOriginInput(info.source === "config" ? (info.configured ?? "") : "");
     });
-    // 注意：关闭对话框不停止配对——会话与已连接客户端保活（preload/桥窗口
-    // 自持），只有「刷新二维码」与「停止」按钮才会重建/结束会话。
+    // 注意：关闭对话框不立即停止配对（扫码后关窗等手机加载的场景），但会
+    // 上报可见性：main 侧无连接时启动短保险丝收摊，有连接则挂起信令——
+    // 「安装即用」成本模型：无人使用 = 零信令流量。
+    void (
+      window as {
+        zcode?: { zcodeGoMobileBridgeSetDialogVisible?: (v: boolean) => Promise<void> };
+      }
+    ).zcode?.zcodeGoMobileBridgeSetDialogVisible?.(true);
     return () => {
       unsubscribe?.();
+      void (
+        window as {
+          zcode?: { zcodeGoMobileBridgeSetDialogVisible?: (v: boolean) => Promise<void> };
+        }
+      ).zcode?.zcodeGoMobileBridgeSetDialogVisible?.(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 打开/关闭驱动配对生命周期
   }, [open]);

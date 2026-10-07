@@ -100,8 +100,19 @@ interface Session {
   windows: BridgeWindowEntry[];
   status: MobileBridgeStatus;
   onStatus: (status: MobileBridgeStatus) => void;
-  /** 房间心跳（滑动续期）定时器；teardown/stop 清理。 */
+  /** 房间心跳（滑动续期）定时器；teardown/stop/信令挂起清理。 */
   roomHeartbeat: NodeJS.Timeout | null;
+  /** 空闲看门狗（无已连接客户端超时收摊兜底；ZCODE_GO_BRIDGE_IDLE_MS 覆盖）。 */
+  idleWatchdog: NodeJS.Timeout | null;
+  /** 对话框关闭保险丝（关窗且无连接时短延时收摊；ZCODE_GO_BRIDGE_CLOSE_FUSE_MS 覆盖）。 */
+  closeFuse: NodeJS.Timeout | null;
+  /** 信令挂起：有客户端连接期间停 WS/ping/心跳 → 信令零流量，按需恢复。 */
+  signalingSuspended: boolean;
+  /** 最近一次有客户端在连的时刻（空闲计时基准，会话创建时初始化）。 */
+  lastClientActivityAt: number;
+  /** 挂起/恢复信令（startMobileBridgePairing 内部赋值）。 */
+  suspendSignaling: (() => void) | null;
+  resumeSignaling: (() => void) | null;
   /** primary PC 失败的时间戳（10 分钟滑窗内 ≥5 次才判定网络禁 WebRTC）。 */
   primaryFailureTimestamps: number[];
 }
@@ -278,14 +289,17 @@ function teardown(session: Session, reason: string): void {
     anyConnected: anyConnected(session),
   });
   if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
+  if (session.idleWatchdog) clearInterval(session.idleWatchdog);
+  if (session.closeFuse) clearTimeout(session.closeFuse);
   for (const entry of [...session.windows]) destroyEntry(session, entry);
   try {
     session.ws?.close();
   } catch {
     /* 尽力而为 */
   }
-  // 用户主动停止 → idle；其余 teardown 原因都值得在对话框里露出。
-  const stopped = reason === "stopped";
+  // 用户主动停止 / 空闲收摊（关窗保险丝、看门狗）→ idle（无错误横幅）；
+  // 其余 teardown 原因都值得在对话框里露出。
+  const stopped = reason === "stopped" || reason === "idle-timeout";
   session.status = { state: stopped ? "idle" : "error", error: stopped ? undefined : reason };
   session.onStatus({ ...session.status });
 }
@@ -809,7 +823,17 @@ export function startMobileBridgePairing(
   host?: MobileBridgeHostAttach,
 ): MobileBridgeStatus {
   if (activeSession) {
-    return { ...activeSession.status };
+    // idle（含空闲收摊）与 error 会话不复活——重建拿新配对码：重开对话框/
+    // 网页「在新窗口打开」无需用户手动刷新二维码。
+    if (activeSession.status.state !== "idle" && activeSession.status.state !== "error") {
+      // 已连接但信令挂起（零流量模式）：调 Start = 有新配对需求（重开对话框
+      // 展示二维码 / 新标签页要加入）——恢复信令并立即续期房间。
+      if (activeSession.signalingSuspended && anyConnected(activeSession)) {
+        activeSession.resumeSignaling?.();
+      }
+      return { ...activeSession.status };
+    }
+    teardown(activeSession, "stopped");
   }
   sessionLogger = logger;
   const origin = resolveSignalingOrigin();
@@ -829,11 +853,36 @@ export function startMobileBridgePairing(
     ws: null,
     windows: [],
     roomHeartbeat: null,
+    idleWatchdog: null,
+    closeFuse: null,
+    signalingSuspended: false,
+    lastClientActivityAt: Date.now(),
+    suspendSignaling: null,
+    resumeSignaling: null,
     primaryFailureTimestamps: [],
     status: { state: "signaling", token, pairingUrl: shortUrl, qrUrl: shortUrl },
     onStatus,
   };
   activeSession = session;
+
+  // 空闲看门狗（兜底）：无已连接客户端持续 idleMs 即收摊。「安装即用」共享
+  // 信令服务器的成本模型要求无人使用 = 零流量：1 万常开桌面若全时段保活
+  // ≈ $440/月；无连接收摊 + 连接期挂起信令后，空闲成本为 0、活跃成本仅
+  // 每次使用 ~10 条请求。ZCODE_GO_BRIDGE_IDLE_MS 可覆盖（测试用）。
+  const idleMs = Number.parseInt(process.env.ZCODE_GO_BRIDGE_IDLE_MS ?? "", 10) || 30 * 60_000;
+  session.idleWatchdog = setInterval(() => {
+    if (activeSession !== session) return;
+    if (anyConnected(session)) {
+      session.lastClientActivityAt = Date.now();
+      return;
+    }
+    if (Date.now() - session.lastClientActivityAt < idleMs) return;
+    sessionLogger?.info("[zcode-go-mobile-bridge] 空闲超时收摊（无已连接客户端）", {
+      token,
+      idleMs,
+    });
+    teardown(session, "idle-timeout");
+  }, Math.max(1_000, Math.min(idleMs / 4, 60_000)));
 
   /** 用窗口应答一个挂起的 req-offer（offer 就绪时调用）。 */
   const answerPendingRequest = (entry: BridgeWindowEntry, ws: WebSocket): void => {
@@ -949,6 +998,10 @@ export function startMobileBridgePairing(
         const state = payload.state as string;
         if (state === "connected" && !entry.connected) {
           entry.connected = true;
+          session.lastClientActivityAt = Date.now();
+          // P2P 已通：信令（WS/ping/心跳）不再必要——挂起归零 CF 流量；
+          // 新配对需求（重开对话框/新标签页）经 Start 自动恢复。
+          if (!session.signalingSuspended) session.suspendSignaling?.();
           entry.everConnected = true;
           if (!detached && session.status.state !== "connected") {
             session.status = { ...session.status, state: "connected" };
@@ -1007,6 +1060,9 @@ export function startMobileBridgePairing(
       } else if (payload.kind === "channel-open" && payload.label === "zcode-go-control") {
         entry.connected = true;
         entry.everConnected = true;
+        session.lastClientActivityAt = Date.now();
+        // 同 pc-state 路径：P2P 已通即挂起信令（零 CF 流量），Start 按需恢复。
+        if (!session.signalingSuspended) session.suspendSignaling?.();
         if (!detached && session.status.state !== "connected") {
           session.status = { ...session.status, state: "connected" };
           emit(session);
@@ -1189,11 +1245,15 @@ export function startMobileBridgePairing(
           lastPongAt = Date.now();
           // mailbox 注册 capability secret。
           ws.send(JSON.stringify({ t: "register", p: session.secret }));
+          // 立即续期房间：信令挂起 >5min 后房间已过 TTL，恢复连接的新客户端
+          // req-offer 会撞 room_expired——注册后先复活房间再等服务请求。
+          void postRoomPing(2);
           if (session.status.state !== "connected") {
             session.status = { ...session.status, state: "waiting-mobile", qrUrl: session.qrUrl };
             emit(session);
           }
-          // 信令保活：30s ping；75s 无 pong 判定半开，废弃重建。
+          // 信令保活：60s ping（NAT established 超时普遍 ≥5min，余量充足；
+          // 同时摊薄共享服务器请求量）；150s 无 pong 判定半开，废弃重建。
           if (!signalingPing) {
             signalingPing = setInterval(() => {
               if (activeSession !== session || session.ws !== ws) {
@@ -1201,7 +1261,7 @@ export function startMobileBridgePairing(
                 signalingPing = null;
                 return;
               }
-              if (Date.now() - lastPongAt > 75_000) {
+              if (Date.now() - lastPongAt > 150_000) {
                 logger.warn("[zcode-go-mobile-bridge] 信令 pong 超时，判定半开连接，重建", { token });
                 if (signalingPing) clearInterval(signalingPing);
                 signalingPing = null;
@@ -1220,11 +1280,11 @@ export function startMobileBridgePairing(
               } catch {
                 /* onclose 会接管重连 */
               }
-            }, 30_000);
+            }, 60_000);
           }
-          // 房间滑动续期：会话存续期间每 2 分钟探活，二维码长期可扫。
-          // 单次失败不中断会话（既有连接不依赖信令）；连续重试仍失败只记
-          // 日志——房间 TTL 5 分钟 > 心跳周期，恢复后首跳即续上。
+          // 房间滑动续期：会话存续期间每 4 分钟探活（房间 TTL 5min > 心跳
+          // 周期+重试窗口；过期后首跳即复活）。单次失败不中断会话（既有连接
+          // 不依赖信令）。行写入频率减半摊薄共享服务器成本（$1/百万行）。
           if (!session.roomHeartbeat) {
             session.roomHeartbeat = setInterval(() => {
               void postRoomPing(3).then((response) => {
@@ -1232,7 +1292,7 @@ export function startMobileBridgePairing(
                   logger.warn("[zcode-go-mobile-bridge] 房间心跳失败（重试后仍失败）", { token });
                 }
               });
-            }, 120_000);
+            }, 240_000);
           }
         };
         ws.onmessage = (event) => {
@@ -1298,6 +1358,34 @@ export function startMobileBridgePairing(
           logger.warn("[zcode-go-mobile-bridge] 信令错误", { token });
         };
       };
+      // 挂起：关 WS（onclose 见 session.ws 已置空即跳过重连）+ 清 ping/心跳。
+      // ws=null 先行：ping 回调与 onclose 都凭「session.ws 不是自己」自清。
+      session.suspendSignaling = () => {
+        if (activeSession !== session || session.signalingSuspended) return;
+        session.signalingSuspended = true;
+        if (session.roomHeartbeat) {
+          clearInterval(session.roomHeartbeat);
+          session.roomHeartbeat = null;
+        }
+        const currentWs = session.ws;
+        session.ws = null;
+        try {
+          currentWs?.close();
+        } catch {
+          /* 尽力而为 */
+        }
+        sessionLogger?.info("[zcode-go-mobile-bridge] 信令挂起（P2P 在用，零信令流量）", {
+          token,
+        });
+      };
+      session.resumeSignaling = () => {
+        if (activeSession !== session || !session.signalingSuspended) return;
+        session.signalingSuspended = false;
+        sessionLogger?.info("[zcode-go-mobile-bridge] 信令恢复（新客户端配对需求）", {
+          token,
+        });
+        connectSignaling();
+      };
       connectSignaling();
     } catch (error) {
       teardown(session, error instanceof Error ? error.message : String(error));
@@ -1307,6 +1395,35 @@ export function startMobileBridgePairing(
   logger.info("[zcode-go-mobile-bridge] 配对开始", { token });
   emit(session);
   return { ...session.status };
+}
+
+/**
+ * 对话框可见性：关闭且无连接 → 短保险丝收摊（扫码后关窗等手机加载的场景
+ * 由保险丝时长覆盖）；打开 → 解除保险丝，挂起态恢复信令。
+ * 「安装即用」成本模型：不打开移动端远程控制 = 永不创建会话（本模块只在
+ * Start 时建会话），关窗后也不再无限保活。
+ */
+export function setMobileBridgeDialogVisible(visible: boolean): void {
+  const session = activeSession;
+  if (!session) return;
+  if (session.closeFuse) {
+    clearTimeout(session.closeFuse);
+    session.closeFuse = null;
+  }
+  if (!visible) {
+    if (anyConnected(session)) return; // 连接期已挂起信令，交给空闲看门狗
+    const closeFuseMs =
+      Number.parseInt(process.env.ZCODE_GO_BRIDGE_CLOSE_FUSE_MS ?? "", 10) || 5 * 60_000;
+    session.closeFuse = setTimeout(() => {
+      if (activeSession !== session || anyConnected(session)) return;
+      sessionLogger?.info("[zcode-go-mobile-bridge] 对话框关闭后无人使用，收摊", {
+        token: session.token,
+      });
+      teardown(session, "idle-timeout");
+    }, closeFuseMs);
+    return;
+  }
+  if (session.signalingSuspended) session.resumeSignaling?.();
 }
 
 export function stopMobileBridgePairing(): void {

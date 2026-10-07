@@ -157,6 +157,7 @@ import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import { initZcodeGoRendererRecovery } from "./zcodeGoRendererRecovery.js";
 import {
+  setMobileBridgeDialogVisible,
   startMobileBridgePairing,
   stopMobileBridgePairing,
   getMobileBridgeStatus,
@@ -2499,6 +2500,14 @@ app.whenReady().then(async () => {
     win.once("closed", () => child.removeListener("message", onChildMessage));
     return true;
   };
+  // zcode-go：对话框可见性——关闭且无连接时启动空闲收摊保险丝（成本模型：
+  // 不打开远程控制不建会话；关窗后短保险丝收摊；连接期信令挂起零流量）。
+  ipcMain.handle(
+    PlatformChannels.ZcodeGoMobileBridgeSetDialogVisible,
+    (_event: Electron.IpcMainInvokeEvent, visible: unknown) => {
+      if (typeof visible === "boolean") setMobileBridgeDialogVisible(visible);
+    },
+  );
   ipcMain.handle(PlatformChannels.ZcodeGoMobileBridgeStart, () =>
     startMobileBridgePairing(logger, broadcastMobileBridgeStatus, {
       attach: attachHostToBridgeWindow,

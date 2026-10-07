@@ -428,6 +428,7 @@ export const PlatformChannels = {
   ZcodeGoTakeSessionInitial: "zcode:zcode-go-take-session-initial",
   /** Renderer → Main：移动端远程控制——开始配对（生成二维码/链接并连信令） */
   ZcodeGoMobileBridgeStart: "zcode:zcode-go-mobile-bridge-start",
+  ZcodeGoMobileBridgeSetDialogVisible: "zcode:zcode-go-mobile-bridge-set-dialog-visible",
   /** Renderer → Main：移动端远程控制——停止配对/断开 */
   ZcodeGoMobileBridgeStop: "zcode:zcode-go-mobile-bridge-stop",
   /** Renderer → Main：移动端远程控制——查询当前状态 */
@@ -1211,6 +1212,10 @@ export interface PlatformChannelMap {
   };
   [PlatformChannels.ZcodeGoMobileBridgeStop]: {
     request: void;
+    response: void;
+  };
+  [PlatformChannels.ZcodeGoMobileBridgeSetDialogVisible]: {
+    request: { visible: boolean };
     response: void;
   };
   [PlatformChannels.ZcodeGoMobileBridgeGetStatus]: {
