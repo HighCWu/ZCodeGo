@@ -12,7 +12,7 @@
  *
  * 运行：node scripts/e2e/silent-fork-auto-e2e.mjs（需 Xvfb :103 在跑）
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, appendFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -93,17 +93,32 @@ async function cdp() {
   return { ev, trustedClick, trustedTypeAndEnterAt, close: () => ws0.close() };
 }
 
+let appProcPid = null;
+
 function killAppInstance() {
-  // 精确杀本 E2E 实例：Electron 会把 argv 重写为应用名，cmdline 匹配不可靠——
-  // 按 environ 的 HOME=沙箱路径匹配（绝不碰真实实例/second-profile）。
-  for (const d of readdirSync("/proc").filter((p) => /^\d+$/.test(p))) {
+  // 主进程按 pid 精确终止（Electron 工具进程随主进程退出）；win 用 taskkill
+  // 连树终止（Windows 子进程不随父退出）。
+  if (appProcPid) {
     try {
-      if (process.pid === Number(d)) continue;
-      const env = readFileSync(join("/proc", d, "environ"), "utf8");
-      // 前缀匹配清掉任何一轮本脚本的沙箱实例：只杀本轮会留下上轮僵尸占住
-      // CDP 端口，后续运行会连到旧实例（其假 Provider 端口已死、状态混乱）。
-      if (env.includes(`HOME=${join(tmpdir(), "zg-sfk-e2e-")}`)) process.kill(Number(d), "SIGTERM");
-    } catch { /* 进程已退/无权限 */ }
+      if (process.platform === "win32") {
+        spawnSync("taskkill", ["/PID", String(appProcPid), "/T", "/F"], { stdio: "ignore" });
+      } else {
+        process.kill(appProcPid, "SIGTERM");
+      }
+    } catch { /* 进程已退 */ }
+    appProcPid = null;
+  }
+  // Linux 追加 /proc environ 前缀清杀：Electron 会把 argv 重写为应用名，历史
+  // 僵尸（argv 不可辨）只能按 HOME 沙箱路径匹配；只杀本轮会留上轮僵尸占住
+  // CDP 端口，后续运行会连到旧实例。
+  if (process.platform === "linux") {
+    for (const d of readdirSync("/proc").filter((p) => /^\d+$/.test(p))) {
+      try {
+        if (process.pid === Number(d)) continue;
+        const env = readFileSync(join("/proc", d, "environ"), "utf8");
+        if (env.includes(`HOME=${join(tmpdir(), "zg-sfk-e2e-")}`)) process.kill(Number(d), "SIGTERM");
+      } catch { /* 进程已退/无权限 */ }
+    }
   }
 }
 
@@ -111,7 +126,7 @@ let pass = false;
 let providerProc = null;
 try {
   if (!existsSync(ELECTRON)) throw new Error(`E2E app 不存在：${ELECTRON}（可用 ZCODE_GO_E2E_APP_BIN 注入）`);
-  if (!process.env.ZCODE_GO_E2E_DISPLAY) {
+  if (process.platform === "linux" && !process.env.ZCODE_GO_E2E_DISPLAY) {
     try {
       const xvfbOk = require("node:child_process").execSync("pgrep -x Xvfb", { stdio: "pipe" }).toString().trim();
       if (!xvfbOk) throw new Error("Xvfb 未运行");
@@ -130,10 +145,13 @@ try {
   const realOfficial = join(REAL_STATE_DIR, "official.json");
   if (process.env.ZCODE_OFFICIAL_BIN) {
     const bin = process.env.ZCODE_OFFICIAL_BIN;
+    const runtimeBundle = process.platform === "darwin"
+      ? join(dirname(dirname(bin)), "Resources", "glm", "zcode.cjs")
+      : join(dirname(bin), "resources", "glm", "zcode.cjs");
     writeFileSync(join(sandboxHome, ".zcode-go", "official.json"), JSON.stringify({
       platform: process.platform,
       bin,
-      runtimeBundle: join(dirname(bin), "resources", "glm", "zcode.cjs"),
+      runtimeBundle,
       discoveredAt: Date.now(),
     }));
   } else if (existsSync(realOfficial)) {
@@ -202,20 +220,40 @@ try {
   console.log(`0a. sandbox=${sandboxHome} fake provider port=${port}`);
 
   // ── 0b. 启动沙箱 E2E 实例（HOME 隔离 + DISPLAY 强制 :103） ──
-  const appProc = spawn(ELECTRON, [
+  const appArgs = [
+    // 强制中文 UI：脚本的全部 DOM 文本匹配（onboarding 按钮/重试/发送）是中文，
+    // CI runner 的系统 locale 不保证
+    "--lang=zh-CN",
     `--user-data-dir=${join(ws, PROFILE_TAG)}`,
     `--remote-debugging-port=${CDP_PORT}`,
-  ], {
-    env: {
-      PATH: process.env.PATH,
-      LANG: process.env.LANG ?? "zh_CN.UTF-8",
-      HOME: sandboxHome,
-      DISPLAY: E2E_DISPLAY,
-      ZCODE_GO_TAKEOVER: "1",
-      ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Go E2E",
-    },
+    // mac CI VM 的 GPU 栈不稳（官方对照步骤同款规避）
+    ...(process.platform === "darwin" ? ["--disable-gpu"] : []),
+  ];
+  // 受控 env（不整包继承：宿主 shell 可能携带 ZCODE_* 等会击穿沙箱语义的变量）；
+  // win 显式补系统必需（Electron 依赖 SYSTEMROOT/TEMP 等）
+  const appEnv = {
+    PATH: process.env.PATH,
+    LANG: process.env.LANG ?? "zh_CN.UTF-8",
+    HOME: sandboxHome,
+    ...(process.platform === "linux" ? { DISPLAY: E2E_DISPLAY } : {}),
+    ...(process.platform === "win32"
+      ? {
+          USERPROFILE: sandboxHome,
+          SYSTEMROOT: process.env.SYSTEMROOT,
+          TEMP: join(ws, "tmp"),
+          TMP: join(ws, "tmp"),
+          COMSPEC: process.env.COMSPEC,
+          PATHEXT: process.env.PATHEXT,
+        }
+      : {}),
+    ZCODE_GO_TAKEOVER: "1",
+    ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Go E2E",
+  };
+  const appProc = spawn(ELECTRON, appArgs, {
+    env: appEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  appProcPid = appProc.pid;
   appProc.stdout.on("data", (c) => appendFileSync(appLog, c));
   appProc.stderr.on("data", (c) => appendFileSync(appLog, c));
   console.log("0b. app launched (sandboxed), waiting CDP…");

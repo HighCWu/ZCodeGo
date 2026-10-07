@@ -341,23 +341,42 @@ jobs:
       # ── 5. zcode-go 假 Provider 真链 E2E（goal 复核 + 静默 fork 自动触发）────
       # HOME 沙箱隔离实例 + 官方运行时 + 脚本化假 Provider，零真人介入闭环：
       # 复用本 job 的桌面 out/ 与官方 unpacked（ensure 组装 ~/.zcode-go/electron，
-      # 并从官方包补齐 packaged builtin provider 配置）。
-      - name: zcode-go 假 Provider E2E（Linux）
-        if: runner.os == 'Linux'
+      # 并从官方包补齐 packaged builtin provider 配置）。三平台同跑——脚本内
+      # 按 --lang=zh-CN 固定 UI 语言、HOME/USERPROFILE 沙箱、pid+平台工具终止；
+      # Linux 包 xvfb-run+openbox（脚本经 ZCODE_GO_E2E_DISPLAY 接动态 display）。
+      - name: zcode-go 假 Provider E2E（多平台）
+        shell: bash
         env:
           ZCODE_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
         run: |
           node scripts/ensure-official-electron.mjs
-          xvfb-run -a --server-args="-screen 0 1920x1080x24" bash -c '
-            openbox >/tmp/openbox-fp.log 2>&1 &
-            sleep 2
-            export ZCODE_GO_E2E_DISPLAY="$DISPLAY"
+          APP_BIN="$(node -e '
+            const os = require("node:os"), path = require("node:path");
+            const root = path.join(os.homedir(), ".zcode-go", "electron");
+            if (process.platform === "darwin") console.log(path.join(root, "ZCode Go.app", "Contents", "MacOS", "zcode"));
+            else console.log(path.join(root, process.platform === "win32" ? "zcode.exe" : "zcode"));
+          ')"
+          export ZCODE_GO_E2E_APP_BIN="$APP_BIN"
+          echo "APP_BIN=$APP_BIN"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" bash -c '
+              openbox >/tmp/openbox-fp.log 2>&1 &
+              sleep 2
+              export ZCODE_GO_E2E_DISPLAY="$DISPLAY"
+              node scripts/e2e/goal-verify-e2e.mjs
+              rc1=$?
+              node scripts/e2e/silent-fork-auto-e2e.mjs
+              rc2=$?
+              kill %1 2>/dev/null || true
+              [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]
+            '
+          else
             node scripts/e2e/goal-verify-e2e.mjs
+            rc1=$?
             node scripts/e2e/silent-fork-auto-e2e.mjs
-            rc=$?
-            kill %1 2>/dev/null || true
-            exit $rc
-          '
+            rc2=$?
+            [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]
+          fi
 
       - name: 保存官方 unpacked 产物缓存（仅成功时，防半成品污染键）
         if: success() && steps.official-dist.outputs.cache-hit != 'true'
@@ -398,5 +417,7 @@ jobs:
             !~/.zcode-go/electron
             ~/.zcode/v2/crash/
             ~/Library/Logs/DiagnosticReports/
+            /tmp/zg-goal-e2e-*/
+            /tmp/zg-sfk-e2e-*/
           if-no-files-found: ignore
           include-hidden-files: true
