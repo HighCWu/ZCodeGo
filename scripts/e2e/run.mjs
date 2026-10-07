@@ -447,15 +447,31 @@ function hookFeed(prompt) {
     }
     check("session: prompt 已提交（v4 sendText）", !sent.error, JSON.stringify(sent).slice(0, 200));
 
-    // 等待 hook 拦截结果：v4 帧（assistantText 行含 stopReason 文案）
+    // 等待 hook 拦截结果：v4 帧（assistantText 行含 stopReason 文案）。
+    // 偶发（windows runner 实证）：hook 每 prompt 独立 spawn，瞬时加载失败时
+    // prompt 直达模型（帧里出现模型回复而非拦截文案）——补发一次同 prompt
+    // 再等，二次仍未拦截才判失败（拉长 deadline 对此类失败无效）。
     let eventsRaw = "";
     let settled = false;
-    const deadline = Date.now() + 60000;
-    while (Date.now() < deadline && !settled) {
-      await new Promise((r) => setTimeout(r, 1000));
-      drainFrames();
-      eventsRaw = v4frames.map((f) => JSON.stringify(f)).join("");
-      settled = eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked");
+    for (let attempt = 0; attempt < 2 && !settled; attempt += 1) {
+      if (attempt > 0 && sessionId) {
+        const resent = await request("v4/command", {
+          commandId: randomUUID(),
+          clientId: "zcode-go-e2e",
+          sessionId,
+          type: "sendText",
+          payload: { text: sessionPrompt },
+          issuedAt: Date.now(),
+        }, 20000);
+        if (resent.error) break;
+      }
+      const deadline = Date.now() + 60000;
+      while (Date.now() < deadline && !settled) {
+        await new Promise((r) => setTimeout(r, 1000));
+        drainFrames();
+        eventsRaw = v4frames.map((f) => JSON.stringify(f)).join("");
+        settled = eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked");
+      }
     }
     if (!settled) {
       console.error(`[e2e][session][frames] ${eventsRaw.slice(-2000)}`);
