@@ -419,6 +419,18 @@ jobs:
           path: ~/.zcode-go/e2e-shots/
           if-no-files-found: ignore
           include-hidden-files: true
+      # Windows 上 upload-artifact v4 拒绝 workspace（D:\...）之外的跨盘路径
+      # （POSIX 的 ~ 同样在 workspace 外但被容忍）——先把现场拷进 workspace 再传。
+      - name: Windows 产物收拢（跨盘规避）
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dst = "ci-logs-win"
+          New-Item -ItemType Directory -Force -Path "$dst" | Out-Null
+          foreach ($src in @("$env:USERPROFILE\.zcode-go", "$env:LOCALAPPDATA\Temp\zg-goal-e2e-*", "$env:LOCALAPPDATA\Temp\zg-sfk-e2e-*")) {
+            if (Test-Path $src) { Copy-Item -Recurse -Force $src "$dst" -ErrorAction SilentlyContinue }
+          }
+          if (Test-Path "$dst\.zcode-go\electron") { Remove-Item -Recurse -Force "$dst\.zcode-go\electron" -ErrorAction SilentlyContinue }
       - name: 上传排障产物
         if: always()
         uses: actions/upload-artifact@v4
@@ -431,7 +443,13 @@ jobs:
             ~/Library/Logs/DiagnosticReports/
             /tmp/zg-goal-e2e-*/
             /tmp/zg-sfk-e2e-*/
-            ~/AppData/Local/Temp/zg-goal-e2e-*/
-            ~/AppData/Local/Temp/zg-sfk-e2e-*/
+          if-no-files-found: ignore
+          include-hidden-files: true
+      - name: 上传排障产物（Windows 收拢目录）
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ matrix.os }}
+          path: ci-logs-win/
           if-no-files-found: ignore
           include-hidden-files: true
