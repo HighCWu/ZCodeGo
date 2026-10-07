@@ -424,6 +424,8 @@ export const PlatformChannels = {
   ZcodeGoForkCompactSession: "zcode:zcode-go-fork-compact-session",
   /** Renderer → Main：在新窗口打开会话（同实例多窗口，共享配置/会话库/托盘） */
   ZcodeGoOpenSessionInNewWindow: "zcode:zcode-go-open-session-in-new-window",
+  ZcodeGoSilentFork: "zcode:zcode-go-silent-fork",
+  ZcodeGoSessionRedirected: "zcode:zcode-go-session-redirected",
   /** Renderer → Main：新窗口启动时领取待打开的初始会话（一次性质询，避免事件时序竞态） */
   ZcodeGoTakeSessionInitial: "zcode:zcode-go-take-session-initial",
   /** Renderer → Main：移动端远程控制——开始配对（生成二维码/链接并连信令） */
@@ -1191,6 +1193,15 @@ export interface PlatformChannelMap {
   [PlatformChannels.ZcodeGoForkCompactSession]: {
     request: { parentSessionId: string };
     response: { ok: boolean; childSessionId: string; copiedMessages: number; workspacePath?: string; error?: string };
+  };
+  [PlatformChannels.ZcodeGoSilentFork]: {
+    request: { sessionId: string };
+    response: { ok: boolean; forkSessionId?: string; error?: string };
+  };
+  [PlatformChannels.ZcodeGoSessionRedirected]: {
+    /** 事件（main → renderer）：{ from: 原会话, to: 隐形 fork }。 */
+    request: void;
+    response: { from: string; to: string };
   };
   [PlatformChannels.ZcodeGoOpenSessionInNewWindow]: {
     request: { taskId: string; workspacePath: string; workspaceIdentity?: string };

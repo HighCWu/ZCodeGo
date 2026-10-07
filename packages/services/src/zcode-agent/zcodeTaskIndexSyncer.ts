@@ -45,6 +45,7 @@ import type {
   ZCodeAgentWorkspaceTarget,
 } from "./zcodeAgent.js";
 import { ZCODE_AGENT_RUNTIME_UNAVAILABLE_CODE } from "./zcodeAgent.js";
+import { lookupZcodeGoOriginalSession } from "./zcodeGoSessionRedirect.js";
 import { formatTaskMetaModelSelectionFromSnapshot } from "./zcodeConfigOptions.js";
 
 const logger = createServiceLogger("zcode-task-index-syncer");
@@ -209,6 +210,16 @@ function taskStatusFromSummaryPhase(phase: SessionPhase): ZCodeTaskMeta["status"
     default:
       return undefined;
   }
+}
+
+/**
+ * zcode-go 静默 fork：sessions-index 里的隐形子会话 summary 反向映射为原会话——
+ * 活跃状态（phase/spinner/标题）驱动原会话的任务行，隐形 fork 自身不产生侧栏行。
+ * 非 fork 会话原样返回。sessionId 一致地映射，基线/diff/删除语义保持自洽。
+ */
+function remapSummarySessionId(summary: SessionSummary): SessionSummary {
+  const original = lookupZcodeGoOriginalSession(summary.sessionId);
+  return original ? { ...summary, sessionId: original } : summary;
 }
 
 function buildBaselineMetaFromSummary(
@@ -1009,7 +1020,8 @@ export function createZCodeTaskIndexSyncer(
       state.indexSeq = frame.toSeq;
       state.indexHasAppliedBase = true;
       const nextSummaries = new Map<string, SessionSummary>();
-      for (const summary of frame.payload.snapshot.sessions) {
+      for (const rawSummary of frame.payload.snapshot.sessions) {
+        const summary = remapSummarySessionId(rawSummary);
         nextSummaries.set(summary.sessionId, summary);
       }
       if (!state.seeded) {
@@ -1066,16 +1078,16 @@ export function createZCodeTaskIndexSyncer(
     }
     for (const delta of frame.payload.deltas) {
       if (delta.op === "session.upserted") {
-        processSummary(
-          state,
-          state.summaries.get(delta.session.sessionId),
-          delta.session,
-          deliveryKind,
-        );
+        const summary = remapSummarySessionId(delta.session);
+        processSummary(state, state.summaries.get(summary.sessionId), summary, deliveryKind);
         continue;
       }
       // session.removed：会话删除的 sqlite 收口走 task 删除操作（adapter deleteTask /
       // v4 deleteSession 命令的 host 侧收尾），这里只维护基线。
+      // 隐形 fork 的 removed（轮换清理）直接忽略：若删除原会话的基线条目，下一次
+      // 轮换 upsert 会被当作全新会话（previous=undefined），自定义标题等
+      // titleOverridden 状态会被基线 meta 重置。原会话的行只由其自身生命周期管理。
+      if (lookupZcodeGoOriginalSession(delta.sessionId)) continue;
       state.summaries.delete(delta.sessionId);
     }
     state.indexSeq = frame.toSeq;

@@ -321,6 +321,10 @@ import {
   type CuaOperationStateReporter,
 } from "./cuaOperationTurnTracker.js";
 import type { PipSessionEvent } from "@zcode/zcode-cua/pip-session";
+import {
+  lookupZcodeGoOriginalSession,
+  resolveZcodeGoSessionId,
+} from "./zcodeGoSessionRedirect.js";
 import { registerMemoryDiagnosticsProvider } from "#src/memoryDiagnostics.js";
 
 const logger = createServiceLogger("zcode-agent-service");
@@ -2105,6 +2109,15 @@ export function createZCodeAgentService(
           }
           const parsed = conversationTopicWireCandidateSchema.safeParse(message.params);
           if (parsed.success) {
+            // zcode-go 静默 fork：下行帧的 topic 从隐形子会话回写为原会话——
+            // renderer 投影、goal-keeper 观察者、web 远程全程以原会话身份消费。
+            if (typeof parsed.data.topic === "string" && parsed.data.topic.startsWith("conversation/")) {
+              const frameSessionId = parsed.data.topic.slice("conversation/".length);
+              const originalSession = lookupZcodeGoOriginalSession(frameSessionId);
+              if (originalSession) {
+                parsed.data = { ...parsed.data, topic: `conversation/${originalSession}` };
+              }
+            }
             getConversationFrameEmitter(workspace).fire(parsed.data);
             observeZcodeGoConversationFrame(workspace, parsed.data);
             observeZcodeGoSubagentRecoveryFrame(workspace, parsed.data);
@@ -3689,6 +3702,9 @@ export function createZCodeAgentService(
     },
 
     async readSession(params: ZCodeAgentReadSessionParams) {
+      // zcode-go 静默 fork：读取寻址到活跃隐形子会话（陈旧的原会话档案会误导
+      // goal 复核/看门狗等按 ID 读取的消费者）。
+      params = { ...params, sessionId: resolveZcodeGoSessionId(params.sessionId) };
       const client = await getReadOnlyClient(params, params.runtimePolicy);
       // task-index 为补正文索引调用 readSession 时，默认策略会在 runtime
       // 已被回收后重新拉起 Agent；这条观察路径不应改变 session 生命周期。只有显式
@@ -4978,7 +4994,9 @@ export function createZCodeAgentService(
         Math.round(performance.now() - providerRegistryStartedAt),
       );
       const connection = resolveV4Connection(params);
-      const topic = conversationTopic(params.sessionId);
+      // zcode-go 静默 fork：订阅寻址到活跃隐形子会话；任务元数据（thoughtLevel）
+      // 仍按原会话 id 读任务行——任务行身份永远是原会话。
+      const topic = conversationTopic(resolveZcodeGoSessionId(params.sessionId));
       const taskMetaStartedAt = performance.now();
       const resumeThoughtLevel = await automationTaskIndexRepo
         .getTaskMeta({
@@ -5103,6 +5121,11 @@ export function createZCodeAgentService(
         });
       }
       let envelope = await buildConversationCommandEnvelope(params);
+    // zcode-go 静默 fork：命令信封按重定向寻址到活跃隐形子会话（resolve 对无
+    // 表项 id 原样返回，createSession 等新会话路径不受影响）。
+    if (envelope.sessionId) {
+      envelope = { ...envelope, sessionId: resolveZcodeGoSessionId(envelope.sessionId) };
+    }
       // TTFT 首版只允许可信桌面本地 continuous，手机/远端透传不能开启本地观测。
       if (
         commandClientMode !== "desktop-continuous" ||

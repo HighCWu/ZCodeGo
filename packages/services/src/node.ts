@@ -17,6 +17,11 @@ import {
 } from "@zcode/shared";
 
 export {
+  clearZcodeGoSessionRedirect,
+  setZcodeGoSessionRedirect,
+} from "./zcode-agent/zcodeGoSessionRedirect.js";
+
+export {
   materializeZCodeBuiltinProviderConfig,
   ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV,
 } from "@zcode/provider-node";

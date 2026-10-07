@@ -123,6 +123,11 @@ function remapCompactionPayloadIds(payload: Record<string, unknown>, map: Map<st
 
 export function forkCompactSessionDirect(input: {
   parentSessionId: string;
+  /** 静默 fork：不 upsert 任务索引行（侧栏/搜索不可见，由 redirect map 寻址）。 */
+  silent?: boolean;
+  /** 测试注入的库路径（缺省用真实共享库）。 */
+  sessionDbPath?: string;
+  tasksIndexDbPath?: string;
   log?: (message: string, meta?: unknown) => void;
 }): DirectForkResult {
   const log = input.log ?? (() => {});
@@ -130,17 +135,23 @@ export function forkCompactSessionDirect(input: {
   const parentSessionId = input.parentSessionId;
   const childSessionId = `sess_${randomUUID()}`;
   const base: DirectForkResult = { ok: false, childSessionId, copiedMessages: 0 };
+  const sessionDbPath = input.sessionDbPath ?? SESSION_DB;
+  const tasksIndexDbPath = input.tasksIndexDbPath ?? TASKS_INDEX_DB;
   if (!parentSessionId.startsWith("sess_")) return { ...base, error: "invalid session id" };
-  if (!existsSync(SESSION_DB) || !existsSync(TASKS_INDEX_DB)) {
-    return { ...base, error: "db not found" };
+  // silent 模式不读任务索引（隐形），库缺失判定分开。
+  if (!existsSync(sessionDbPath)) return { ...base, error: "session db not found" };
+  if (!input.silent && !existsSync(tasksIndexDbPath)) {
+    return { ...base, error: "tasks index db not found" };
   }
 
   let sessionDb: SqliteDb;
-  let tasksDb: SqliteDb;
+  let tasksDb: SqliteDb | undefined;
   try {
     const sqlite = loadSqlite();
-    sessionDb = new sqlite.DatabaseSync(SESSION_DB, { timeout: 10_000 });
-    tasksDb = new sqlite.DatabaseSync(TASKS_INDEX_DB, { timeout: 10_000 });
+    sessionDb = new sqlite.DatabaseSync(sessionDbPath, { timeout: 10_000 });
+    if (!input.silent) {
+      tasksDb = new sqlite.DatabaseSync(tasksIndexDbPath, { timeout: 10_000 });
+    }
   } catch (error) {
     return { ...base, error: `open failed: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -392,9 +403,13 @@ export function forkCompactSessionDirect(input: {
     // 官方 schema：tasks 以 (workspace_key, task_id) 唯一，on conflict 同键整行更新；
     // workspace 键直接沿用父任务行（与 syncer 写入保持同一身份，避免并行两行）。
     // mode 必须落在读取侧枚举内——CLI 值 "default" 会让行被 zod 判非法而从侧栏消失。
+    // silent fork 跳过整段：侧栏/搜索对隐形子会话不可见，由 redirect map 寻址。
     const parentSession = sessionDb
       .prepare("select directory, title from session where id = ?")
       .get(parentSessionId) as { directory: string; title: string } | undefined;
+    if (input.silent) {
+      log("直连 fork（silent）：跳过任务索引行", { childSessionId });
+    } else
     try {
       const now = Date.now();
       const childTitle = `Fork of ${(parentSession?.title ?? "")}`;
@@ -490,10 +505,12 @@ export function forkCompactSessionDirect(input: {
     } catch {
       /* 尽力而为 */
     }
-    try {
-      tasksDb.close();
-    } catch {
-      /* 尽力而为 */
+    if (tasksDb) {
+      try {
+        tasksDb.close();
+      } catch {
+        /* 尽力而为 */
+      }
     }
   }
 }

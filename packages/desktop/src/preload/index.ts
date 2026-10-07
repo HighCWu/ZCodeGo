@@ -260,6 +260,20 @@ contextBridge.exposeInMainWorld("zcode", {
     error?: string;
   }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoTrimForkedSessionHistory, payload),
   /** zcode-go：在新窗口打开会话（同实例多窗口）。 */
+  /** zcode-go：静默 fork（手动触发，第一批验证入口）。 */
+  zcodeGoSilentFork: (payload: {
+    sessionId: string;
+  }): Promise<{ ok: boolean; forkSessionId?: string; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoSilentFork, payload),
+  /** zcode-go：会话被静默转接（原会话 → 隐形 fork）事件；返回退订函数。 */
+  zcodeGoOnSessionRedirected: (
+    callback: (payload: { from: string; to: string }) => void,
+  ): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { from: string; to: string }) =>
+      callback(payload);
+    ipcRenderer.on(PlatformChannels.ZcodeGoSessionRedirected, listener);
+    return () => ipcRenderer.removeListener(PlatformChannels.ZcodeGoSessionRedirected, listener);
+  },
   zcodeGoOpenSessionInNewWindow: (payload: {
     taskId: string;
     workspacePath: string;

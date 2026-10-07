@@ -2424,6 +2424,27 @@ export function SessionPane({
     void lease.store.refreshPlans();
   }, [lease, sessionId, snapshot?.sessionId, state.planDirectoryRevision]);
 
+  // zcode-go 静默 fork：当前会话被转接（原会话 → 活跃隐形子会话）时强制快照重订。
+  // 服务层已把新订阅寻址到隐形 fork 并把下行帧 topic 回写为原会话；这里丢弃旧
+  // base 重取，视图即时续接到转接后的内容（同尾窗内容，视觉无感）。
+  useEffect(() => {
+    if (!sessionId || !lease) return;
+    const off = (
+      window as {
+        zcode?: {
+          zcodeGoOnSessionRedirected?: (
+            callback: (payload: { from: string; to: string }) => void,
+          ) => () => void;
+        };
+      }
+    ).zcode?.zcodeGoOnSessionRedirected?.((payload) => {
+      if (payload?.from === sessionId) {
+        void lease.store.connect({ forceSnapshot: true });
+      }
+    });
+    return () => off?.();
+  }, [sessionId, lease]);
+
   // 预热会话订阅失败（CLI 重启内存会话消失等）→ 丢弃回落无预热路径，不进错误 UI。
   useEffect(() => {
     if (sessionId === null && prewarmBinding && state.status === "error") {
