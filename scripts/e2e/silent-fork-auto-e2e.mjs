@@ -247,14 +247,31 @@ try {
     ...(process.platform === "win32"
       ? {
           USERPROFILE: sandboxHome,
+          // Windows Electron 早期启动需要一批系统变量；APPDATA/LOCALAPPDATA
+          // 指向沙箱（缺它们主进程会停在 crash-capture 之后一行日志）
           SYSTEMROOT: process.env.SYSTEMROOT,
+          WINDIR: process.env.WINDIR,
+          SYSTEMDRIVE: process.env.SYSTEMDRIVE,
+          PROGRAMDATA: process.env.PROGRAMDATA,
+          ...(process.env.ALLUSERSPROFILE ? { ALLUSERSPROFILE: process.env.ALLUSERSPROFILE } : {}),
+          ...(process.env.COMPUTERNAME ? { COMPUTERNAME: process.env.COMPUTERNAME } : {}),
+          ...(process.env.USERNAME ? { USERNAME: process.env.USERNAME } : {}),
+          ...(process.env.USERDOMAIN ? { USERDOMAIN: process.env.USERDOMAIN } : {}),
+          ...(process.env.OS ? { OS: process.env.OS } : {}),
+          ...(process.env.NUMBER_OF_PROCESSORS
+            ? { NUMBER_OF_PROCESSORS: process.env.NUMBER_OF_PROCESSORS }
+            : {}),
+          ...(process.env.PROCESSOR_ARCHITECTURE
+            ? { PROCESSOR_ARCHITECTURE: process.env.PROCESSOR_ARCHITECTURE }
+            : {}),
           TEMP: join(ws, "tmp"),
           TMP: join(ws, "tmp"),
           COMSPEC: process.env.COMSPEC,
           PATHEXT: process.env.PATHEXT,
+          APPDATA: join(sandboxHome, "AppData", "Roaming"),
+          LOCALAPPDATA: join(sandboxHome, "AppData", "Local"),
         }
       : {}),
-    ZCODE_GO_TAKEOVER: "1",
     ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Go E2E",
   };
   const appProc = spawn(ELECTRON, appArgs, {
@@ -275,7 +292,7 @@ try {
   const { ev } = c;
 
   // ── 1. onboarding（API key 路径） ──
-  for (let step = 0; step < 14; step += 1) {
+  for (let step = 0; step < 40; step += 1) {
     const r = await ev(`(() => {
       if (document.querySelector('[contenteditable="true"]')) return "composer";
       const btns = Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent !== null);
@@ -306,7 +323,16 @@ try {
   }
   const composerOk = await ev(`!!document.querySelector('[contenteditable="true"]')`);
   console.log("1. onboarding composer:", composerOk);
-  if (!composerOk) throw new Error("onboarding 未完成");
+  if (!composerOk) {
+    const dump = await ev(`(() => {
+      const btns = Array.from(document.querySelectorAll('button'))
+        .filter(b => b.offsetParent !== null)
+        .map(b => (b.innerText || '').trim()).filter(Boolean).slice(0, 15);
+      return JSON.stringify({ body: document.body.innerText.slice(0, 400), btns });
+    })()`);
+    console.log("onboarding stuck dump:", dump);
+    throw new Error("onboarding 未完成（见上 dump）");
+  }
 
   // ── 2. 多轮普通消息（可信输入 + 发送按钮；每轮 turn 结束即静默点） ──
   const sendRound = async (text) => {
