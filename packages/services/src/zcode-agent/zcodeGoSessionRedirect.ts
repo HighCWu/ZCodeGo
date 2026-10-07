@@ -29,6 +29,10 @@ export interface ZcodeGoSessionRedirectEntry {
   forkSessionId: string;
   createdAt: number;
   createdBy: "manual" | "auto-compaction";
+  /** fork 快照时原会话 message max(rowid)——迟到写入注入的判定边界（batch 3）。 */
+  parentMaxMessageRowid?: number;
+  /** fork 完成时子会话 message max(rowid)——增量归并回原会话的水位线（batch 3）。 */
+  childMaxMessageRowid?: number;
 }
 
 interface RedirectFile {

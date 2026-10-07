@@ -159,6 +159,10 @@ import {
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
+import {
+  runZcodeGoSilentForkMergePass,
+  startZcodeGoSilentForkMergeWorker,
+} from "./zcodeGoSilentForkMerge.js";
 import { initZcodeGoRendererRecovery } from "./zcodeGoRendererRecovery.js";
 import {
   setMobileBridgeDialogVisible,
@@ -1832,6 +1836,12 @@ function executeZcodeGoSilentForkTransaction(
       forkSessionId: result.childSessionId,
       createdAt: Date.now(),
       createdBy,
+      ...(typeof result.parentMaxMessageRowid === "number"
+        ? { parentMaxMessageRowid: result.parentMaxMessageRowid }
+        : {}),
+      ...(typeof result.childMaxMessageRowid === "number"
+        ? { childMaxMessageRowid: result.childMaxMessageRowid }
+        : {}),
     });
     for (const win of getApplicationWindowsExcludingCuaIndicator()) {
       if (!win.isDestroyed()) {
@@ -1841,13 +1851,21 @@ function executeZcodeGoSilentForkTransaction(
         });
       }
     }
-    logger.info("[zcode-go-silent-fork] 转接完成", {
-      from: sessionId,
-      to: result.childSessionId,
-      copiedMessages: result.copiedMessages,
-      createdBy,
-    });
-    return { ok: true, forkSessionId: result.childSessionId };
+      logger.info("[zcode-go-silent-fork] 转接完成", {
+        from: sessionId,
+        to: result.childSessionId,
+        copiedMessages: result.copiedMessages,
+        createdBy,
+      });
+      // batch 3：转接后立即做一次双向补齐（迟到注入 + 增量归并起点对齐）
+      try {
+        runZcodeGoSilentForkMergePass({
+          log: (message, meta) => logger.info(`[zcode-go-silent-fork-merge] ${message}`, meta),
+        });
+      } catch {
+        /* 归并 pass 失败由 60s 周期 worker 幂等重试 */
+      }
+      return { ok: true, forkSessionId: result.childSessionId };
   } finally {
     zcodeGoSilentForkTransactionInFlight = false;
   }
@@ -2144,6 +2162,11 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
 
 app.whenReady().then(async () => {
   markMainLaunchAppReady();
+  // zcode-go 静默 fork 第三批：双向归并 worker（迟到注入 S→S' + 增量归并 S'→S，
+  // 60s 周期，unref 不拖退出；redirect map 为空时 pass 零成本）。
+  startZcodeGoSilentForkMergeWorker((message, meta) =>
+    logger.info(`[zcode-go-silent-fork-merge] ${message}`, meta),
+  );
   installLocalMediaPreviewProtocol(session.defaultSession.protocol, {
     isPathAuthorized: localMediaPreviewPathRegistry.isAuthorized,
   });

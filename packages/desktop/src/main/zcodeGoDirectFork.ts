@@ -64,6 +64,12 @@ export interface DirectForkResult {
   childSessionId: string;
   copiedMessages: number;
   workspacePath?: string;
+  /** 快照时刻原会话 message 表 max(rowid)：此后落进原会话的行属「迟到写入」，
+   *  由静默 fork 归并 worker 注入子会话（batch 3）。 */
+  parentMaxMessageRowid?: number;
+  /** fork 写入完成后子会话 message 表 max(rowid)：归并 worker 以此为水位线，
+   *  只把此后产生的新行复制回原会话（避开 fork 复制前缀的重复归并）。 */
+  childMaxMessageRowid?: number;
   error?: string;
 }
 
@@ -246,7 +252,15 @@ export function forkCompactSessionDirect(input: {
     for (const message of messages) idMap.set(message.id, `msg_zgk_${randomUUID()}`);
 
     sessionDb.exec("begin immediate");
+    let parentMaxMessageRowid = 0;
+    let childMaxMessageRowid = 0;
     try {
+      // 快照水位线：此刻原会话 message 已有的最大 rowid（begin immediate 持写锁，
+      // 后续提交的写入 rowid 必然更大——无时钟歧义的迟到判定边界）。
+      parentMaxMessageRowid =
+        ((sessionDb
+          .prepare("select max(rowid) as m from message where session_id = ?")
+          .get(parentSessionId) as { m: number | null } | undefined)?.m ?? 0) || 0;
       // ── 3. 子会话行：镜像父行（新 id / parent_id=父 / Fork of 标题 / 现在）──
       sessionDb
         .prepare(
@@ -381,6 +395,11 @@ export function forkCompactSessionDirect(input: {
         executionStateData,
       );
       sessionDb.exec("commit");
+      // 归并水位线：fork 复制完的最后一行 rowid（此后新产生的行才会归并回原会话）。
+      childMaxMessageRowid =
+        ((sessionDb
+          .prepare("select max(rowid) as m from message where session_id = ?")
+          .get(childSessionId) as { m: number | null } | undefined)?.m ?? 0) || 0;
       log("直连 fork 会话库写入完成", {
         childSessionId,
         copiedMessages: messages.length,
@@ -491,6 +510,8 @@ export function forkCompactSessionDirect(input: {
       childSessionId,
       copiedMessages: messages.length,
       ...(parentSession?.directory ? { workspacePath: parentSession.directory } : {}),
+      parentMaxMessageRowid,
+      childMaxMessageRowid,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
