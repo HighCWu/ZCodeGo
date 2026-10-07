@@ -325,6 +325,12 @@ import {
   lookupZcodeGoOriginalSession,
   resolveZcodeGoSessionId,
 } from "./zcodeGoSessionRedirect.js";
+import {
+  observeZcodeGoSilentForkFrame,
+  setZcodeGoSilentForkDelegate,
+  startZcodeGoSilentForkPeriodicCheck,
+  waitForZcodeGoSilentForkGate,
+} from "./zcodeGoSilentForkTrigger.js";
 import { registerMemoryDiagnosticsProvider } from "#src/memoryDiagnostics.js";
 
 const logger = createServiceLogger("zcode-agent-service");
@@ -911,6 +917,16 @@ interface CreateZCodeAgentServiceOptions extends Omit<
    * browser 命令返回 backend_unavailable，不影响其它功能。
    */
   browserControlExecutor?: BrowserAmbientContextExecutor;
+  /**
+   * zcode-go 静默 fork：host 检测到 compaction + 静默点后向 main 发信号。
+   * desktop main 装配时注入（child.postMessage → main 执行 direct fork）；
+   * 缺省（纯 CLI）则自动触发静默。
+   */
+  silentForkArmSignal?: (params: {
+    sessionId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+  }) => void;
   /**
    * 官方 Server MCP 身份头解析器。Agent 进程不持有用户身份权威，
    * 经 interaction/requestOfficialMcpAuthHeaders 向 host 索取本次请求的身份头。
@@ -2120,6 +2136,7 @@ export function createZCodeAgentService(
             }
             getConversationFrameEmitter(workspace).fire(parsed.data);
             observeZcodeGoConversationFrame(workspace, parsed.data);
+            observeZcodeGoSilentForkFrame(workspace, parsed.data);
             observeZcodeGoSubagentRecoveryFrame(workspace, parsed.data);
             // goal 状态的权威实时源是 conversation 帧的 state.goal（sessions-index
             // 的 goalStatus 是列表投影、可选字段，CLI 不保证每次 goal 变化都带）。
@@ -3358,7 +3375,7 @@ export function createZCodeAgentService(
     return envelope;
   }
 
-  return {
+  const result: IZCodeAgentService & { disposeAllAndWait(): Promise<void> } = {
     async prepareStorage(params) {
       const client = await processManager.getClient(params);
       wireClient(client, params, "chat");
@@ -4465,6 +4482,8 @@ export function createZCodeAgentService(
 
     async sendPrompt(params: ZCodeAgentSendPromptParams) {
       // zcode-go 静默 fork：legacy 发送路径同样寻址到活跃隐形子会话。
+      // 派发门闩：fork 事务期间短暂等待，redirect 表项落盘后再 resolve 寻址。
+      await waitForZcodeGoSilentForkGate(params.sessionId);
       params = { ...params, sessionId: resolveZcodeGoSessionId(params.sessionId) };
       const startedAt = Date.now();
       const client = await getClient(params);
@@ -5129,8 +5148,10 @@ export function createZCodeAgentService(
       }
       let envelope = await buildConversationCommandEnvelope(params);
     // zcode-go 静默 fork：命令信封按重定向寻址到活跃隐形子会话（resolve 对无
-    // 表项 id 原样返回，createSession 等新会话路径不受影响）。
+    // 表项 id 原样返回，createSession 等新会话路径不受影响）。派发门闩同样
+    // 覆盖 v4 命令面（prompt/queue 等所有 mutation）。
     if (envelope.sessionId) {
+      await waitForZcodeGoSilentForkGate(envelope.sessionId);
       envelope = { ...envelope, sessionId: resolveZcodeGoSessionId(envelope.sessionId) };
     }
       // TTFT 首版只允许可信桌面本地 continuous，手机/远端透传不能开启本地观测。
@@ -5723,4 +5744,34 @@ export function createZCodeAgentService(
       disposeLocalState();
     },
   };
+
+  // zcode-go 静默 fork 第二批：注入 quiescence 检查 + host→main 信号通道。
+  // 在 service 对象构造完成后设置（方法内部引用自身需要闭包捕获）。
+  const service = result;
+  setZcodeGoSilentForkDelegate({
+    checkQuiescence: async (params) => {
+      try {
+        const snapshot = await service.readSession({
+          ...params,
+          runtimePolicy: "existing-only",
+        });
+        const runtime = snapshot?.runtime;
+        if (!runtime) return false;
+        return (
+          (runtime.activeTurnId ?? null) === null &&
+          (Array.isArray(runtime.pendingRequestIds) ? runtime.pendingRequestIds.length : 0) === 0
+        );
+      } catch {
+        return false;
+      }
+    },
+    notifyArm: (params) => {
+      try {
+        options?.silentForkArmSignal?.(params);
+      } catch { /* main 侧处理 */ }
+    },
+  });
+  startZcodeGoSilentForkPeriodicCheck();
+
+  return result;
 }

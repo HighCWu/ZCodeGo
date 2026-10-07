@@ -81,10 +81,7 @@ interface KeptRow {
 
 /** compaction 载荷里的结构化消息引用字段，按 identity map 改写（仅限映射内的 id）。 */
 function remapCompactionPayloadIds(payload: Record<string, unknown>, map: Map<string, string>): void {
-  const remap = (value: unknown): void => {
-    if (typeof value === "string" && map.has(value)) return map.get(value) as string;
-    return value;
-  };
+  const remap = (value: string): string => map.get(value) ?? value;
   if (typeof payload.summaryMessageId === "string") {
     payload.summaryMessageId = remap(payload.summaryMessageId);
   }
@@ -409,7 +406,7 @@ export function forkCompactSessionDirect(input: {
       .get(parentSessionId) as { directory: string; title: string } | undefined;
     if (input.silent) {
       log("直连 fork（silent）：跳过任务索引行", { childSessionId });
-    } else
+    } else if (tasksDb)
     try {
       const now = Date.now();
       const childTitle = `Fork of ${(parentSession?.title ?? "")}`;

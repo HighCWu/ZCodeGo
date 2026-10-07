@@ -1125,6 +1125,20 @@ const cuaOperationStateReporter = {
   },
 } satisfies NonNullable<Parameters<typeof createLocalServices>[0]>["cuaOperationStateReporter"];
 
+// zcode-go 静默 fork：host 侧 trigger（帧观测 + 静默巡检）达到触发条件后，
+// 经此信号请求 main 执行 direct fork + redirect 写入（main 持有 redirect map 的写权）。
+const silentForkArmSignal: NonNullable<
+  Parameters<typeof createLocalServices>[0]
+>["silentForkArmSignal"] = (event) => {
+  if (!parentPort) {
+    return;
+  }
+  parentPort.postMessage({
+    type: HostResponseTypes.ZcodeGoSilentForkArm,
+    ...event,
+  });
+};
+
 let untrackedPromptRpcCount = 0;
 function reportHostRunningTaskCount(): void {
   runtimeTaskReporter.onRunningTaskCountChanged({
@@ -2878,6 +2892,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
               // CUA 顶部提示属于物理 Windows 桌面投影；非 Windows 和远端 authority 都不得上报。
               cuaOperationStateReporter:
                 process.platform === "win32" ? cuaOperationStateReporter : undefined,
+              // zcode-go 静默 fork：compaction 观测 + 静默巡检在 host 侧 service 内运行，
+              // 达到触发条件即请求 main 执行 fork 事务。
+              silentForkArmSignal,
             });
             activeServices = initializedServices;
             activeHostApiNetworkTransport = hostApiNetworkTransport;

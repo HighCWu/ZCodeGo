@@ -183,6 +183,12 @@ export function spawnHostProcess(
       source: ElectronUtilityProcess,
       event: HostCuaOperationStateResponse,
     ) => void;
+    /** zcode-go 静默 fork：host 侧 compaction 观测 + 静默巡检命中，请求执行 fork 事务。 */
+    onZcodeGoSilentForkArm?: (event: {
+      sessionId: string;
+      workspacePath: string;
+      workspaceIdentity?: string;
+    }) => void;
     onCuaOperationStateSourceExited?: (source: ElectronUtilityProcess) => void;
     handleBotRemoteWorkspaceReconnectRequest?: (params: {
       win: BrowserWindow;
@@ -403,6 +409,19 @@ export function spawnHostProcess(
     if (result.data.type === HostResponseTypes.CuaOperationState) {
       // Main 只投影 Host 已经判定的 turn 状态，不在这里重复解析 session/tool 业务事件。
       dependencies.onCuaOperationStateChanged?.(child, result.data);
+      return;
+    }
+
+    if (result.data.type === HostResponseTypes.ZcodeGoSilentForkArm) {
+      // zcode-go 静默 fork：host 已完成 quiescence 门控并设好派发门闩，
+      // main 在这里执行 direct fork + redirect 写入（进程内互斥防并发事务）。
+      dependencies.onZcodeGoSilentForkArm?.({
+        sessionId: result.data.sessionId,
+        workspacePath: result.data.workspacePath,
+        ...(result.data.workspaceIdentity
+          ? { workspaceIdentity: result.data.workspaceIdentity }
+          : {}),
+      });
       return;
     }
 

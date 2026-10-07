@@ -681,6 +681,8 @@ export const HostResponseTypes = {
   ProviderProvisioningSourceChanged: "provider-provisioning-source-changed",
   /** host → main：一次 Remote Environment 同步执行完毕。 */
   ProviderProvisioningExecutionResult: "provider-provisioning-execution-result",
+  /** host → main：会话出现活跃压缩边界且已达静默点，请求 main 执行静默 fork（zcode-go） */
+  ZcodeGoSilentForkArm: "zcode-go-silent-fork-arm",
 } as const;
 
 // ============================================================================

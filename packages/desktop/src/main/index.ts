@@ -160,7 +160,6 @@ import {
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import { initZcodeGoRendererRecovery } from "./zcodeGoRendererRecovery.js";
-import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import {
   setMobileBridgeDialogVisible,
   startMobileBridgePairing,
@@ -1805,6 +1804,55 @@ const attachServicePortToSharedHostWindow = (
   return child;
 };
 
+// zcode-go 静默 fork 事务执行器（模块级：手动 IPC 与 host 自动触发共用）：
+// direct fork 构造隐形子会话（不写任务索引行）+ redirect map 建立重定向 + 广播
+// 事件。服务层（subscribe/send/read/帧中继/索引 syncer）按 map 寻址，renderer
+// 收到事件后 forceSnapshot 重订。host 侧派发门闩在 redirect 表项落盘后自动放行。
+// 进程内互斥防并发 fork；迟到写入由 S 观察者（第三批）注入归并。
+let zcodeGoSilentForkTransactionInFlight = false;
+function executeZcodeGoSilentForkTransaction(
+  sessionId: string,
+  createdBy: "manual" | "auto-compaction",
+): { ok: boolean; forkSessionId?: string; error?: string } {
+  if (!sessionId.startsWith("sess_")) {
+    return { ok: false, error: "invalid session id" };
+  }
+  if (zcodeGoSilentForkTransactionInFlight) {
+    return { ok: false, error: "another silent fork transaction is in flight" };
+  }
+  zcodeGoSilentForkTransactionInFlight = true;
+  try {
+    const result = forkCompactSessionDirect({
+      parentSessionId: sessionId,
+      silent: true,
+      log: (message, meta) => logger.info(`[zcode-go-silent-fork] ${message}`, meta),
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+    setZcodeGoSessionRedirect(sessionId, {
+      forkSessionId: result.childSessionId,
+      createdAt: Date.now(),
+      createdBy,
+    });
+    for (const win of getApplicationWindowsExcludingCuaIndicator()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(PlatformChannels.ZcodeGoSessionRedirected, {
+          from: sessionId,
+          to: result.childSessionId,
+        });
+      }
+    }
+    logger.info("[zcode-go-silent-fork] 转接完成", {
+      from: sessionId,
+      to: result.childSessionId,
+      copiedMessages: result.copiedMessages,
+      createdBy,
+    });
+    return { ok: true, forkSessionId: result.childSessionId };
+  } finally {
+    zcodeGoSilentForkTransactionInFlight = false;
+  }
+}
+
 function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
   const runtimeProcessEnvPreparation = takeRuntimeProcessEnvPreparation();
   const win = createWindow({
@@ -1857,6 +1905,18 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
             windowsCuaOperationIndicator.handleState(source, event),
           onCuaOperationStateSourceExited: (source) =>
             windowsCuaOperationIndicator.clearSource(source),
+          // zcode-go 静默 fork 第二批：host 帧观测 armed + 静默巡检命中后请求
+          // main 执行 fork 事务（host 侧已设派发门闩，redirect 落盘即放行）。
+          onZcodeGoSilentForkArm: (event) => {
+            const result = executeZcodeGoSilentForkTransaction(event.sessionId, "auto-compaction");
+            if (!result.ok) {
+              logger.warn("[zcode-go-silent-fork] 自动触发失败，回落原会话继续", {
+                sessionId: event.sessionId,
+                workspacePath: event.workspacePath,
+                error: result.error,
+              });
+            }
+          },
           onAgentProcessExited: (event) => reportAgentProcessExitToArms(event, logger),
           onAgentProcessError: (event) => reportAgentProcessSpawnErrorToArms(event, logger),
           onAgentProcessException: (event) => reportAgentProcessExceptionToArms(event, logger),
@@ -2614,44 +2674,14 @@ app.whenReady().then(async () => {
       typeof payload?.origin === "string" ? payload.origin : null,
     ),
   );
-  // zcode-go 静默 fork（手动触发，第一批）：direct fork 构造隐形子会话（不写任务
-  // 索引行）+ redirect map 建立重定向 + 广播事件。服务层（subscribe/send/read/
-  // 帧中继/索引 syncer）按 map 寻址，renderer 收到事件后 forceSnapshot 重订。
-  // 静默点门控（无活跃 turn ∧ 无未决后台）在第二批的自动触发里做；手动路径靠
-  // fork 的 begin immediate 事务拿一致性快照，迟到写入由 S 观察者（第三批）注入。
+  // zcode-go 静默 fork（手动触发，第一批）：执行器在模块级（与 host 自动触发
+  // 共用，见 executeZcodeGoSilentForkTransaction）。
   ipcMain.handle(
     PlatformChannels.ZcodeGoSilentFork,
     (_event: Electron.IpcMainInvokeEvent, payload: unknown) => {
       const request = payload as { sessionId?: unknown };
       const sessionId = typeof request?.sessionId === "string" ? request.sessionId : "";
-      if (!sessionId.startsWith("sess_")) {
-        return { ok: false, error: "invalid session id" };
-      }
-      const result = forkCompactSessionDirect({
-        parentSessionId: sessionId,
-        silent: true,
-        log: (message, meta) => logger.info(`[zcode-go-silent-fork] ${message}`, meta),
-      });
-      if (!result.ok) return { ok: false, error: result.error };
-      setZcodeGoSessionRedirect(sessionId, {
-        forkSessionId: result.childSessionId,
-        createdAt: Date.now(),
-        createdBy: "manual",
-      });
-      for (const win of getApplicationWindowsExcludingCuaIndicator()) {
-        if (!win.isDestroyed()) {
-          win.webContents.send(PlatformChannels.ZcodeGoSessionRedirected, {
-            from: sessionId,
-            to: result.childSessionId,
-          });
-        }
-      }
-      logger.info("[zcode-go-silent-fork] 转接完成", {
-        from: sessionId,
-        to: result.childSessionId,
-        copiedMessages: result.copiedMessages,
-      });
-      return { ok: true, forkSessionId: result.childSessionId };
+      return executeZcodeGoSilentForkTransaction(sessionId, "manual");
     },
   );
   ipcMain.handle(PlatformChannels.ZcodeGoTakeSessionInitial, (event) => {

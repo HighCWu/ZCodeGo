@@ -48,7 +48,10 @@ jobs:
           npx tsx --test \
             packages/services/test/zcodeGoStandaloneGate.test.ts \
             packages/services/test/zcodeGoWireFrame.test.ts \
-            packages/services/test/zcodeGoGoalKeepAlive.test.ts
+            packages/services/test/zcodeGoGoalKeepAlive.test.ts \
+            packages/services/test/zcodeGoSessionRedirect.test.ts \
+            packages/services/test/zcodeGoSilentForkTrigger.test.ts \
+            packages/services/test/sessionHistoryLazyReader.test.ts
       - name: ui 单测（tsx + ui tsconfig 路径别名）
         run: |
           npx tsx --tsconfig packages/ui/tsconfig.json --test \

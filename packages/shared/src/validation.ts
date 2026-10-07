@@ -767,6 +767,20 @@ export const hostCuaOperationStateResponseSchema = z
 
 export type HostCuaOperationStateResponse = z.infer<typeof hostCuaOperationStateResponseSchema>;
 
+// zcode-go 静默 fork：host 侧 compaction 观测 + 静默巡检命中，请求 main 执行
+// fork 事务（main 持 redirect map 写权）。未列入 hostResponseMessageSchema 的
+// 消息会被 main 静默丢弃——新增 host → main 消息必须同步登记该 union。
+export const hostZcodeGoSilentForkArmResponseSchema = z
+  .object({
+    type: z.literal("zcode-go-silent-fork-arm"),
+    sessionId: nonEmptyStringSchema,
+    workspacePath: nonEmptyStringSchema,
+    workspaceIdentity: nonEmptyStringSchema.optional(),
+  })
+  .strict();
+
+export type HostZcodeGoSilentForkArmResponse = z.infer<typeof hostZcodeGoSilentForkArmResponseSchema>;
+
 export const hostBroadcastClaimRequestResponseSchema = z.object({
   type: z.literal("broadcast-claim-request"),
   requestId: nonEmptyStringSchema,
@@ -1006,6 +1020,7 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostAgentRunningTaskCountChangedResponseSchema,
   hostWorkspaceRunningTaskCountChangedResponseSchema,
   hostCuaOperationStateResponseSchema,
+  hostZcodeGoSilentForkArmResponseSchema,
   hostBroadcastEnvelopeSchema,
   hostBroadcastClaimRequestResponseSchema,
   hostBroadcastClaimCommitResponseSchema,

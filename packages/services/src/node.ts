@@ -1376,6 +1376,12 @@ export function createLocalServices(options: {
   };
   /** Windows desktop-local Host 的 CUA turn 状态投影；其它 authority 会在装配层拒绝。 */
   cuaOperationStateReporter?: CuaOperationStateReporter;
+  /** zcode-go 静默 fork：host 观测到 compaction + 静默点后通知 main（desktop 装配注入）。 */
+  silentForkArmSignal?: (params: {
+    sessionId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+  }) => void;
 }): ServiceCollection {
   const isDesktopAttachedRemote = options?.serviceAuthorityMode === "desktop-attached-remote";
   // host / remote server 以前直接沿用当前进程环境启动后续服务。
@@ -2096,6 +2102,7 @@ export function createLocalServices(options: {
       ? { accountProviderConfigSource: agentAccountProviderConfigSource }
       : {}),
     accountRequestAuthService,
+    ...(options?.silentForkArmSignal ? { silentForkArmSignal: options.silentForkArmSignal } : {}),
     ...(modelSelectionReadinessSource ? { modelSelectionReadinessSource } : {}),
     authorizeLocalMediaPreviewPath: options?.authorizeLocalMediaPreviewPath,
     ...offPeakToolWiring,
