@@ -68,6 +68,7 @@ import {
 } from "@zcode/services/node";
 import {
   clearZcodeGoSessionRedirect,
+  getZcodeGoSessionRedirect,
   setZcodeGoSessionRedirect,
 } from "@zcode/services/node";
 import {
@@ -160,9 +161,14 @@ import {
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import {
+  resetZcodeGoSilentForkEntryState,
   runZcodeGoSilentForkMergePass,
-  startZcodeGoSilentForkMergeWorker,
 } from "./zcodeGoSilentForkMerge.js";
+import {
+  deleteZcodeGoSilentForkSession,
+  runZcodeGoSilentForkFinalMerge,
+  startZcodeGoSilentForkMergeWorker,
+} from "./zcodeGoSilentForkLifecycle.js";
 import { initZcodeGoRendererRecovery } from "./zcodeGoRendererRecovery.js";
 import {
   setMobileBridgeDialogVisible,
@@ -1813,6 +1819,9 @@ const attachServicePortToSharedHostWindow = (
 // 事件。服务层（subscribe/send/read/帧中继/索引 syncer）按 map 寻址，renderer
 // 收到事件后 forceSnapshot 重订。host 侧派发门闩在 redirect 表项落盘后自动放行。
 // 进程内互斥防并发 fork；迟到写入由 S 观察者（第三批）注入归并。
+// 轮换（batch 4）：redirect 已存在时，fork 的父 = 活跃端点（旧 fork），完成后
+// 终末归并旧 fork 增量 → 轮换表项 → 删除旧 fork 行；伪帧空转轮换由「新边界
+// 晚于当前表项建立」的 DB 校验在事务前拦下。
 let zcodeGoSilentForkTransactionInFlight = false;
 function executeZcodeGoSilentForkTransaction(
   sessionId: string,
@@ -1826,23 +1835,62 @@ function executeZcodeGoSilentForkTransaction(
   }
   zcodeGoSilentForkTransactionInFlight = true;
   try {
+    const existingEntry = getZcodeGoSessionRedirect(sessionId);
+    const activeEndpoint = existingEntry?.forkSessionId ?? sessionId;
     const result = forkCompactSessionDirect({
-      parentSessionId: sessionId,
+      parentSessionId: activeEndpoint,
       silent: true,
+      // 轮换防伪：活跃端点须有晚于当前表项建立的新压缩边界（原会话无表项时
+      // 不校验——首个 fork 的边界本就可能很老）
+      ...(existingEntry ? { requireBoundaryNewerThanMs: existingEntry.createdAt } : {}),
       log: (message, meta) => logger.info(`[zcode-go-silent-fork] ${message}`, meta),
     });
     if (!result.ok) return { ok: false, error: result.error };
-    setZcodeGoSessionRedirect(sessionId, {
-      forkSessionId: result.childSessionId,
-      createdAt: Date.now(),
-      createdBy,
-      ...(typeof result.parentMaxMessageRowid === "number"
-        ? { parentMaxMessageRowid: result.parentMaxMessageRowid }
-        : {}),
-      ...(typeof result.childMaxMessageRowid === "number"
-        ? { childMaxMessageRowid: result.childMaxMessageRowid }
-        : {}),
-    });
+    if (existingEntry) {
+      const oldForkId = existingEntry.forkSessionId;
+      // 终末归并旧 fork 增量（全量兜底扫描，rewind 行也收尾）再轮换删除
+      try {
+        runZcodeGoSilentForkFinalMerge({
+          originalSessionId: sessionId,
+          entry: existingEntry,
+          log: (message, meta) => logger.info(`[zcode-go-silent-fork-merge] ${message}`, meta),
+        });
+      } catch (error) {
+        logger.warn("[zcode-go-silent-fork] 轮换终末归并异常（继续轮换，旧 fork 保留待删）", {
+          original: sessionId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      // 先轮换表项（新发送立即寻址新 fork），再删旧 fork 行
+      setZcodeGoSessionRedirect(sessionId, {
+        forkSessionId: result.childSessionId,
+        createdAt: Date.now(),
+        createdBy,
+        ...(typeof result.parentMaxMessageRowid === "number"
+          ? { parentMaxMessageRowid: result.parentMaxMessageRowid }
+          : {}),
+        ...(typeof result.childMaxMessageRowid === "number"
+          ? { childMaxMessageRowid: result.childMaxMessageRowid }
+          : {}),
+      });
+      resetZcodeGoSilentForkEntryState(sessionId);
+      deleteZcodeGoSilentForkSession({
+        forkSessionId: oldForkId,
+        log: (message, meta) => logger.info(`[zcode-go-silent-fork] ${message}`, meta),
+      });
+    } else {
+      setZcodeGoSessionRedirect(sessionId, {
+        forkSessionId: result.childSessionId,
+        createdAt: Date.now(),
+        createdBy,
+        ...(typeof result.parentMaxMessageRowid === "number"
+          ? { parentMaxMessageRowid: result.parentMaxMessageRowid }
+          : {}),
+        ...(typeof result.childMaxMessageRowid === "number"
+          ? { childMaxMessageRowid: result.childMaxMessageRowid }
+          : {}),
+      });
+    }
     for (const win of getApplicationWindowsExcludingCuaIndicator()) {
       if (!win.isDestroyed()) {
         win.webContents.send(PlatformChannels.ZcodeGoSessionRedirected, {
@@ -1851,21 +1899,23 @@ function executeZcodeGoSilentForkTransaction(
         });
       }
     }
-      logger.info("[zcode-go-silent-fork] 转接完成", {
-        from: sessionId,
-        to: result.childSessionId,
-        copiedMessages: result.copiedMessages,
-        createdBy,
+    logger.info("[zcode-go-silent-fork] 转接完成", {
+      from: sessionId,
+      to: result.childSessionId,
+      copiedMessages: result.copiedMessages,
+      createdBy,
+      rotation: Boolean(existingEntry),
+    });
+    // batch 3：转接后立即做一次双向补齐（迟到注入 + 增量归并起点对齐）。
+    // 失败由 60s 周期 worker 幂等重试。
+    try {
+      runZcodeGoSilentForkMergePass({
+        log: (message, meta) => logger.info(`[zcode-go-silent-fork-merge] ${message}`, meta),
       });
-      // batch 3：转接后立即做一次双向补齐（迟到注入 + 增量归并起点对齐）
-      try {
-        runZcodeGoSilentForkMergePass({
-          log: (message, meta) => logger.info(`[zcode-go-silent-fork-merge] ${message}`, meta),
-        });
-      } catch {
-        /* 归并 pass 失败由 60s 周期 worker 幂等重试 */
-      }
-      return { ok: true, forkSessionId: result.childSessionId };
+    } catch {
+      /* 见上 */
+    }
+    return { ok: true, forkSessionId: result.childSessionId };
   } finally {
     zcodeGoSilentForkTransactionInFlight = false;
   }

@@ -79,15 +79,16 @@ test("静默点触发：not quiet 不 notify；quiet 才 notify 并透传 worksp
   });
 });
 
-test("已有 redirect 的会话：观测不 arm，armed 残留被清出", async () => {
+test("轮换时效：老表项 + 新 compaction arm → notify；arm 早于表项建立（重放）→ 丢弃", async () => {
   await withTempStateDir(async () => {
-    const S = "sess_redirected_111";
+    const S = "sess_rotation_1111";
+    // 表项建立于 60s 前（上一次 fork/轮换），现在观测到新 compaction 帧
     setZcodeGoSessionRedirect(S, {
-      forkSessionId: "sess_redirected_f1",
-      createdAt: Date.now(),
+      forkSessionId: "sess_rotation_f1",
+      createdAt: Date.now() - 60_000,
       createdBy: "auto-compaction",
     });
-    const notified: unknown[] = [];
+    const notified: Array<{ sessionId: string }> = [];
     setZcodeGoSilentForkDelegate({
       notifyArm: (params) => notified.push(params),
       checkQuiescence: async () => true,
@@ -96,11 +97,28 @@ test("已有 redirect 的会话：观测不 arm，armed 残留被清出", async 
     observeZcodeGoSilentForkFrame(WORKSPACE, compactionFrame(S));
     backdateZcodeGoSilentForkArmedAtForTest(S, 6_000);
     await checkArmedSessionsAndTrigger();
-    assert.equal(notified.length, 0, "redirect 在役，不重复 fork");
+    assert.equal(notified.length, 1, "老表项 + 新帧 → 轮换 notify");
+
+    // 重放场景：表项刚建立（createdAt=now），armed 回拨到表项建立前 → 丢弃
+    const S2 = "sess_replay_111111";
+    setZcodeGoSessionRedirect(S2, {
+      forkSessionId: "sess_replay_f1",
+      createdAt: Date.now(),
+      createdBy: "auto-compaction",
+    });
+    const notified2: unknown[] = [];
+    setZcodeGoSilentForkDelegate({
+      notifyArm: (params) => notified2.push(params),
+      checkQuiescence: async () => true,
+    });
+    observeZcodeGoSilentForkFrame(WORKSPACE, compactionFrame(S2));
+    backdateZcodeGoSilentForkArmedAtForTest(S2, 6_000);
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified2.length, 0, "armed 早于表项建立（重放信号）被丢弃");
   });
 });
 
-test("门闩：无 latch 立即过；超时兜底放行；redirect 出现提前放行", async () => {
+test("门闩：无 latch 立即过；超时兜底放行；fork 身份变化提前放行（轮换语义）", async () => {
   await withTempStateDir(async () => {
     const S = "sess_latch_111111111";
 
@@ -108,11 +126,13 @@ test("门闩：无 latch 立即过；超时兜底放行；redirect 出现提前�
     await waitForZcodeGoSilentForkGate(S);
     assert.ok(Date.now() - t0 < 50, "无门闩不等待");
 
+    // 首 fork：latch 时无表项；同表项不动（轮换期间旧表项恒在，必须等身份变化）
     armZcodeGoSilentForkLatch(S, 120);
     const t1 = Date.now();
     await waitForZcodeGoSilentForkGate(S);
-    assert.ok(Date.now() - t1 >= 100, "无 redirect 时等到超时兜底放行");
+    assert.ok(Date.now() - t1 >= 100, "fork 身份未变化时等到超时兜底放行");
 
+    // 首 fork：null → S1 提前放行
     armZcodeGoSilentForkLatch(S, 10_000);
     setTimeout(() => {
       setZcodeGoSessionRedirect(S, {
@@ -123,6 +143,19 @@ test("门闩：无 latch 立即过；超时兜底放行；redirect 出现提前�
     }, 60);
     const t2 = Date.now();
     await waitForZcodeGoSilentForkGate(S);
-    assert.ok(Date.now() - t2 < 5_000, "redirect 出现提前放行");
+    assert.ok(Date.now() - t2 < 5_000, "首 fork 表项出现提前放行");
+
+    // 轮换：S1 → S2 提前放行（旧表项在 latch 期间已存在，存在性不构成放行）
+    armZcodeGoSilentForkLatch(S, 10_000);
+    setTimeout(() => {
+      setZcodeGoSessionRedirect(S, {
+        forkSessionId: "sess_latch_fork_2",
+        createdAt: Date.now(),
+        createdBy: "auto-compaction",
+      });
+    }, 60);
+    const t3 = Date.now();
+    await waitForZcodeGoSilentForkGate(S);
+    assert.ok(Date.now() - t3 < 5_000, "轮换表项身份变化提前放行");
   });
 });

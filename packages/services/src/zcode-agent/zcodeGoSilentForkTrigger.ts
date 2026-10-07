@@ -48,6 +48,11 @@ export function setZcodeGoSilentForkDelegate(d: ZcodeGoSilentForkArmDelegate): v
  * 帧中继观察者：检测 compaction part → armed。
  * 判据与 zcodeGoDirectFork / CLI isActiveCompactionBoundaryPart 同源：
  * type=compaction 且带 compactBoundary（或无 timelineStatus）。
+ *
+ * redirect 已存在时同样 arm（batch 4 轮换）：帧中继把 fork 的下行 topic 回写为
+ * 原会话，活跃 fork 自身发生 compaction 也以原会话身份到达这里——静默点后由
+ * main 轮换到新 fork。伪帧/重放的空转轮换由 main 的「新边界晚于当前 entry
+ * 创建时间」DB 校验拦截，这里不重复设防。
  */
 export function observeZcodeGoSilentForkFrame(
   workspace: { workspacePath: string; workspaceIdentity?: string },
@@ -56,11 +61,6 @@ export function observeZcodeGoSilentForkFrame(
   if (typeof frame.topic !== "string" || !frame.topic.startsWith("conversation/")) return;
   const sessionId = frame.topic.slice("conversation/".length);
   if (!sessionId.startsWith("sess_")) return;
-
-  // 已有重定向的会话（上次 fork 已转接）不需要再 arm——下次 compaction 在
-  // fork 里发生时由帧 remap 后的原会话 topic 再次触发（armed 幂等）。
-  // 但如果已有 redirect，说明上次 fork 还在用，不需要再 fork。
-  if (getZcodeGoSessionRedirect(sessionId)) return;
 
   // 帧的 payload 里是否有 compaction part？
   // wire candidate 的 payload 可能是 JSON 字符串或已解析对象
@@ -107,8 +107,10 @@ export async function checkArmedSessionsAndTrigger(): Promise<void> {
     if (notifiedSessions.has(sessionId)) continue;
     // 先占位再 await：并发调用（事件 + 巡检重叠）不会对同一会话双发
     notifiedSessions.add(sessionId);
-    // 已有重定向的清出 armed
-    if (getZcodeGoSessionRedirect(sessionId)) {
+    // 轮换时效检查：redirect 已存在时，armed 必须晚于该 entry 的建立（含 2s
+    // 容差）——否则是重放/启动期回放的老边界信号，丢弃等真正的下次 compaction。
+    const existing = getZcodeGoSessionRedirect(sessionId);
+    if (existing && info.armedAt <= existing.createdAt + 2_000) {
       armedSessions.delete(sessionId);
       notifiedSessions.delete(sessionId);
       continue;
@@ -158,31 +160,36 @@ export function stopZcodeGoSilentForkPeriodicCheck(): void {
 }
 
 // ---------------------------------------------------------------------------
-// 派发门闩：arm → main 完成 fork + redirect 写入之间，短暂 hold 该会话的新发送。
-// 放行条件（先到先得）：
-//   1. redirect map 出现该会话表项（fork 成功，发送将按 map 寻址到隐形子会话）；
-//   2. 超时（fork 失败 / main 卡死时不拖死用户输入，回落原会话发送）。
+// 派发门闩：arm → main 完成 fork/轮换 + redirect 写入之间，短暂 hold 该会话的
+// 新发送。放行条件（先到先得）：
+//   1. redirect 表项的 forkSessionId 相对 arm 时刻发生变化（首 fork：null→S'；
+//      轮换：S'→S''——轮换期间旧表项恒存在，必须比对身份而非存在性）；
+//   2. 超时（fork 失败 / main 卡死时不拖死用户输入，回落当前端点发送）。
 // ---------------------------------------------------------------------------
 
 const FORK_LATCH_TIMEOUT_MS = 5_000;
 const FORK_LATCH_POLL_MS = 25;
 
-const forkLatches = new Map<string, number>();
+const forkLatches = new Map<string, { until: number; prevForkId: string | null }>();
 
 export function armZcodeGoSilentForkLatch(sessionId: string, timeoutMs = FORK_LATCH_TIMEOUT_MS): void {
-  forkLatches.set(sessionId, Date.now() + timeoutMs);
+  forkLatches.set(sessionId, {
+    until: Date.now() + timeoutMs,
+    prevForkId: getZcodeGoSessionRedirect(sessionId)?.forkSessionId ?? null,
+  });
 }
 
 export function clearZcodeGoSilentForkLatch(sessionId: string): void {
   forkLatches.delete(sessionId);
 }
 
-/** 发送咽喉点调用：latch 存在时轮询等待 redirect 表项或超时。 */
+/** 发送咽喉点调用：latch 存在时轮询等待 redirect 指向新 fork 或超时。 */
 export async function waitForZcodeGoSilentForkGate(sessionId: string): Promise<void> {
-  const deadline = forkLatches.get(sessionId);
-  if (!deadline) return;
-  while (Date.now() < deadline) {
-    if (getZcodeGoSessionRedirect(sessionId)) {
+  const latch = forkLatches.get(sessionId);
+  if (!latch) return;
+  while (Date.now() < latch.until) {
+    const currentForkId = getZcodeGoSessionRedirect(sessionId)?.forkSessionId ?? null;
+    if (currentForkId !== latch.prevForkId) {
       forkLatches.delete(sessionId);
       return;
     }

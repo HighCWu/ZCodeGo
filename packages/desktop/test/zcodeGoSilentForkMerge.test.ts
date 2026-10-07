@@ -6,11 +6,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { forkCompactSessionDirect } from "../src/main/zcodeGoDirectFork.js";
 import {
+  resetZcodeGoSilentForkEntryState,
   runZcodeGoSilentForkMergePass,
-  stopZcodeGoSilentForkMergeWorkerForTest,
   syncZcodeGoSilentForkEntry,
 } from "../src/main/zcodeGoSilentForkMerge.js";
 import {
+  deleteZcodeGoSilentForkSession,
+  runZcodeGoSilentForkFinalMerge,
+  stopZcodeGoSilentForkMergeWorkerForTest,
+} from "../src/main/zcodeGoSilentForkLifecycle.js";
+import {
+  getZcodeGoSessionRedirect,
   resetZcodeGoSessionRedirectCacheForTest,
   setZcodeGoSessionRedirect,
 } from "../../services/src/zcode-agent/zcodeGoSessionRedirect.js";
@@ -256,6 +262,156 @@ test("迟到注入 + 增量归并 + 回流去重 + rewind 兜底 全链", () => 
       .prepare("select 1 from message where session_id = ? and id = ?")
       .get("sess_merge_S", "msg_zgk_mb_msg_live_user");
     assert.ok(kept, "rewind 删除前的行在 S 档案保留");
+
+    db.close();
+  } finally {
+    delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
+    resetZcodeGoSessionRedirectCacheForTest();
+    stopZcodeGoSilentForkMergeWorkerForTest();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("轮换链：伪帧防伪（旧边界拒绝）→ 新边界放行 → 终末归并 → 删旧 fork → 崩溃恢复清悬空表项", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zg-sf-rotate-"));
+  process.env.ZCODE_GO_STATE_DIR_OVERRIDE = dir;
+  resetZcodeGoSessionRedirectCacheForTest();
+  stopZcodeGoSilentForkMergeWorkerForTest();
+  try {
+    const dbPath = createTestDb(dir);
+    const db = new DatabaseSync(dbPath);
+    db.prepare("insert into session (id, directory, time_created, time_updated) values (?, ?, ?, ?)").run(
+      "sess_rot_S",
+      "/tmp/ws2",
+      1000,
+      1000,
+    );
+
+    // S：种子 + compaction 边界
+    const messages: SeedMessage[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `msg_r_seed_${i}`,
+      timeCreated: 2000 + i * 10,
+      parts: [{ id: `part_r_seed_${i}` }],
+    }));
+    messages[2].parts = [
+      { id: "part_r_seed_2" },
+      {
+        id: "part_r_boundary_2",
+        data: JSON.stringify({
+          type: "compaction",
+          compactBoundary: { preservedSegment: { headMessageId: "msg_r_seed_1", tailMessageId: "msg_r_seed_1" } },
+        }),
+      },
+    ];
+    for (const message of messages) seedMessage(db, "sess_rot_S", message);
+    renumber(db, "sess_rot_S");
+
+    // 第一次 fork（首 fork 不校验边界新鲜度）
+    const fork1 = forkCompactSessionDirect({
+      parentSessionId: "sess_rot_S",
+      silent: true,
+      sessionDbPath: dbPath,
+      log: () => {},
+    });
+    assert.ok(fork1.ok, `首 fork 成功：${fork1.error ?? ""}`);
+    const F1 = fork1.childSessionId!;
+    const entryCreatedAt = Date.now();
+    setZcodeGoSessionRedirect("sess_rot_S", {
+      forkSessionId: F1,
+      createdAt: entryCreatedAt,
+      createdBy: "auto-compaction",
+      parentMaxMessageRowid: fork1.parentMaxMessageRowid,
+      childMaxMessageRowid: fork1.childMaxMessageRowid,
+    });
+
+    // 伪帧轮换：S' 无新边界 → requireBoundaryNewerThanMs 拒绝（防整库全拷空转）
+    const spurious = forkCompactSessionDirect({
+      parentSessionId: F1,
+      silent: true,
+      sessionDbPath: dbPath,
+      requireBoundaryNewerThanMs: entryCreatedAt,
+      log: () => {},
+    });
+    assert.ok(!spurious.ok && spurious.error === "no fresh compaction boundary", "伪帧轮换被拦截");
+
+    // S' 里积累活行 + 新 compaction 边界（time_created 晚于 entryCreatedAt）
+    const liveTime = entryCreatedAt + 5_000;
+    seedMessage(db, F1, {
+      id: "msg_r_live",
+      timeCreated: liveTime,
+      parts: [{ id: "part_r_live_1" }],
+    });
+    db.prepare(
+      "insert into message (id, session_id, time_created, time_updated, data, sequence) values (?,?,?,?,'{}',?)",
+    ).run("msg_r_newboundary", F1, liveTime + 10, liveTime + 10, 2);
+    db.prepare(
+      "insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?,?)",
+    ).run(
+      "part_r_newboundary",
+      F1,
+      "msg_r_newboundary",
+      liveTime + 10,
+      liveTime + 10,
+      JSON.stringify({ type: "compaction", compactBoundary: { preservedSegment: {} } }),
+      1,
+    );
+    renumber(db, F1);
+
+    // 真轮换：新边界晚于表项建立 → 放行
+    const fork2 = forkCompactSessionDirect({
+      parentSessionId: F1,
+      silent: true,
+      sessionDbPath: dbPath,
+      requireBoundaryNewerThanMs: entryCreatedAt,
+      log: () => {},
+    });
+    assert.ok(fork2.ok, `轮换 fork 成功：${fork2.error ?? ""}`);
+    const F2 = fork2.childSessionId!;
+
+    // 终末归并旧 F1 增量 → 轮换表项 → 删旧 F1
+    runZcodeGoSilentForkFinalMerge({
+      originalSessionId: "sess_rot_S",
+      entry: {
+        forkSessionId: F1,
+        createdAt: entryCreatedAt,
+        createdBy: "auto-compaction",
+        parentMaxMessageRowid: fork1.parentMaxMessageRowid,
+        childMaxMessageRowid: fork1.childMaxMessageRowid,
+      },
+      sessionDbPath: dbPath,
+      log: () => {},
+    });
+    setZcodeGoSessionRedirect("sess_rot_S", {
+      forkSessionId: F2,
+      createdAt: Date.now(),
+      createdBy: "auto-compaction",
+      parentMaxMessageRowid: fork2.parentMaxMessageRowid,
+      childMaxMessageRowid: fork2.childMaxMessageRowid,
+    });
+    resetZcodeGoSilentForkEntryState("sess_rot_S");
+    const deleted = deleteZcodeGoSilentForkSession({ forkSessionId: F1, sessionDbPath: dbPath, log: () => {} });
+    assert.ok(deleted, "旧 fork 删除成功");
+    const f1Rows = (
+      db.prepare("select count(*) c from message where session_id = ?").get(F1) as { c: number }
+    ).c;
+    assert.equal(f1Rows, 0, "旧 fork 消息行已清");
+    const mergedLive = db
+      .prepare("select 1 from message where session_id = ? and id = ?")
+      .get("sess_rot_S", "msg_zgk_mb_msg_r_live");
+    assert.ok(mergedLive, "旧 fork 活行在删除前已终末归并回 S");
+
+    // 崩溃恢复：表项指向不存在的 fork → 归并 pass 清除表项回退直连
+    db.prepare("delete from part where session_id = ?").run(F2);
+    db.prepare("delete from message where session_id = ?").run(F2);
+    db.prepare("delete from session_entry where session_id = ?").run(F2);
+    db.prepare("delete from session where id = ?").run(F2);
+    const pass = runZcodeGoSilentForkMergePass({ sessionDbPath: dbPath, log: () => {} });
+    assert.equal(pass.entries, 1, "悬空表项被扫描");
+    assert.equal(
+      getZcodeGoSessionRedirect("sess_rot_S"),
+      null,
+      "悬空表项已清除（回退直连原会话）",
+    );
 
     db.close();
   } finally {

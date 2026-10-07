@@ -128,6 +128,12 @@ export function forkCompactSessionDirect(input: {
   parentSessionId: string;
   /** 静默 fork：不 upsert 任务索引行（侧栏/搜索不可见，由 redirect map 寻址）。 */
   silent?: boolean;
+  /**
+   * 轮换防伪（batch 4）：要求父会话存在 time_created 晚于该时刻的活跃压缩边界，
+   * 否则返回专用错误 "no fresh compaction boundary"——重放/伪帧触发的空转轮换
+   * （整库全拷）由此在事务前拦下。缺省不校验（首个 fork 的边界本就可能很老）。
+   */
+  requireBoundaryNewerThanMs?: number;
   /** 测试注入的库路径（缺省用真实共享库）。 */
   sessionDbPath?: string;
   tasksIndexDbPath?: string;
@@ -174,15 +180,16 @@ export function forkCompactSessionDirect(input: {
       .all(parentSessionId) as unknown as Array<{ id: string; sequence: number }>;
     const compactionParts = sessionDb
       .prepare(
-        "select m.sequence as seq, p.data as data " +
+        "select m.sequence as seq, p.data as data, p.time_created as boundary_time " +
           "from part p join message m on m.id = p.message_id and m.session_id = p.session_id " +
           "where p.session_id = ? and p.data like '{\"type\":\"compaction\"%' " +
           "order by m.sequence desc",
       )
-      .all(parentSessionId) as unknown as Array<{ seq: number; data: string }>;
+      .all(parentSessionId) as unknown as Array<{ seq: number; data: string; boundary_time: number }>;
     let boundarySeq = -1;
     let preservedHead: string | undefined;
     let preservedTail: string | undefined;
+    let boundaryTime = -1;
     for (const part of compactionParts) {
       let payload: Record<string, unknown>;
       try {
@@ -192,6 +199,7 @@ export function forkCompactSessionDirect(input: {
       }
       if (!isActiveCompactionBoundaryPayload(payload)) continue;
       boundarySeq = part.seq;
+      boundaryTime = part.boundary_time;
       const boundary = payload.compactBoundary as
         | { preservedSegment?: { headMessageId?: string; tailMessageId?: string } }
         | undefined;
@@ -207,6 +215,14 @@ export function forkCompactSessionDirect(input: {
         if (message.id === preservedHead) headSeq = Math.min(headSeq, message.sequence);
         if (message.id === preservedTail) tailSeq = Math.max(tailSeq, message.sequence);
       }
+    }
+    // 轮换防伪：伪帧/重放触发时父会话没有「晚于当前 redirect 建立」的新边界，
+    // 在开事务前拦下（整库全拷的空转轮换毫无意义且撕裂归并水位线）。
+    if (
+      typeof input.requireBoundaryNewerThanMs === "number" &&
+      boundaryTime < input.requireBoundaryNewerThanMs
+    ) {
+      return { ...base, error: "no fresh compaction boundary" };
     }
     const inPreservedSegment =
       headSeq <= tailSeq

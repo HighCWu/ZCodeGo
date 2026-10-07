@@ -1,28 +1,26 @@
 /**
- * zcode-go 静默 fork 第三批：双向归并 worker（main 进程）。
+ * zcode-go 静默 fork 双向归并（batch 3，main 进程核心逻辑；worker/删除见 lifecycle）。
  *
- * redirect 建立后，原会话 S 冻结为完整档案（所有发送经 map 寻址到隐形子会话 S'，
- * 模型与 UI 全程在 S' 上工作）。本 worker 周期性做两个方向的补齐：
- *
- * 1. 迟到注入（S 观察者）：fork 快照（parentMaxMessageRowid）之后落进 S 的行
- *    ——quiescence 门控收不掉的后台写入（bg bash 输出等）——按原样 id 注入 S'
- *    尾部。原样 id 使注入行随后被方向 2 归并回 S 时天然幂等跳过（同 id 已在 S）。
- *    S 已冻结无删除，rowid 单调，水位线安全；注入按 part 粒度补齐（消息先到、
- *    part 持续追加的后台流不丢尾）。
- * 2. 增量归并（S' → S）：fork 复制前缀之后的 S' 新行整消息复制回 S（id 原样 +
- *    sequence 续排），S 持续保有完整历史；下次轮换（batch 4）删除旧 fork 无损。
- *    前缀排除不用 rowid 水位线——S' 是活会话，用户 rewind 删行后 rowid 会回退
- *    复用；改用结构判据：fork 复制行 id 一律带 msg_zgk_ 前缀（zcodeGoDirectFork
- *    生成），活行天然没有。活行筛 id 不在 S（幂等，崩溃重跑安全）。
- *
- * 常态 pass 只扫内存 rowid 提示之后的新行（近零成本）；每 N 次 pass 做一次全量
- * 兜底扫描，捕获 rewind 造成的 rowid 回退行。
+ * redirect 建立后原会话 S 冻结为档案（发送全部寻址到隐形子会话 S'）：
+ * 1. 迟到注入（S→S'）：快照水位线（parentMaxMessageRowid，S 冻结故 rowid 单调）
+ *    之后的行 = quiescence 收不住的后台写入，确定性派生 id（msg_zgk_inj_<原id>）
+ *    注入——message.id 是全局主键，原样 id 会与源行冲突；派生 id 兼得幂等与
+ *    前缀排除回流。part 粒度补齐（消息先到、part 持续追加的后台流不丢尾）。
+ * 2. 增量归并（S'→S）：活行（无 msg_zgk_ 前缀——S' 会 rewind，rowid 水位线不
+ *    安全，结构判据替代）整消息复制回 S，派生 id msg_zgk_mb_<原id>，sequence
+ *    续排；S 持续保有完整历史，轮换删旧 fork（batch 4）无损。
+ * 两个方向都按 msg_zgk_ 前缀排除对方产物——否则归并行落 S 后被误判迟到再注入，
+ * 形成内容复制循环（单测捕获的真实缺陷）。幂等：全部 INSERT OR IGNORE，
+ * 崩溃重跑安全，无需持久化进度。
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ZcodeGoSessionRedirectEntry } from "@zcode/services/node";
-import { listZcodeGoSessionRedirects } from "@zcode/services/node";
+import {
+  clearZcodeGoSessionRedirect,
+  listZcodeGoSessionRedirects,
+} from "@zcode/services/node";
 
 type SqliteDb = {
   prepare: (sql: string) => {
@@ -50,6 +48,14 @@ function loadSqlite(): {
 
 const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
 
+/** 打开会话库（lifecycle/测试共用）。缺省真实库；返回 null = 库不存在。 */
+export function openZcodeGoSilentForkSessionDb(sessionDbPath?: string): SqliteDb | null {
+  const resolved = sessionDbPath ?? SESSION_DB;
+  if (!existsSync(resolved)) return null;
+  const sqlite = loadSqlite();
+  return new sqlite.DatabaseSync(resolved, { timeout: 10_000 });
+}
+
 export interface ZcodeGoSilentForkMergePassResult {
   entries: number;
   injectedMessages: number;
@@ -72,6 +78,68 @@ interface PartRow {
   time_created: number;
   time_updated: number;
   sequence: number | null;
+}
+
+/** 两个方向共用的复制语句集（message/part 幂等插入 + 源 part 读取）。 */
+function prepareCopyStatements(sessionDb: SqliteDb) {
+  return {
+    insertMessage: sessionDb.prepare(
+      "insert or ignore into message (id, session_id, time_created, time_updated, data, sequence) " +
+        "values (?, ?, ?, ?, ?, ?)",
+    ),
+    insertPart: sessionDb.prepare(
+      "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
+        "values (?, ?, ?, ?, ?, ?, ?)",
+    ),
+    selectParts: sessionDb.prepare(
+      "select id, message_id, data, time_created, time_updated, sequence from part " +
+        "where session_id = ? and message_id = ? order by sequence, rowid",
+    ),
+  };
+}
+
+/** 单事务包裹：失败回滚、记日志并返回 null（调用方回落空结果，下轮幂等重试）。 */
+function withForkTransaction<T>(
+  sessionDb: SqliteDb,
+  log: (message: string, meta?: unknown) => void,
+  failLabel: string,
+  context: Record<string, unknown>,
+  fn: () => T,
+): T | null {
+  sessionDb.exec("begin immediate");
+  try {
+    const result = fn();
+    sessionDb.exec("commit");
+    return result;
+  } catch (error) {
+    try {
+      sessionDb.exec("rollback");
+    } catch {
+      /* 尽力而为 */
+    }
+    log(`${failLabel}失败（下轮重试）`, {
+      ...context,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/** 会话的 message id 集合（parentID 改写的存在性判定）。 */
+function loadSessionMessageIds(sessionDb: SqliteDb, sessionId: string): Set<string> {
+  const ids = sessionDb.prepare("select id from message where session_id = ?").all(sessionId) as unknown as Array<{
+    id: unknown;
+  }>;
+  return new Set(ids.map((row) => String(row.id)));
+}
+
+/** 会话的 message sequence 最大值（追加续排起点）。 */
+function maxMessageSequence(sessionDb: SqliteDb, sessionId: string): number {
+  return (
+    ((sessionDb
+      .prepare("select max(sequence) as m from message where session_id = ?")
+      .get(sessionId) as { m: number | null } | undefined)?.m ?? 0) || 0
+  );
 }
 
 function insertChanges(result: unknown): number {
@@ -117,30 +185,10 @@ function injectLateWrites(
   const idMap = new Map<string, string>();
   for (const row of lateRows) idMap.set(row.id, `msg_zgk_inj_${row.id}`);
 
-  const forkIds = new Set(
-    (
-      sessionDb.prepare("select id from message where session_id = ?").all(F) as unknown as Array<{
-        id: unknown;
-      }>
-    ).map((row) => String(row.id)),
-  );
+  const forkIds = loadSessionMessageIds(sessionDb, F);
   for (const mapped of idMap.values()) forkIds.add(mapped);
-  const maxSeq =
-    ((sessionDb
-      .prepare("select max(sequence) as m from message where session_id = ?")
-      .get(F) as { m: number | null } | undefined)?.m ?? 0) || 0;
-  const insertMessage = sessionDb.prepare(
-    "insert or ignore into message (id, session_id, time_created, time_updated, data, sequence) " +
-      "values (?, ?, ?, ?, ?, ?)",
-  );
-  const insertPart = sessionDb.prepare(
-    "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
-      "values (?, ?, ?, ?, ?, ?, ?)",
-  );
-  const selectParts = sessionDb.prepare(
-    "select id, message_id, data, time_created, time_updated, sequence from part " +
-      "where session_id = ? and message_id = ? order by sequence, rowid",
-  );
+  const maxSeq = maxMessageSequence(sessionDb, F);
+  const { insertMessage, insertPart, selectParts } = prepareCopyStatements(sessionDb);
   /** 迟到行的 data：parentID 批内改写 / 存在保留 / 悬空置空。 */
   const remapLateData = (data: string): string => {
     try {
@@ -157,11 +205,11 @@ function injectLateWrites(
     }
   };
 
-  let injectedMessages = 0;
-  let injectedParts = 0;
-  let seq = maxSeq;
-  sessionDb.exec("begin immediate");
-  try {
+  const seqStart = maxSeq;
+  const outcome = withForkTransaction(sessionDb, log, "迟到注入", { original: S }, () => {
+    let injectedMessages = 0;
+    let injectedParts = 0;
+    let seq = seqStart;
     for (const row of lateRows) {
       const targetId = idMap.get(row.id)!;
       seq += 1;
@@ -175,23 +223,13 @@ function injectLateWrites(
         }
       }
     }
-    sessionDb.exec("commit");
-  } catch (error) {
-    try {
-      sessionDb.exec("rollback");
-    } catch {
-      /* 尽力而为 */
-    }
-    log("迟到注入失败（下轮重试）", {
-      original: S,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return { injectedMessages: 0, injectedParts: 0 };
+    return { injectedMessages, injectedParts };
+  });
+  if (!outcome) return { injectedMessages: 0, injectedParts: 0 };
+  if (outcome.injectedMessages > 0 || outcome.injectedParts > 0) {
+    log("迟到写入已注入隐形子会话", { original: S, fork: F, ...outcome });
   }
-  if (injectedMessages > 0 || injectedParts > 0) {
-    log("迟到写入已注入隐形子会话", { original: S, fork: F, injectedMessages, injectedParts });
-  }
-  return { injectedMessages, injectedParts };
+  return outcome;
 }
 
 /**
@@ -233,30 +271,10 @@ function mergeBackNewWrites(
   // 批次 id 映射（parentID 链改写）+ S 既有 id 集（跨批引用存在则保留）
   const idMap = new Map<string, string>();
   for (const row of rows) idMap.set(row.id, `msg_zgk_mb_${row.id}`);
-  const originalIds = new Set(
-    (
-      sessionDb.prepare("select id from message where session_id = ?").all(S) as unknown as Array<{
-        id: unknown;
-      }>
-    ).map((row) => String(row.id)),
-  );
+  const originalIds = loadSessionMessageIds(sessionDb, S);
   for (const mapped of idMap.values()) originalIds.add(mapped);
-  const maxSeq =
-    ((sessionDb
-      .prepare("select max(sequence) as m from message where session_id = ?")
-      .get(S) as { m: number | null } | undefined)?.m ?? 0) || 0;
-  const insertMessage = sessionDb.prepare(
-    "insert or ignore into message (id, session_id, time_created, time_updated, data, sequence) " +
-      "values (?, ?, ?, ?, ?, ?)",
-  );
-  const insertPart = sessionDb.prepare(
-    "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
-      "values (?, ?, ?, ?, ?, ?, ?)",
-  );
-  const selectParts = sessionDb.prepare(
-    "select id, message_id, data, time_created, time_updated, sequence from part " +
-      "where session_id = ? and message_id = ? order by sequence, rowid",
-  );
+  const maxSeq = maxMessageSequence(sessionDb, S);
+  const { insertMessage, insertPart, selectParts } = prepareCopyStatements(sessionDb);
   /** 归并行 data：parentID 批内改写 / S 存在保留 / 悬空置空（档案局部一致）。 */
   const remapMergedData = (data: string): string => {
     try {
@@ -377,6 +395,16 @@ export function syncZcodeGoSilentForkEntry(input: {
 const entryState = new Map<string, { mergeRowid: number; passCount: number }>();
 const FULL_SCAN_EVERY_N_PASSES = 10;
 
+/** 轮换后重置条目的内存扫描提示（水位线换到新 fork 的 rowid 空间）。 */
+export function resetZcodeGoSilentForkEntryState(originalSessionId: string): void {
+  entryState.delete(originalSessionId);
+}
+
+/** 测试专用：清空全部条目扫描提示。 */
+export function clearZcodeGoSilentForkEntryStateForTest(): void {
+  entryState.clear();
+}
+
 /** 全表 pass：遍历 redirect map 的每个条目做双向补齐。 */
 export function runZcodeGoSilentForkMergePass(input?: {
   sessionDbPath?: string;
@@ -385,19 +413,24 @@ export function runZcodeGoSilentForkMergePass(input?: {
   const log = input?.log ?? (() => {});
   const entries = listZcodeGoSessionRedirects();
   if (entries.length === 0) return { entries: 0, injectedMessages: 0, mergedMessages: 0 };
-  const sessionDbPath = input?.sessionDbPath ?? SESSION_DB;
-  if (!existsSync(sessionDbPath)) {
+  const sessionDb = openZcodeGoSilentForkSessionDb(input?.sessionDbPath);
+  if (!sessionDb) {
     return { entries: entries.length, injectedMessages: 0, mergedMessages: 0 };
   }
-  const sqlite = loadSqlite();
-  const sessionDb = new sqlite.DatabaseSync(sessionDbPath, { timeout: 10_000 });
   try {
     let injectedMessages = 0;
     let mergedMessages = 0;
     for (const { originalSessionId, entry } of entries) {
-      // 条目指向的 fork 会话不存在（被外部清理）→ 跳过（轮换/崩溃恢复另行处理）
+      // 崩溃恢复（batch 4）：条目指向的 fork 会话行缺失 = fork 被外部清理或库
+      // 回滚——redirect 悬空会让所有寻址 404。清除条目回退直连原会话（归并行
+      // 已让原会话保有完整档案，直连是安全降级）。
       const forkExists = sessionDb.prepare("select 1 from session where id = ?").get(entry.forkSessionId);
-      if (!forkExists) continue;
+      if (!forkExists) {
+        clearZcodeGoSessionRedirect(originalSessionId);
+        entryState.delete(originalSessionId);
+        log("redirect 条目悬空（fork 会话缺失），已清除回退直连原会话", { originalSessionId });
+        continue;
+      }
       const state = entryState.get(originalSessionId) ?? { mergeRowid: 0, passCount: 0 };
       const result = syncZcodeGoSilentForkEntry({
         sessionDb,
@@ -422,33 +455,4 @@ export function runZcodeGoSilentForkMergePass(input?: {
       /* 尽力而为 */
     }
   }
-}
-
-let workerTimer: ReturnType<typeof setInterval> | null = null;
-const WORKER_INTERVAL_MS = 60_000;
-
-/** 启动周期归并（60s；unref 不拖住进程退出）。幂等。 */
-export function startZcodeGoSilentForkMergeWorker(
-  log: (message: string, meta?: unknown) => void,
-): void {
-  if (workerTimer) return;
-  const tick = (): void => {
-    try {
-      runZcodeGoSilentForkMergePass({ log });
-    } catch (error) {
-      log("静默 fork 归并 pass 异常", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
-  workerTimer = setInterval(tick, WORKER_INTERVAL_MS);
-  workerTimer.unref?.();
-}
-
-export function stopZcodeGoSilentForkMergeWorkerForTest(): void {
-  if (workerTimer) {
-    clearInterval(workerTimer);
-    workerTimer = null;
-  }
-  entryState.clear();
 }

@@ -18,7 +18,9 @@ import {
 
 export {
   clearZcodeGoSessionRedirect,
+  getZcodeGoSessionRedirect,
   listZcodeGoSessionRedirects,
+  resolveZcodeGoSessionId,
   setZcodeGoSessionRedirect,
   type ZcodeGoSessionRedirectEntry,
 } from "./zcode-agent/zcodeGoSessionRedirect.js";
