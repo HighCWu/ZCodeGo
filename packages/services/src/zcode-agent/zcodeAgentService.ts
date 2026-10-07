@@ -5747,31 +5747,35 @@ export function createZCodeAgentService(
 
   // zcode-go 静默 fork 第二批：注入 quiescence 检查 + host→main 信号通道。
   // 在 service 对象构造完成后设置（方法内部引用自身需要闭包捕获）。
-  const service = result;
-  setZcodeGoSilentForkDelegate({
-    checkQuiescence: async (params) => {
-      try {
-        const snapshot = await service.readSession({
-          ...params,
-          runtimePolicy: "existing-only",
-        });
-        const runtime = snapshot?.runtime;
-        if (!runtime) return false;
-        return (
-          (runtime.activeTurnId ?? null) === null &&
-          (Array.isArray(runtime.pendingRequestIds) ? runtime.pendingRequestIds.length : 0) === 0
-        );
-      } catch {
-        return false;
-      }
-    },
-    notifyArm: (params) => {
-      try {
-        options?.silentForkArmSignal?.(params);
-      } catch { /* main 侧处理 */ }
-    },
-  });
-  startZcodeGoSilentForkPeriodicCheck();
+  // 仅 desktop host 装配（有 silentForkArmSignal）接线：CLI/server 等无主进程
+  // 信号通道的上下文里，观测/巡检/fork 全链不工作，空转也一并省掉。
+  if (options?.silentForkArmSignal) {
+    const service = result;
+    setZcodeGoSilentForkDelegate({
+      checkQuiescence: async (params) => {
+        try {
+          const snapshot = await service.readSession({
+            ...params,
+            runtimePolicy: "existing-only",
+          });
+          const runtime = snapshot?.runtime;
+          if (!runtime) return false;
+          return (
+            (runtime.activeTurnId ?? null) === null &&
+            (Array.isArray(runtime.pendingRequestIds) ? runtime.pendingRequestIds.length : 0) === 0
+          );
+        } catch {
+          return false;
+        }
+      },
+      notifyArm: (params) => {
+        try {
+          options.silentForkArmSignal?.(params);
+        } catch { /* main 侧处理 */ }
+      },
+    });
+    startZcodeGoSilentForkPeriodicCheck();
+  }
 
   return result;
 }

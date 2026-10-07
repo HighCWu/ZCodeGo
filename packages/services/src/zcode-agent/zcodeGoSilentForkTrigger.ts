@@ -2,16 +2,19 @@
  * zcode-go 静默 fork 第二批：compaction 观测 armed + 静默点门控 + 自动触发。
  *
  * 设计（与用户共同推导定稿）：
- * - compaction part 在帧中继处观测到 → armed[S]（幂等，持续有效）；
+ * - compaction 在帧流中以 timelineMarker 行投影（marker.type="compact"，
+ *   status="success"）；观察者在帧中继处检测 online 增量 → armed[S]；
  * - 静默点 = 复合判定（无活跃 turn ∧ 无未决后台），事件驱动 + 周期巡检；
  * - 满足即发 host → main ZcodeGoSilentForkArm，main 执行 direct fork + redirect；
  * - 派发门闩（fork 事务期间短暂 hold 新派发）在 main 侧实现（第三批）。
  *
  * 本模块在 host（utility process）运行，通过 observeZcodeGoSilentForkFrame
  * 挂入帧中继；quiescence 用 readSession existing-only（不拉起新 runtime）。
+ * delegate 未接线（CLI/server 无 silentForkArmSignal）时整个模块空转跳过。
  */
 import type { ConversationTopicWireCandidate } from "@zcode/shared/zcode-protocol-v4";
 import { getZcodeGoSessionRedirect } from "./zcodeGoSessionRedirect.js";
+import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
 
 /** armed 会话表：sessionId → { workspacePath, armedAt } */
 const armedSessions = new Map<
@@ -40,14 +43,22 @@ export interface ZcodeGoSilentForkArmDelegate {
 let delegate: ZcodeGoSilentForkArmDelegate | null = null;
 let periodicTimer: ReturnType<typeof setInterval> | null = null;
 
-export function setZcodeGoSilentForkDelegate(d: ZcodeGoSilentForkArmDelegate): void {
+export function setZcodeGoSilentForkDelegate(d: ZcodeGoSilentForkArmDelegate | null): void {
   delegate = d;
 }
 
 /**
- * 帧中继观察者：检测 compaction part → armed。
- * 判据与 zcodeGoDirectFork / CLI isActiveCompactionBoundaryPart 同源：
- * type=compaction 且带 compactBoundary（或无 timelineStatus）。
+ * 帧中继观察者：检测 compaction 成功标记 → armed。
+ *
+ * 帧结构：分发点传入的是 wire 层候选（complete 帧逻辑载荷在 frame 键内、大帧
+ * 为 fragment 分片）——必须经 extractLogicalFramePayload 提取，直接读 wire
+ * 顶层 payload 键恒为 undefined（历史教训见 zcodeGoSubagentRecovery 头注）。
+ * 逻辑载荷是 UI 行投影而非原始 part：compaction 以 timelineMarker 行出现。
+ *
+ * 只认 online 增量：initial/recovery 投递会重放历史 compact 标记（快照窗口、
+ * 断线恢复），按标记无条件 arm 会在每次订阅建立时触发 fork 风暴；缺省按
+ * online 处理（与 zcodeTaskIndexSyncer.deliveryKindOf 同惯例）。
+ * running/failed/cancelled/noop 的 compact 不 arm。
  *
  * redirect 已存在时同样 arm（batch 4 轮换）：帧中继把 fork 的下行 topic 回写为
  * 原会话，活跃 fork 自身发生 compaction 也以原会话身份到达这里——静默点后由
@@ -56,20 +67,36 @@ export function setZcodeGoSilentForkDelegate(d: ZcodeGoSilentForkArmDelegate): v
  */
 export function observeZcodeGoSilentForkFrame(
   workspace: { workspacePath: string; workspaceIdentity?: string },
-  frame: ConversationTopicWireCandidate,
+  wire: ConversationTopicWireCandidate,
 ): void {
-  if (typeof frame.topic !== "string" || !frame.topic.startsWith("conversation/")) return;
-  const sessionId = frame.topic.slice("conversation/".length);
+  // CLI/server 未接线（无 host→main 信号通道）时整个触发链不工作，观测也跳过
+  if (!delegate) return;
+  const topic = wireFrameTopic(wire);
+  if (!topic || !topic.startsWith("conversation/")) return;
+  const sessionId = topic.slice("conversation/".length);
   if (!sessionId.startsWith("sess_")) return;
+  // 只认 online 增量：initial/recovery 投递会重放历史 compact 标记（快照窗口、
+  // 断线恢复），按标记无条件 arm 会在每次订阅建立时触发 fork 风暴。缺省值按
+  // online 处理（与 zcodeTaskIndexSyncer.deliveryKindOf 同惯例）。
+  const deliveryKind = (wire as { deliveryKind?: unknown }).deliveryKind;
+  if (deliveryKind === "initial" || deliveryKind === "recovery") return;
 
-  // 帧的 payload 里是否有 compaction part？
-  // wire candidate 的 payload 可能是 JSON 字符串或已解析对象
-  const raw = typeof frame.payload === "string" ? frame.payload : JSON.stringify(frame.payload ?? "");
-  if (!raw.includes('"type":"compaction"')) return;
-  if (!raw.includes("compactBoundary") && raw.includes('"timelineStatus"')) return;
-
-  // 确认是活跃压缩边界（不是 timeline 展示用的 compaction）
-  if (raw.includes('"timelineStatus"') && !raw.includes("compactBoundary")) return;
+  const logical = extractLogicalFramePayload(wire);
+  if (!logical || logical.kind !== "deltas") return;
+  let compactSucceeded = false;
+  for (const delta of logical.deltas ?? []) {
+    const d = delta as {
+      op?: unknown;
+      row?: { kind?: unknown; marker?: { type?: unknown; status?: unknown } };
+    };
+    if (d.op !== "row.appended" && d.op !== "row.upserted") continue;
+    if (d.row?.kind !== "timelineMarker") continue;
+    if (d.row.marker?.type !== "compact") continue;
+    if (d.row.marker?.status !== "success") continue;
+    compactSucceeded = true;
+    break;
+  }
+  if (!compactSucceeded) return;
 
   if (!armedSessions.has(sessionId)) {
     armedSessions.set(sessionId, {

@@ -11,7 +11,7 @@
  * - 状态文件 ~/.zcode-go/session-redirect.json；mtime 缓存（热路径毫秒级）。
  * - 仅在 host/主进程使用（node:fs）——renderer 不得直接 import。
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -69,10 +69,16 @@ function readRedirectFile(): RedirectFile {
 
 function writeRedirectFile(file: RedirectFile): void {
   mkdirSync(stateDir(), { recursive: true });
-  writeFileSync(redirectFile(), JSON.stringify(file, null, 2), "utf8");
+  // 原子写（temp + rename）：门闩/咽喉点在 fork 事务期间以 25ms 轮询读本文件，
+  // 直接 writeFileSync 的半写窗口会被并发读者看成损坏 JSON → 空表 → 门闩误
+  // 提前放行（发送漏进已冻结的原会话）。rename 在 POSIX 上原子替换。
+  const target = redirectFile();
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(temp, JSON.stringify(file, null, 2), "utf8");
+  renameSync(temp, target);
   cachedFile = file;
   try {
-    cachedMtimeMs = statSync(redirectFile()).mtimeMs;
+    cachedMtimeMs = statSync(target).mtimeMs;
   } catch {
     cachedMtimeMs = -1;
   }

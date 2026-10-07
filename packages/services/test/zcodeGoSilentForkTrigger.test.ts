@@ -18,22 +18,95 @@ import {
 } from "../src/zcode-agent/zcodeGoSessionRedirect.js";
 
 /**
- * zcode-go 静默 fork 第二批：触发器契约。
+ * zcode-go 静默 fork 触发器契约（帧形状对齐 wire 层真实结构）。
+ * - 观测：online 增量的 timelineMarker(compact, success) → armed（complete 与
+ *   fragment 分片两形态）；initial/recovery 重放与非 success 终态不 arm；
+ *   delegate 未接线（CLI/server）不观测；
  * - 静默点：quiescence false 不 notify；true 才 notify（workspace 一并透传）；
- * - 已有 redirect 的 armed 会话被清出且不 notify（上次 fork 仍在役）；
- * - 门闩：无 latch 立即过；redirect 表项出现提前放行；超时兜底放行。
+ * - 轮换时效：老表项 + 新 arm → notify；arm 早于表项建立（重放）→ 丢弃；
+ * - 门闩：无 latch 立即过；fork 身份变化提前放行；超时兜底放行。
  */
 
 const WORKSPACE = { workspacePath: "/tmp/ws" };
 
-function compactionFrame(sessionId: string) {
+type Wire = Parameters<typeof observeZcodeGoSilentForkFrame>[1];
+
+/** 真实形状：complete 帧，逻辑载荷在 frame 键内（UI 行投影）。 */
+function completeFrame(
+  sessionId: string,
+  payload: unknown,
+  deliveryKind: "initial" | "online" | "recovery" = "online",
+): Wire {
   return {
+    wireVersion: 3,
+    kind: "complete",
+    deliveryKind,
+    logicalFrameId: `lf_${Math.random().toString(36).slice(2)}`,
+    logicalFrameOrdinal: 1,
     topic: `conversation/${sessionId}`,
-    payload: JSON.stringify({
-      type: "conversation.appendPartsV4",
-      parts: [{ type: "compaction", compactBoundary: true }],
-    }),
-  } as Parameters<typeof observeZcodeGoSilentForkFrame>[1];
+    subscriptionId: "sub_test",
+    frame: {
+      topic: `conversation/${sessionId}`,
+      subscriptionId: "sub_test",
+      fromSeq: 0,
+      toSeq: 1,
+      sentAt: Date.now(),
+      payload,
+    },
+  } as Wire;
+}
+
+/** 真实形状：fragment 分片帧（frame 的 JSON 字节切片、各片独立 base64）。 */
+function fragmentFrames(sessionId: string, payload: unknown, chunks = 3): Wire[] {
+  const frame = {
+    topic: `conversation/${sessionId}`,
+    subscriptionId: "sub_test",
+    fromSeq: 0,
+    toSeq: 1,
+    sentAt: Date.now(),
+    payload,
+  };
+  const bytes = Buffer.from(JSON.stringify(frame), "utf8");
+  const logicalFrameId = `lf_${Math.random().toString(36).slice(2)}`;
+  const size = Math.ceil(bytes.length / chunks);
+  return Array.from({ length: chunks }, (_, i) => {
+    const slice = bytes.subarray(i * size, Math.min((i + 1) * size, bytes.length));
+    return {
+      wireVersion: 3,
+      kind: "fragment",
+      deliveryKind: "online",
+      logicalFrameId,
+      logicalFrameOrdinal: 2,
+      topic: `conversation/${sessionId}`,
+      subscriptionId: "sub_test",
+      fragmentIndex: i,
+      fragmentCount: chunks,
+      logicalBytes: bytes.length,
+      checksum: "abcd1234",
+      dataBase64: slice.toString("base64"),
+    } as Wire;
+  });
+}
+
+const compactDelta = (status: string) => ({
+  kind: "deltas" as const,
+  deltas: [
+    {
+      op: "row.appended",
+      row: {
+        rowId: 1,
+        turnId: "t1",
+        kind: "timelineMarker",
+        marker: { type: "compact", origin: "auto", status },
+      },
+    },
+  ],
+});
+
+const compactSuccessDelta = compactDelta("success");
+
+function compactionFrame(sessionId: string): Wire {
+  return completeFrame(sessionId, compactSuccessDelta);
 }
 
 async function withTempStateDir<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -157,5 +230,93 @@ test("门闩：无 latch 立即过；超时兜底放行；fork 身份变化提�
     const t3 = Date.now();
     await waitForZcodeGoSilentForkGate(S);
     assert.ok(Date.now() - t3 < 5_000, "轮换表项身份变化提前放行");
+  });
+});
+
+test("观测判据：complete/fragment 均命中；重放/非 success/未接线 不 arm", async () => {
+  await withTempStateDir(async () => {
+    const notified: Array<{ sessionId: string }> = [];
+    setZcodeGoSilentForkDelegate({
+      notifyArm: (params) => notified.push(params),
+      checkQuiescence: async () => true,
+    });
+
+    // fragment 分片（乱序送达）：完整重组后命中
+    const SF = "sess_frag_111111111";
+    const frags = fragmentFrames(SF, compactSuccessDelta);
+    observeZcodeGoSilentForkFrame(WORKSPACE, frags[2]!);
+    observeZcodeGoSilentForkFrame(WORKSPACE, frags[0]!);
+    let notifiedCount = 0;
+    // 仅两片（缺一片）不触发
+    backdateZcodeGoSilentForkArmedAtForTest(SF, 6_000);
+    await checkArmedSessionsAndTrigger();
+    notifiedCount = notified.length;
+    observeZcodeGoSilentForkFrame(WORKSPACE, frags[1]!);
+    backdateZcodeGoSilentForkArmedAtForTest(SF, 6_000);
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified.length, notifiedCount + 1, "分片齐全重组后 arm 并 notify");
+
+    // initial 投递的快照重放（历史 compact 标记）：不 arm
+    const SI = "sess_replay_snap";
+    observeZcodeGoSilentForkFrame(
+      WORKSPACE,
+      completeFrame(
+        SI,
+        {
+          kind: "snapshot",
+          snapshot: {
+            rows: {
+              window: [
+                { rowId: 1, kind: "timelineMarker", marker: { type: "compact", origin: "auto", status: "success" } },
+              ],
+            },
+          },
+        },
+        "initial",
+      ),
+    );
+    backdateZcodeGoSilentForkArmedAtForTest(SI, 6_000);
+    const before = notified.length;
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified.length, before, "initial 快照重放不 arm");
+
+    // recovery 投递的增量重放：不 arm
+    const SR = "sess_replay_recovery";
+    observeZcodeGoSilentForkFrame(
+      WORKSPACE,
+      completeFrame(SR, compactSuccessDelta, "recovery"),
+    );
+    backdateZcodeGoSilentForkArmedAtForTest(SR, 6_000);
+
+    // deliveryKind 缺省：按 online 处理（与 taskIndexSyncer 惯例一致）→ arm
+    const SD = "sess_default_kind_11";
+    const noKind = compactionFrame(SD) as { deliveryKind?: unknown };
+    delete noKind.deliveryKind;
+    observeZcodeGoSilentForkFrame(WORKSPACE, noKind);
+    backdateZcodeGoSilentForkArmedAtForTest(SD, 6_000);
+
+    // online 但 compact 终态非 success（cancelled/running/failed）：不 arm
+    for (const status of ["cancelled", "running", "failed", "noop"]) {
+      const SX = `sess_status_${status}`;
+      observeZcodeGoSilentForkFrame(WORKSPACE, completeFrame(SX, compactDelta(status)));
+      backdateZcodeGoSilentForkArmedAtForTest(SX, 6_000);
+    }
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified.length, before + 1, "缺省 kind 按 online arm；recovery 不 arm；非 success 不 arm");
+
+    // delegate 未接线（CLI/server 上下文）：完全不观测
+    setZcodeGoSilentForkDelegate(null);
+    const SC = "sess_cli_111111111";
+    observeZcodeGoSilentForkFrame(WORKSPACE, compactionFrame(SC));
+    backdateZcodeGoSilentForkArmedAtForTest(SC, 6_000);
+    await checkArmedSessionsAndTrigger();
+    // 恢复接线便于后续断言（通知数不变即未触发）
+    const notified2: unknown[] = [];
+    setZcodeGoSilentForkDelegate({
+      notifyArm: (params) => notified2.push(params),
+      checkQuiescence: async () => true,
+    });
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified2.length, 0, "未接线期间观测被跳过（无遗留 armed）");
   });
 });
