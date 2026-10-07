@@ -754,6 +754,21 @@ if (!skipLaunch) {
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\nE2E 汇总：${results.length - failed.length}/${results.length} 通过`);
+// CI 诊断：结果写 GITHUB_STEP_SUMMARY（公开 run 页面无需登录可见——匿名 API
+// 拿不到 job 日志，失败断言至少能在页面上直接看到）。
+const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+if (summaryFile) {
+  try {
+    const { appendFileSync } = await import("node:fs");
+    const lines = [
+      `## E2E 结果：${results.length - failed.length}/${results.length}`,
+      "",
+      ...results.map((r) => `- ${r.ok ? "✅" : "❌"} ${r.name}${r.ok ? "" : ` — ${r.detail ?? ""}`}`),
+      "",
+    ];
+    appendFileSync(summaryFile, lines.join("\n"), "utf8");
+  } catch { /* 摘要尽力而为 */ }
+}
 if (failed.length > 0) {
   for (const f of failed) console.error(`  失败：${f.name} ${f.detail}`);
   // wails 实践：失败必留根窗口截图（CI artifact 已含 ~/.zcode-go）

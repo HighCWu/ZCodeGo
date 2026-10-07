@@ -1072,6 +1072,8 @@ const SHIM_JS = String.raw`
         bootPortMessage = msg;
         deliverToWindow(deliverBootPort);
       } else if (msg.kind === "port-msg") {
+        window.__zcodeShimDebug.portMsgsIn = (window.__zcodeShimDebug.portMsgsIn || 0) + 1;
+        window.__zcodeShimDebug.portMsgsInAt = Date.now();
         var streamPort = streams.get(msg.streamId);
         if (streamPort) {
           try { streamPort.postMessage(decodePortData(msg.data)); } catch (e3) {}
