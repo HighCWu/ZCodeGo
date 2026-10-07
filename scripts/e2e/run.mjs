@@ -188,9 +188,14 @@ function hookFeed(prompt) {
       try {
         target = (run("readlink", [themeIcon]).stdout ?? "").trim();
       } catch { /* 非链接则 target 留空 */ }
+      // 尺寸集优先是设计意图（任务栏按尺寸拿大徽章构图）：512 链接指向
+      // icons-zcode-go/512.png（与 icon-zcode-go.png 同构图），或品牌门控
+      // 文件本体。两者皆为品牌资产；旧断言只认后者，与小尺寸大徽章重构
+      // （dda8cc8）后的 ensure 行为不符。
+      const flat512 = join(resourcesDir, "icons-zcode-go", "512.png");
       check(
         "icon: hicolor 主题链指向品牌资产",
-        target === brandIcon,
+        target === brandIcon || target === flat512,
         `link=${target || "(无/非链接)"}`,
       );
     }
