@@ -204,6 +204,27 @@ function ensureIcons() {
       assembled = true;
     }
   }
+  // packaged builtin provider 配置：官方安装态自带 resources/config/provider/
+  // zcode-builtin.json，组装 app 缺它时冷启动报「Bundled 与 Active ZCode
+  // Built-in Release 均不可用」且发送全拒（依赖历史 Active 缓存或 CDN 同步
+  // 追平）。从官方包补齐（symlink 同图标策略；mac 实拷）。
+  try {
+    const builtinSrc = join(officialResources, "config", "provider", "zcode-builtin.json");
+    const builtinDst = join(resourcesDir, "config", "provider", "zcode-builtin.json");
+    if (!existsSync(builtinDst) && existsSync(builtinSrc)) {
+      mkdirSync(join(resourcesDir, "config", "provider"), { recursive: true });
+      if (isMacBundle) {
+        copyFileSync(builtinSrc, builtinDst);
+        log("builtin provider 配置复制：zcode-builtin.json");
+      } else {
+        symlinkSync(builtinSrc, builtinDst);
+        log("builtin provider 配置链接：zcode-builtin.json");
+      }
+      assembled = true;
+    }
+  } catch (error) {
+    log(`builtin provider 配置补齐失败（不阻塞）：${error instanceof Error ? error.message : String(error)}`);
+  }
   // zcode-go 品牌图标（B5：官方 logo 圆角方形 + Go 徽章）：独立新文件门控——
   // 运行时检测到 icon-zcode-go.png 即替换窗口/Dock/任务栏图标，删除即回退
   // 官方（ZCODE_GO_OFFICIAL_ICON=1 也可强切回）。仓库资产为准，装一次即可。

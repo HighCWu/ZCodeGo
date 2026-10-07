@@ -251,7 +251,11 @@ async function sendAndCollectVerdict(
     subscriberScope: SUBSCRIBER_SCOPE,
     visibility: "background",
   });
-  const collector = { verifyTag, turnId: null as string | null, text: "", lastAppendAt: Date.now() };
+  // tag 按轮唯一（prompt 携带 `${verifyTag}r1`/`${verifyTag}r2`）：r2 订阅的
+  // 快照窗口会重放 r1 的判定行（含标记），两轮共用 tag 会让 r2 的 collector
+  // 被绑回 r1 的 turn——二次确认回声首判结论（E2E 双 true 场景测不出的暗病）。
+  const roundTag = goalVerifyMarkerTag(text) ?? verifyTag;
+  const collector = { verifyTag: roundTag, turnId: null as string | null, text: "", lastAppendAt: Date.now() };
   replyCollectors.set(sessionId, collector);
   try {
     // 发送失败（传输异常/被拒）重试数次
@@ -327,7 +331,7 @@ async function sendAndCollectVerdict(
 
 function judgmentPrompt(verifyTag: string, objective: string): string {
   return (
-    `${ZCODE_GO_GOAL_VERIFY_MARKER} ${verifyTag} r1\n` +
+    `${ZCODE_GO_GOAL_VERIFY_MARKER} ${verifyTag}\n` +
     `The session goal (GOAL) is:\n${objective}\n\n` +
     "This goal was previously marked as complete, but that verdict may be wrong.\n" +
     "Judge from the conversation context alone whether the goal has actually been completed.\n" +
@@ -340,7 +344,7 @@ function judgmentPrompt(verifyTag: string, objective: string): string {
 
 function doubleCheckPrompt(verifyTag: string, objective: string): string {
   return (
-    `${ZCODE_GO_GOAL_VERIFY_MARKER} ${verifyTag} r2\n` +
+    `${ZCODE_GO_GOAL_VERIFY_MARKER} ${verifyTag}\n` +
     `The session goal (GOAL) is:\n${objective}\n\n` +
     "To avoid misjudgment on complex projects, discard your previous conclusion and re-judge from the " +
     "conversation context alone whether the goal above has truly been completed. Do not call tools or investigate. Reply immediately and briefly.\n" +
@@ -438,7 +442,7 @@ async function handleVerified(
     workspace,
     sessionId,
     verifyTag,
-    judgmentPrompt(verifyTag, objective),
+    judgmentPrompt(`${verifyTag}r1`, objective),
     traceId,
   );
   if (!first) {
@@ -455,7 +459,7 @@ async function handleVerified(
       workspace,
       sessionId,
       verifyTag,
-      doubleCheckPrompt(verifyTag, objective),
+      doubleCheckPrompt(`${verifyTag}r2`, objective),
       traceId,
     );
     if (second) verdict = second;

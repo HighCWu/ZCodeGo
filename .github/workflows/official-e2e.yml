@@ -338,6 +338,27 @@ jobs:
           else
             node scripts/e2e/run.mjs
           fi
+      # ── 5. zcode-go 假 Provider 真链 E2E（goal 复核 + 静默 fork 自动触发）────
+      # HOME 沙箱隔离实例 + 官方运行时 + 脚本化假 Provider，零真人介入闭环：
+      # 复用本 job 的桌面 out/ 与官方 unpacked（ensure 组装 ~/.zcode-go/electron，
+      # 并从官方包补齐 packaged builtin provider 配置）。
+      - name: zcode-go 假 Provider E2E（Linux）
+        if: runner.os == 'Linux'
+        env:
+          ZCODE_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
+        run: |
+          node scripts/ensure-official-electron.mjs
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" bash -c '
+            openbox >/tmp/openbox-fp.log 2>&1 &
+            sleep 2
+            export ZCODE_GO_E2E_DISPLAY="$DISPLAY"
+            node scripts/e2e/goal-verify-e2e.mjs
+            node scripts/e2e/silent-fork-auto-e2e.mjs
+            rc=$?
+            kill %1 2>/dev/null || true
+            exit $rc
+          '
+
       - name: 保存官方 unpacked 产物缓存（仅成功时，防半成品污染键）
         if: success() && steps.official-dist.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

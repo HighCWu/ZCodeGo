@@ -213,28 +213,32 @@ test("goal 复核全链（串行三场景：重触发/双确认/重放防护）"
     });
   });
 
-  await t.test("双确认：首判 true → r2 再判 true → 保持完成（不重触发）", async () => {
+  await t.test("双确认：r1 true + r2 false → 重触发（r2 不得回声 r1 结论）", async () => {
     await withEnv(async () => {
       const S = `sess_gv2_${randomUUID().slice(0, 8)}`;
       const OBJECTIVE = "发布周报";
       const { agent, calls } = createMockAgent({
         objective: OBJECTIVE,
         goalStatus: "complete",
-        replyFor: (prompt) => ({
-          passed: true,
-          reason: prompt.includes(" r2") ? "二次确认通过" : "首判通过",
-        }),
+        // r1 通过 → 发 r2；r2 判 false。若 r2 回声 r1（tag 跨轮复用 + 快照重放
+        // 绑错 turn 的旧 bug），sendGoalCommand 不会触发——本用例即回归闸。
+        replyFor: (prompt) => {
+          const tag = prompt.slice(ZCODE_GO_GOAL_VERIFY_MARKER.length).trimStart().split(/\s+/, 1)[0] ?? "";
+          return tag.endsWith("r2")
+            ? { passed: false, reason: "二次核查发现未完成" }
+            : { passed: true, reason: "首判通过" };
+        },
       });
       initZCodeGoGoalVerify(agent, { logger: { info() {}, warn() {}, debug() {} } });
 
       fireVerifiedEdge(S);
       for (let i = 0; i < 150 && calls.sendText.length < 2; i += 1) await sleep(50);
-      await sleep(300);
+      for (let i = 0; i < 100 && calls.sendGoalCommand.length === 0; i += 1) await sleep(50);
 
       assert.equal(calls.sendText.length, 2, "两轮判定消息（r1 + r2）");
-      assert.match(calls.sendText[0]!.text, / r1\n/, "首轮标记");
-      assert.match(calls.sendText[1]!.text, / r2\n/, "二轮标记");
-      assert.equal(calls.sendGoalCommand.length, 0, "双 true 不重触发");
+      assert.match(calls.sendText[0]!.text, /r1\n/, "首轮按轮 tag");
+      assert.match(calls.sendText[1]!.text, /r2\n/, "二轮按轮 tag");
+      assert.equal(calls.sendGoalCommand.length, 1, "r2 判 false 必须重触发（非回声）");
     });
   });
 

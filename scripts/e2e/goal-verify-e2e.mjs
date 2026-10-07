@@ -25,16 +25,18 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, appendFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const REAL_STATE_DIR = join(homedir(), ".zcode-go");
-const REPO = "/home/whc/pnpm_repos/zcode-go";
-const ELECTRON = join(REAL_STATE_DIR, "electron", "zcode");
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const ELECTRON = process.env.ZCODE_GO_E2E_APP_BIN ?? join(REAL_STATE_DIR, "electron", "zcode");
 const CDP_PORT = 9334;
 const PROFILE_TAG = "zg-goal-e2e-profile";
 const OBJECTIVE = "把示例项目构建修绿并跑通测试";
 const MARKER = "<!-- zcode-go:goal-verify";
 
+const E2E_DISPLAY = process.env.ZCODE_GO_E2E_DISPLAY?.trim() || ":103";
 const ws = join(tmpdir(), `zg-goal-e2e-${Date.now()}`);
 const sandboxHome = join(ws, "home");
 const routesPath = join(ws, "routes.json");
@@ -128,21 +130,53 @@ function killAppInstance() {
 let pass = false;
 let providerProc = null;
 try {
+  if (!existsSync(ELECTRON)) throw new Error(`E2E app 不存在：${ELECTRON}（可用 ZCODE_GO_E2E_APP_BIN 注入）`);
+  if (!process.env.ZCODE_GO_E2E_DISPLAY) {
+    try {
+      const xvfbOk = require("node:child_process").execSync("pgrep -x Xvfb", { stdio: "pipe" }).toString().trim();
+      if (!xvfbOk) throw new Error("Xvfb 未运行");
+    } catch {
+      throw new Error("Xvfb 未运行（默认 DISPLAY :103：Xvfb :103 -screen 0 1920x1080x24；或经 ZCODE_GO_E2E_DISPLAY 注入 CI 动态 display）");
+    }
+  }
   // 前置清理：任何一轮旧沙箱实例（占 CDP 端口会劫持本轮连接）
   try { killAppInstance(); await sleep(1500); } catch { /* 尽力而为 */ }
   // ── 0. HOME 沙箱 + 假 Provider ──
   mkdirSync(join(sandboxHome, ".zcode", "v2"), { recursive: true });
   mkdirSync(join(sandboxHome, ".zcode-go"), { recursive: true });
-  copyFileSync(join(REAL_STATE_DIR, "official.json"), join(sandboxHome, ".zcode-go", "official.json"));
+  // 沙箱 agent 运行时解析链需要 official.json（env 覆盖 → 此文件 → 平台默认）。
+  // 本地从真实状态目录拷；CI 用 ZCODE_OFFICIAL_BIN 构造（runtimeBundle 同目录
+  // resources/glm/zcode.cjs，与 run.mjs 同一定位约定）。
+  const realOfficial = join(REAL_STATE_DIR, "official.json");
+  if (process.env.ZCODE_OFFICIAL_BIN) {
+    const bin = process.env.ZCODE_OFFICIAL_BIN;
+    writeFileSync(join(sandboxHome, ".zcode-go", "official.json"), JSON.stringify({
+      platform: process.platform,
+      bin,
+      runtimeBundle: join(dirname(bin), "resources", "glm", "zcode.cjs"),
+      discoveredAt: Date.now(),
+    }));
+  } else if (existsSync(realOfficial)) {
+    copyFileSync(realOfficial, join(sandboxHome, ".zcode-go", "official.json"));
+  } else {
+    throw new Error("official.json 不可得（本地 ~/.zcode-go/official.json 或 env ZCODE_OFFICIAL_BIN）");
+  }
   // builtin Active 物化种子（~/.zcode/v2/runtime/provider：纯 provider 目录，无凭证）。
   // 新沙箱没有历史 Active 缓存、组装 app 又缺 packaged builtin 文件，CDN 同步在
   // 冷启动窗口内追不上——不种会导致「Bundled 与 Active 均不可用」且发送全拒。
+  // Active 种子优先从真实实例拷（本地）；CI 无该缓存时依赖 packaged builtin
+  // （~/.zcode-go/electron/resources/config/provider/zcode-builtin.json，CI 步
+  // 骤里从官方包补齐——组装 app 缺这文件是冷启动「Bundled 与 Active 均不可
+  // 用」的根因）。ZCODE_GO_E2E_SKIP_ACTIVE_SEED=1 供验证 packaged 路径自足。
   const realProviderRuntime = join(homedir(), ".zcode", "v2", "runtime", "provider");
-  if (existsSync(realProviderRuntime)) {
+  if (process.env.ZCODE_GO_E2E_SKIP_ACTIVE_SEED !== "1" && existsSync(realProviderRuntime)) {
     cpSync(realProviderRuntime, join(sandboxHome, ".zcode", "v2", "runtime", "provider"), { recursive: true });
   }
   writeRoutes([
-    { match: MARKER, content: '{"passed": false, "reason": "测试还没跑通，不能算完成"}' },
+    // 双确认路径：r1 判「通过」→ 触发 r2；r2 判「未完成」→ 重触发（验证按轮
+    // tag 绑定在真实栈上不回声 r1 结论）。r2 路由必须排在通用 marker 路由前。
+    { match: "zcode-go:goal-verify \\S*r2\\n", content: '{"passed": false, "reason": "二次核查发现构建还没跑通"}' },
+    { match: MARKER, content: '{"passed": true, "reason": "从上下文看目标已完成"}' },
     { match: "(?i)goal|objective|complete|done|finish|完成", content: "我已经完成了这个目标：构建已修绿，全部测试通过。" },
   ]);
   providerProc = spawn(process.execPath, [
@@ -195,7 +229,7 @@ try {
       PATH: process.env.PATH,
       LANG: process.env.LANG ?? "zh_CN.UTF-8",
       HOME: sandboxHome,
-      DISPLAY: ":103",
+      DISPLAY: E2E_DISPLAY,
       ZCODE_GO_TAKEOVER: "1",
       ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Go E2E",
     },
