@@ -9,8 +9,18 @@
  *     语义：重置 active + 自动重驱动循环，未完成模型继续推进）
  *   - passed=true  → 追加二次确认（"为避免复杂项目误判请再认真判断一次"），
  *     再解析一次；仍 true 放行完成，false 重触发。
- * 复核消息带隐藏标记（shared ZCODE_GO_GOAL_VERIFY_MARKER），UI 渲染层
- * 据此隐藏复核轮的行；消息保留在会话存储中作为模型后续上下文。
+ * 复核消息带隐藏标记（shared ZCODE_GO_GOAL_VERIFY_MARKER + 本次复核唯一
+ * tag），UI 渲染层按前缀隐藏复核轮的行；消息保留在会话存储中作为模型后续
+ * 上下文。回复收集按「标记 tag → turnId」绑定：只有本次发送的判定输入行
+ * 才能绑定 collector——订阅快照重放的旧复核轮、其它轮次的行一律不参与，
+ * 多轮/并发复核互不串扰。
+ *
+ * 帧结构注意（历史教训，zcodeGoSubagentRecovery 头注）：分发点传入的是
+ * wire 层候选——complete 帧逻辑载荷在 frame 键内、大帧为 fragment 分片，
+ * 必须经 extractLogicalFramePayload 提取；直接读 wire 顶层 payload 键恒空。
+ * sessions-index 的快照重放只建基线不触发边沿（活跃会话必先以非终态进入
+ * 基线，与 taskIndexSyncer/keepAlive 同口径），否则启动即对全部历史
+ * verified goal 复核风暴。
  *
  * 不修改运行时 goal 状态机——全部走官方 v4 协议面。
  * （150% 额度签名链路经实测位于官方 CLI 运行时 zcode.cjs 而非 host，
@@ -31,10 +41,16 @@ import {
 
 const CLIENT_ID = "zcode-go-goal-verify";
 const SUBSCRIBER_SCOPE = "zcode-go-goal-verify";
-const STATE_DIR = join(homedir(), ".zcode-go");
-const SETTLE_DELAY_MS = 3_000;
-const REPLY_TIMEOUT_MS = 240_000;
-const REPLY_STABLE_MS = 4_000;
+// 测试可整体缩放节奏（阈值与轮询同乘一个因子，判定语义不变）
+const TIMING_SCALE = Math.max(
+  0.001,
+  Number(process.env.ZCODE_GO_GOAL_VERIFY_TIMING_SCALE ?? "1") || 1,
+);
+const SETTLE_DELAY_MS = Math.round(3_000 * TIMING_SCALE);
+const REPLY_TIMEOUT_MS = Math.round(240_000 * TIMING_SCALE);
+const REPLY_STABLE_MS = Math.round(4_000 * TIMING_SCALE);
+const NO_TURN_ABORT_MS = Math.round(30_000 * TIMING_SCALE);
+const POLL_MS = Math.max(5, Math.round(1_000 * TIMING_SCALE));
 const RETRIGGER_ATTEMPTS = 5;
 const RETRIGGER_DELAY_MS = 20_000;
 
@@ -86,13 +102,14 @@ interface GoalVerifyConfig {
   maxRounds: number;
 }
 
+/** legacy 会话快照的 goal（zcodeSessionInfoSchema.target，status 枚举含 "complete"）。 */
 interface SessionSnapshotShape {
-  projection?: {
+  session?: {
     target?: {
       objective?: string;
       status?: string;
     } | null;
-  } | null;
+  };
 }
 
 interface FrameRowShape {
@@ -108,15 +125,21 @@ const lastGoalStatusBySession = new Map<string, string>();
 const roundsByGoal = new Map<string, number>();
 const inFlight = new Set<string>();
 
+/** 回复收集器：按会话 id 键控（同一 workspace 多会话并发复核互不覆盖）。 */
 const replyCollectors = new Map<
   string,
-  { turnId: string | null; text: string; lastAppendAt: number }
+  { verifyTag: string; turnId: string | null; text: string; lastAppendAt: number }
 >();
+
+// STATE_DIR 惰性求值（测试可用 ZCODE_GO_STATE_DIR_OVERRIDE 隔离，防读到真实配置）。
+function stateDir(): string {
+  return process.env.ZCODE_GO_STATE_DIR_OVERRIDE || join(homedir(), ".zcode-go");
+}
 
 function readConfig(): GoalVerifyConfig {
   const defaults: GoalVerifyConfig = { enabled: true, maxRounds: 3 };
   try {
-    const path = join(STATE_DIR, "config.json");
+    const path = join(stateDir(), "config.json");
     if (!existsSync(path)) return defaults;
     const raw = JSON.parse(readFileSync(path, "utf8")) as {
       goalVerify?: { enabled?: boolean; maxRounds?: number };
@@ -131,27 +154,38 @@ function readConfig(): GoalVerifyConfig {
 }
 
 function extractConversationRows(wire: unknown): FrameRowShape[] {
-  if (typeof wire !== "object" || wire === null) return [];
-  const w = wire as { payload?: unknown };
-  const payload = w.payload as
-    | {
-        kind?: string;
-        snapshot?: { rows?: { window?: unknown } };
-        deltas?: Array<{ op?: string; row?: unknown }>;
-      }
-      | undefined;
+  const logical = extractLogicalFramePayload(wire);
+  if (!logical) return [];
   const rows: FrameRowShape[] = [];
-  if (payload?.kind === "deltas" && Array.isArray(payload.deltas)) {
-    for (const d of payload.deltas) {
-      if ((d.op === "row.appended" || d.op === "row.upserted") && typeof d.row === "object" && d.row !== null) {
-        rows.push(d.row as FrameRowShape);
+  if (logical.kind === "deltas") {
+    for (const d of logical.deltas ?? []) {
+      const delta = d as { op?: string; row?: unknown };
+      if (
+        (delta.op === "row.appended" || delta.op === "row.upserted") &&
+        typeof delta.row === "object" &&
+        delta.row !== null
+      ) {
+        rows.push(delta.row as FrameRowShape);
       }
     }
-  } else if (payload?.kind === "snapshot") {
-    const window = payload.snapshot?.rows?.window;
+  } else {
+    const window = (logical.snapshot as { rows?: { window?: unknown } } | null)?.rows?.window;
     if (Array.isArray(window)) for (const r of window) rows.push(r as FrameRowShape);
   }
   return rows;
+}
+
+/**
+ * 复核输入行的标记解析：`<marker> <verifyTag> r1`。旧格式（无 tag，直接
+ * `r1`）返回 null——旧轮次的行不匹配任何新 collector，天然不串扰。
+ */
+function goalVerifyMarkerTag(text: string): string | null {
+  if (!isZcodeGoGoalVerifyMarkerText(text)) return null;
+  const rest = text.slice(ZCODE_GO_GOAL_VERIFY_MARKER.length).trimStart();
+  const first = rest.split(/\s+/, 1)[0] ?? "";
+  // 旧格式首 token 即轮次标签（r1/r2），没有唯一 tag
+  if (/^r\d/.test(first)) return null;
+  return first || null;
 }
 
 export function observeZcodeGoConversationFrame(workspace: unknown, wire: unknown): void {
@@ -159,9 +193,13 @@ export function observeZcodeGoConversationFrame(workspace: unknown, wire: unknow
   const rows = extractConversationRows(wire);
   if (rows.length === 0) return;
   for (const row of rows) {
-    if (row.kind === "userInput" && typeof row.text === "string" && isZcodeGoGoalVerifyMarkerText(row.text)) {
+    if (row.kind === "userInput" && typeof row.text === "string") {
+      const tag = goalVerifyMarkerTag(row.text);
+      if (tag === null) continue;
       for (const collector of replyCollectors.values()) {
-        if (!collector.turnId && row.turnId) collector.turnId = row.turnId;
+        if (collector.verifyTag === tag && !collector.turnId && row.turnId) {
+          collector.turnId = row.turnId;
+        }
       }
       continue;
     }
@@ -201,19 +239,20 @@ async function sleep(ms: number): Promise<void> {
 async function sendAndCollectVerdict(
   workspace: { sessionId?: string; workspacePath: string; workspaceIdentity?: string },
   sessionId: string,
+  verifyTag: string,
   text: string,
   traceId: string,
 ): Promise<{ passed: boolean; reason: string } | null> {
   if (!agent) return null;
-  const wsKey = workspace.workspacePath ?? workspace.workspaceIdentity ?? sessionId;
+
   const sub = await agent.subscribeConversationV4({
     ...workspace,
     sessionId,
     subscriberScope: SUBSCRIBER_SCOPE,
     visibility: "background",
   });
-  const collector = { turnId: null as string | null, text: "", lastAppendAt: Date.now() };
-  replyCollectors.set(wsKey, collector);
+  const collector = { verifyTag, turnId: null as string | null, text: "", lastAppendAt: Date.now() };
+  replyCollectors.set(sessionId, collector);
   try {
     // 发送失败（传输异常/被拒）重试数次
     let accepted = false;
@@ -253,15 +292,16 @@ async function sendAndCollectVerdict(
       logger?.warn(traceId, "[zcode-go goal 复核] 复核消息多次发送失败，放行完成", { sessionId });
       return null;
     }
-    const deadline = Date.now() + REPLY_TIMEOUT_MS;
+    const startedAt = Date.now();
+    const deadline = startedAt + REPLY_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      await sleep(1_000);
+      await sleep(POLL_MS);
       const stableFor = Date.now() - collector.lastAppendAt;
       if (collector.text) {
         const verdict = verdictFromText(collector.text);
         if (verdict && stableFor >= REPLY_STABLE_MS) return verdict;
       }
-      if (!collector.turnId && Date.now() - (deadline - REPLY_TIMEOUT_MS) > 30_000) {
+      if (!collector.turnId && Date.now() - startedAt > NO_TURN_ABORT_MS) {
         logger?.warn(traceId, "[zcode-go goal 复核] 复核输入未被运行时确认（30s 无 turn）", {
           sessionId,
         });
@@ -271,7 +311,7 @@ async function sendAndCollectVerdict(
     logger?.warn(traceId, "[zcode-go goal 复核] 复核回复超时，放行完成", { sessionId });
     return null;
   } finally {
-    replyCollectors.delete(wsKey);
+    replyCollectors.delete(sessionId);
     try {
       await agent.unsubscribeConversationV4({
         ...workspace,
@@ -285,9 +325,9 @@ async function sendAndCollectVerdict(
   }
 }
 
-function judgmentPrompt(objective: string): string {
+function judgmentPrompt(verifyTag: string, objective: string): string {
   return (
-    `${ZCODE_GO_GOAL_VERIFY_MARKER} r1\n` +
+    `${ZCODE_GO_GOAL_VERIFY_MARKER} ${verifyTag} r1\n` +
     `The session goal (GOAL) is:\n${objective}\n\n` +
     "This goal was previously marked as complete, but that verdict may be wrong.\n" +
     "Judge from the conversation context alone whether the goal has actually been completed.\n" +
@@ -298,9 +338,10 @@ function judgmentPrompt(objective: string): string {
   );
 }
 
-function doubleCheckPrompt(objective: string): string {
+function doubleCheckPrompt(verifyTag: string, objective: string): string {
   return (
-    `${ZCODE_GO_GOAL_VERIFY_MARKER} r2\n` +
+    `${ZCODE_GO_GOAL_VERIFY_MARKER} ${verifyTag} r2\n` +
+    `The session goal (GOAL) is:\n${objective}\n\n` +
     "To avoid misjudgment on complex projects, discard your previous conclusion and re-judge from the " +
     "conversation context alone whether the goal above has truly been completed. Do not call tools or investigate. Reply immediately and briefly.\n" +
     "Superficial, partial, or plan-only completion counts as not complete; when in doubt, treat it as not complete.\n" +
@@ -359,17 +400,20 @@ async function handleVerified(
     workspaceIdentity: workspace.workspaceIdentity,
     runtimePolicy: "existing-only",
   })) as SessionSnapshotShape | undefined;
-  const objective = snapshot?.projection?.target?.objective?.trim();
+  // goal 在 legacy 快照的 session.target（zcodeSessionInfoSchema.target；
+  // status 枚举 active/paused/budget_limited/complete）
+  const goal = snapshot?.session?.target ?? null;
+  const objective = goal?.objective?.trim();
   if (!objective) {
     logger?.debug(traceId, "[zcode-go goal 复核] 会话无 goal（可能已被清除），跳过", {
       sessionId,
     });
     return;
   }
-  if (snapshot?.projection?.target?.status && snapshot.projection.target.status !== "complete") {
+  if (goal?.status && goal.status !== "complete") {
     logger?.debug(traceId, "[zcode-go goal 复核] goal 状态已变化，跳过", {
       sessionId,
-      status: snapshot.projection.target.status,
+      status: goal.status,
     });
     return;
   }
@@ -389,10 +433,12 @@ async function handleVerified(
     round: roundsByGoal.get(oKey),
   });
 
+  const verifyTag = `v${randomUUID().slice(0, 8)}`;
   const first = await sendAndCollectVerdict(
     workspace,
     sessionId,
-    judgmentPrompt(objective),
+    verifyTag,
+    judgmentPrompt(verifyTag, objective),
     traceId,
   );
   if (!first) {
@@ -408,7 +454,8 @@ async function handleVerified(
     const second = await sendAndCollectVerdict(
       workspace,
       sessionId,
-      doubleCheckPrompt(objective),
+      verifyTag,
+      doubleCheckPrompt(verifyTag, objective),
       traceId,
     );
     if (second) verdict = second;
@@ -441,15 +488,9 @@ export function observeZcodeGoSessionsIndexFrame(
   if (!agent || disposed) return;
   const config = readConfig();
   if (!config.enabled) return;
-  if (typeof wire !== "object" || wire === null) return;
-  const w = wire as { payload?: unknown };
-  const payload = w.payload as
-    | {
-        kind?: string;
-        snapshot?: { sessions?: Array<{ sessionId?: unknown; goalStatus?: unknown }> };
-        deltas?: Array<{ op?: unknown; session?: { sessionId?: unknown; goalStatus?: unknown } }>;
-      }
-      | undefined;
+  const logical = extractLogicalFramePayload(wire);
+  if (!logical) return;
+  const fromSnapshot = logical.kind === "snapshot";
   const entries: Array<{ sessionId: string; goalStatus?: string }> = [];
   const push = (session: { sessionId?: unknown; goalStatus?: unknown } | undefined): void => {
     if (!session || typeof session !== "object") return;
@@ -460,15 +501,23 @@ export function observeZcodeGoSessionsIndexFrame(
       });
     }
   };
-  if (payload?.kind === "deltas" && Array.isArray(payload.deltas)) {
-    for (const d of payload.deltas) if (d.op === "session.upserted") push(d.session);
-  } else if (payload?.kind === "snapshot" && Array.isArray(payload.snapshot?.sessions)) {
-    for (const s of payload.snapshot.sessions) push(s);
+  if (logical.kind === "deltas") {
+    for (const d of logical.deltas ?? []) {
+      const delta = d as { op?: unknown; session?: { sessionId?: unknown; goalStatus?: unknown } };
+      if (delta.op === "session.upserted") push(delta.session);
+    }
+  } else {
+    const sessions = (logical.snapshot as { sessions?: unknown } | null)?.sessions;
+    if (Array.isArray(sessions)) for (const s of sessions) push(s as never);
   }
 
   for (const entry of entries) {
     const prev = lastGoalStatusBySession.get(entry.sessionId);
     if (entry.goalStatus) lastGoalStatusBySession.set(entry.sessionId, entry.goalStatus);
+    // 快照重放/无基线只建基线不触发边沿：活跃会话必先以非 verified 状态进入
+    // 基线（gateway 每事件 fan-out），启动时对历史 verified goal 的快照回放
+    // 不是新完成。
+    if (fromSnapshot || prev === undefined) continue;
     if (entry.goalStatus !== "verified" || prev === "verified") continue;
     const traceId = randomUUID();
     if (inFlight.has(entry.sessionId)) {

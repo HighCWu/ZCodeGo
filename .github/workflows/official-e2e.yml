@@ -51,6 +51,7 @@ jobs:
             packages/services/test/zcodeGoGoalKeepAlive.test.ts \
             packages/services/test/zcodeGoSessionRedirect.test.ts \
             packages/services/test/zcodeGoSilentForkTrigger.test.ts \
+            packages/services/test/zcodeGoGoalVerify.test.ts \
             packages/services/test/sessionHistoryLazyReader.test.ts
       - name: desktop 静默 fork 归并单测（node:test + tsx）
         run: |
