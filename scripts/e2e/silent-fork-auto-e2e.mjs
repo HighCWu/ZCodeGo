@@ -94,6 +94,7 @@ async function cdp() {
 }
 
 let appProcPid = null;
+let appExitInfo = null;
 
 function killAppInstance() {
   // 主进程按 pid 精确终止（Electron 工具进程随主进程退出）；win 用 taskkill
@@ -220,6 +221,12 @@ try {
   console.log(`0a. sandbox=${sandboxHome} fake provider port=${port}`);
 
   // ── 0b. 启动沙箱 E2E 实例（HOME 隔离 + DISPLAY 强制 :103） ──
+  if (process.platform === "win32") {
+    // TEMP/TMP/APPDATA 指向的沙箱目录必须先存在（缺失会让主进程早期挂起）
+    mkdirSync(join(ws, "tmp"), { recursive: true });
+    mkdirSync(join(sandboxHome, "AppData", "Roaming"), { recursive: true });
+    mkdirSync(join(sandboxHome, "AppData", "Local"), { recursive: true });
+  }
   const appArgs = [
     // 强制中文 UI：脚本的全部 DOM 文本匹配（onboarding 按钮/重试/发送）是中文，
     // CI runner 的系统 locale 不保证
@@ -270,6 +277,8 @@ try {
           PATHEXT: process.env.PATHEXT,
           APPDATA: join(sandboxHome, "AppData", "Roaming"),
           LOCALAPPDATA: join(sandboxHome, "AppData", "Local"),
+          HOMEDRIVE: process.env.HOMEDRIVE ?? "C:",
+          ...(process.env.HOMEPATH ? { HOMEPATH: process.env.HOMEPATH } : {}),
         }
       : {}),
     ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Go E2E",
@@ -279,6 +288,9 @@ try {
     stdio: ["ignore", "pipe", "pipe"],
   });
   appProcPid = appProc.pid;
+  appProc.on("exit", (code, signal) => {
+    appExitInfo = { code, signal };
+  });
   appProc.stdout.on("data", (c) => appendFileSync(appLog, c));
   appProc.stderr.on("data", (c) => appendFileSync(appLog, c));
   console.log("0b. app launched (sandboxed), waiting CDP…");
@@ -288,7 +300,10 @@ try {
     await sleep(1500);
     c = await cdp().catch(() => null);
   }
-  if (!c) throw new Error("E2E 实例 CDP 未就绪（看 app.log）");
+  if (!c) {
+    const exitInfo = appExitInfo ? `app exited code=${appExitInfo.code} signal=${appExitInfo.signal}` : "app still running";
+    throw new Error(`E2E 实例 CDP 未就绪（${exitInfo}；看 app.log）`);
+  }
   const { ev } = c;
 
   // ── 1. onboarding（API key 路径） ──
@@ -296,11 +311,11 @@ try {
     const r = await ev(`(() => {
       if (document.querySelector('[contenteditable="true"]')) return "composer";
       const btns = Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent !== null);
-      const apikey = btns.find(b => (b.innerText || "").includes("使用 API key"));
+      const apikey = btns.find(b => /使用 API key|Use API key/i.test(b.innerText || ""));
       if (apikey) { apikey.click(); return "apikey"; }
-      const next = btns.find(b => (b.innerText || "").trim() === "继续");
+      const next = btns.find(b => ["继续", "Continue"].includes((b.innerText || "").trim()));
       if (next) { next.click(); return "continue"; }
-      const skip = btns.find(b => (b.innerText || "").trim() === "跳过");
+      const skip = btns.find(b => ["跳过", "Skip"].includes((b.innerText || "").trim()));
       if (skip) { skip.click(); return "skip"; }
       return "wait";
     })()`);
@@ -316,7 +331,7 @@ try {
         return "filled";
       })()`);
       await sleep(400);
-      await ev(`Array.from(document.querySelectorAll('button')).find(b => b.offsetParent !== null && (b.innerText || "").trim() === "继续")?.click(); "ok"`);
+      await ev(`Array.from(document.querySelectorAll('button')).find(b => b.offsetParent !== null && ["继续","Continue"].includes((b.innerText || "").trim()))?.click(); "ok"`);
     }
     if (r === "composer") break;
     await sleep(1200);
