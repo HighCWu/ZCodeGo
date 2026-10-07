@@ -8,6 +8,7 @@ import { applyComposerPermissionGrant } from "@/v4/composer/composerPermissionGr
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ZCODE_AGENT_PROVIDER, resolveExecutionState } from "@zcode/shared";
 import { applyComposerPlanTransition } from "@/v4/composer/composerPlanTransition.js";
+import { pickFirstAvailableDraftModelSelection } from "@/v4/composer/newTaskDraft.js";
 import type {
   ZCodeConfigOption,
   ModelSelection,
@@ -165,6 +166,15 @@ export function useDraftConfigControl(params: {
             planEnabled: resolveExecutionState(sessionConfig ?? {}).planEnabled,
             modelSelection: sessionConfig?.modelSelection,
           };
+  }
+  // zcode-go 兜底：新任务草稿在模型 View 就绪后仍无选择（preferredSelection 缺失，
+  // 或恢复的草稿 mode 已置位导致上方初始化块被跳过）→ 按 View 顺序自动勾上第一
+  // 个可用模型。只补「新任务」草稿；会话快照的空选择是确定结果，保持不动。
+  if (initializeAsNewTask && modelSelectionView && !draft.modelSelection) {
+    const fallbackModel = pickFirstAvailableDraftModelSelection(modelSelectionView);
+    if (fallbackModel) {
+      draft = { ...draft, modelSelection: fallbackModel };
+    }
   }
   if (sessionConfig) {
     draft = applyComposerPlanTransition(draft, sessionConfig.planTransition);
