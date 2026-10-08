@@ -454,6 +454,10 @@ jobs:
             /tmp/zg-sfk-e2e-*/
             /tmp/zg-lazy-e2e-*/
             /tmp/zg-fresh-e2e-*/
+            /var/folders/*/*/T/zg-goal-e2e-*/
+            /var/folders/*/*/T/zg-sfk-e2e-*/
+            /var/folders/*/*/T/zg-lazy-e2e-*/
+            /var/folders/*/*/T/zg-fresh-e2e-*/
           if-no-files-found: ignore
           include-hidden-files: true
       - name: 上传排障产物（Windows 收拢目录）

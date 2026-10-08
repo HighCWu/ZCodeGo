@@ -31,7 +31,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, appendFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REAL_STATE_DIR = join(homedir(), ".zcode-go");
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -198,7 +198,9 @@ try {
       throw new Error("Xvfb 未运行（默认 DISPLAY :103：Xvfb :103 -screen 0 1920x1080x24；或经 ZCODE_GO_E2E_DISPLAY 注入 CI 动态 display）");
     }
   }
-  const { chromium } = await import(playwrightEntry);
+  // Windows 下动态 import 绝对路径必须是 file:// URL（D:\... 会报
+  // "Only URLs with a scheme in: file..."）
+  const { chromium } = await import(pathToFileURL(playwrightEntry).href);
   // playwright 自带浏览器优先（CI 经 install 装的版本与应用同源），系统 Chrome 兜底
   let browserPath = null;
   try {
@@ -468,6 +470,16 @@ try {
   console.log(`2. pairing url ready: ${qr}`);
   const pairingParams = new URL(qr).searchParams;
   console.log(`2. pairing params: t=${pairingParams.get("t")} i=${pairingParams.get("i")} p.len=${pairingParams.get("p")?.length ?? 0}`);
+  // 等桥真正就绪（waiting-mobile = 房间已登记 + secret 已存 + 信令 WS 已
+  // register）再开浏览器——pairingUrl 在本地生成即可读，秒连会撞 desktop_
+  // offline/bad_secret（mac CI 实测三连快速失败即此竞态）
+  let bridgeReady = false;
+  for (let i = 0; i < 30 && !bridgeReady; i += 1) {
+    const st = JSON.parse(await ev("window.zcode.zcodeGoMobileBridgeGetStatus().then(s => JSON.stringify(s))").catch(() => "{}"));
+    if (st.state === "waiting-mobile" || st.state === "connected") bridgeReady = true;
+    else await sleep(1000);
+  }
+  console.log(`2. bridge ready (waiting-mobile): ${bridgeReady}`);
 
   browser = await chromium.launch({
     ...(browserPath ? { executablePath: browserPath } : {}),
@@ -496,7 +508,7 @@ try {
       return { f: 1, loading: !!d.querySelector("[data-testid=root-startup-loading]") };
     }).catch(() => ({ f: 0 }));
     if (st.f && !st.loading) webReady = true;
-    if (!webReady && webRetries < 3) {
+    if (!webReady && webRetries < 5) {
       // ICE 偶发失败（页面错误卡片 + 重试按钮）：点重连 + 调桌面 Start 恢复
       // 被挂起的信令（pc 连上后信令挂起省流量，页面重试的 req-offer 需要
       // Start 唤醒——与产品「重开对话框=恢复信令」同一条路径）

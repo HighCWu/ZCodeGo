@@ -721,8 +721,14 @@ try {
   // createdBy=auto-open 只有合成分支会发——它本身就是合成订阅的硬证明（比日志
   // 字符串 grep 更稳），synthLog 降为诊断。
   pass = tailVisible && entry !== null && entry.createdBy === "auto-open" && forkSmall;
-  console.log("diagnostics:", JSON.stringify({ tailVisible, providerGot, forkGotMsg, mergedBack }));
-  pass = markerSeen && markerInDb && resumed;
+  // C/D 变量在诊断 try 内声明——异常路径下可能未初始化，typeof 兜底防
+  // 诊断行自身抛错掩盖判据
+  console.log("diagnostics:", JSON.stringify({
+    tailVisible,
+    providerGot: typeof providerGot === "boolean" ? providerGot : null,
+    forkGotMsg: typeof forkGotMsg === "boolean" ? forkGotMsg : null,
+    mergedBack: typeof mergedBack === "boolean" ? mergedBack : null,
+  }));
 } catch (error) {
   console.error("E2E 失败:", error.message);
   try {
