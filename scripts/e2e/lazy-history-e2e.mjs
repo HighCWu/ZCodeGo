@@ -65,10 +65,22 @@ async function cdp() {
   await new Promise((res, rej) => { ws0.onopen = res; ws0.onerror = rej; });
   let id = 0;
   const pending = new Map();
+  // renderer console 缓冲：恢复状态机的关键路径只走 logger.warn/error（如
+  // "[v4-store] resync … 失败"），遥测不覆盖 fault 帧——失败诊断靠这里。
+  const consoleBuffer = [];
   ws0.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
+    if (m.method === "Runtime.consoleAPICalled") {
+      const text = (m.params.args ?? []).map((a) => a.value ?? a.description ?? "").join(" ");
+      consoleBuffer.push(`${m.params.type}: ${text}`.slice(0, 300));
+    }
   };
+  await new Promise((resolve) => {
+    const mid = ++id;
+    pending.set(mid, () => resolve());
+    ws0.send(JSON.stringify({ id: mid, method: "Runtime.enable" }));
+  });
   const ev = (expr) => new Promise((resolve, reject) => {
     const mid = ++id;
     pending.set(mid, (m) => {
@@ -94,13 +106,19 @@ async function cdp() {
   };
   /** 点击编辑器 → 全选清空 → 输入文本（Enter 键序在 CDP+Lexical 下不稳定，
    *  提交统一走发送按钮的可信点击——与 Enter 同路径触发 form submit）。 */
+  const rawCall = (method, params) =>
+    new Promise((resolve) => {
+      const mid = ++id;
+      pending.set(mid, (m) => resolve(m));
+      ws0.send(JSON.stringify({ id: mid, method, params }));
+    });
   const trustedTypeAndEnterAt = async (text, x, y) => {
     await trustedClick(x, y);
     await trustedSelectAll();
     await input("insertText", { text });
     await new Promise((r) => setTimeout(r, 400));
   };
-  return { ev, trustedClick, trustedSelectAll, trustedTypeAndEnterAt, close: () => ws0.close() };
+  return { ev, rawCall, consoleLines: () => consoleBuffer.slice(), trustedClick, trustedSelectAll, trustedTypeAndEnterAt, close: () => ws0.close() };
 }
 
 let appProcPid = null;
@@ -601,6 +619,54 @@ try {
     tailVisible = await ev2(`document.body.innerText.includes(${JSON.stringify(TAIL_MARKER)})`);
   }
   console.log("A. tail window visible:", tailVisible);
+  if (!tailVisible) {
+    try {
+      const shot = join(ws, "a-fail.png");
+      await c2.rawCall("Page.captureScreenshot", { format: "png" }).then((m) => {
+        if (m?.result?.data) writeFileSync(shot, Buffer.from(m.result.data, "base64"));
+      });
+      console.log("A. failure screenshot:", shot);
+    } catch { /* 截图尽力而为 */ }
+    const bodyDump = await ev2(`document.body.innerText.slice(0, 600)`);
+    console.log("A. body dump:", JSON.stringify(bodyDump));
+    const cl = c2.consoleLines().filter((l) => /v4-store|recovery|fault|resync|notOwned|redirect/i.test(l));
+    console.log("A. console (filtered, last 40):");
+    for (const line of cl.slice(-40)) console.log("  ", line);
+    if (cl.length === 0) {
+      const all = c2.consoleLines();
+      console.log("A. console (unfiltered, last 30):");
+      for (const line of all.slice(-30)) console.log("  ", line);
+    }
+    // React fiber 探针：从错误卡 DOM 沿 fiber 向上扫 hooks，找持有 topic+recovery
+    // 的 store 实例，dump 活体状态（终态 fault 从哪来：超时 or fault 帧 or 世代错配）。
+    const probe = await ev2(`(() => {
+      const out = [];
+      try {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node; let startEl = null;
+        while ((node = walker.nextNode())) if (node.textContent.includes("recoveryFailed")) { startEl = node.parentElement; break; }
+        if (!startEl) return "no-error-card";
+        const fiberKey = Object.keys(startEl).find((k) => k.startsWith("__reactFiber$"));
+        if (!fiberKey) return "no-fiber";
+        let f = startEl[fiberKey];
+        for (let depth = 0; f && depth < 60; depth += 1, f = f.return) {
+          let hook = f.memoizedState;
+          for (let h = 0; hook && h < 40; h += 1, hook = hook.next) {
+            const v = hook.memoizedState;
+            const candidates = v && typeof v === "object" ? (Array.isArray(v) ? v : [v]) : [];
+            for (const c of candidates) {
+              if (c && typeof c === "object" && "topic" in c && "recovery" in c) {
+                const s = { depth, topic: c.topic, status: c.status, lastError: c.lastError, subscriptionId: c.state && c.state.subscriptionId, snapshotSeq: c.state && c.state.snapshot && c.state.snapshot.seq, hasBase: !!(c.subscriptionHasAppliedBase), recovery: c.recovery && { sub: c.recovery.subscriptionId, forceSnapshot: c.recovery.forceSnapshot, ackReceived: c.recovery.ackReceived, ackMode: c.recovery.ackMode, validFrameSeen: c.recovery.validFrameSeen, requestInFlight: c.recovery.requestInFlight, upgradePending: c.recovery.upgradePending, contentFault: c.recovery.contentFault, frameDeadline: c.recovery.frameDeadline && String(c.recovery.frameDeadline) } };
+                out.push(JSON.stringify(s));
+              }
+            }
+          }
+        }
+      } catch (e) { return "probe-error: " + (e && e.message); }
+      return out.length ? out.join("\\n") : "no-store-found";
+    })()`);
+    console.log("A. store probe:", probe);
+  }
   const convEv = c2;
 
   const redirectFile = join(sandboxHome, ".zcode-go", "session-redirect.json");
@@ -633,9 +699,6 @@ try {
     if (!composerExists) await sleep(1500);
   }
   if (!composerExists) console.log("C. composer missing (conversation view not ready)");
-  const rect2 = composerExists
-    ? await convEv.ev(`(() => { const r = document.querySelector('[contenteditable="true"]').getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`)
-    : '{"x":640,"y":700}';
   // 输入落盘校验 + 重试：fork 订阅/重订阅渲染会短暂卸载 composer（取坐标
   // 会撞 null），输入也可能打到被替换的节点上（editorText 空 + 按钮
   // disabled）——每次先等 composer 出现、重取坐标，最多 5 次

@@ -135,5 +135,35 @@ pnpm install && pnpm run build
 node scripts/e2e/goal-verify-e2e.mjs        # 其余同理
 ```
 
+改过源码先重建再跑（否则 E2E 打的是 `~/.zcode-go/electron` 里的旧 bundle，
+结论不可信）：
+
+```bash
+pnpm --filter @zcode/desktop build:no-runtime-assets
+node scripts/ensure-official-electron.mjs   # 按 mtime 同步产物
+```
+
 本地调试沙箱保留：失败自动保留现场（app.log / provider.log.jsonl /
-wrangler.log）；`ZCODE_GO_E2E_KEEP_SANDBOX=1` 通过判据也保留。
+wrangler.log）；`ZCODE_GO_E2E_KEEP_SANDBOX=1` 通过判据也保留。A 段失败时
+自动截图（a-fail.png）+ renderer console 捕获输出。
+
+## 已知问题：lazy-history 发送链（C/D）
+
+A/B（合成尾窗渲染 + auto-open fork 落盘与裁剪）为硬判据全绿（CI 三平台 +
+本地真实库拷贝/CI 扩增双种子路径均验证）。C（发送走 fork）/D（归并回写）
+为诊断输出，产品链由单测（`zcodeGoSilentForkMerge`）与 goal E2E 发送路径
+覆盖；剩余缺口是 CDP 输入交互时序（文本偶发未稳定落入 composer，脚本已带
+5 次重试 + 熔断保护）。
+
+> 排查教训（2026-10）：本地一度复现"会话区 `fault.subscription.recoveryFailed`
+> 错误卡"，深挖后确认是 `~/.zcode-go/electron` 里**陈旧构建产物**——本地
+> 改源码做实验前若不重建（`pnpm --filter @zcode/desktop build:no-runtime-assets`
+> + `node scripts/ensure-official-electron.mjs`），E2E 跑的还是旧 bundle，
+> 结论会被污染（CI 每次新鲜构建故始终全绿）。另注意 mtime 同步只增不删，
+> `out/renderer/assets/` 会积累无引用的旧 chunk，属无害残留。
+
+### windows fresh-model（CI 已知失败）
+
+windows runner 上移动桥窗口不创建、"配对开始"后主进程 IPC 冻结
+（<2min 干净失败 + 产物上传，不影响其余三条 E2E 与其它平台）。属
+Electron/windows runner 深层问题，ubuntu/macos 全绿。
