@@ -30,6 +30,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { BrowserWindow, app, ipcMain } from "electron";
 
 const STATE_DIR = join(homedir(), ".zcode-go");
@@ -170,6 +171,8 @@ interface Session {
   primaryFailureTimestamps: number[];
   /** 启动期诊断心跳（证明主进程事件循环存活；首个 offer-ready 后停止）。 */
   heartbeatTimer: NodeJS.Timeout | null;
+  /** worker 线程看门狗（主线程冻结时唯一仍能发声的通道；stdout 与主线程共享）。 */
+  loopWatchdogWorker: Worker | null;
 }
 
 let activeSession: Session | null = null;
@@ -395,6 +398,10 @@ function teardown(session: Session, reason: string): void {
   if (session.heartbeatTimer) {
     clearInterval(session.heartbeatTimer);
     session.heartbeatTimer = null;
+  }
+  if (session.loopWatchdogWorker) {
+    void session.loopWatchdogWorker.terminate();
+    session.loopWatchdogWorker = null;
   }
   if (session.suspendTimer) {
     clearTimeout(session.suspendTimer);
@@ -982,6 +989,7 @@ export function startMobileBridgePairing(
     resumeSignaling: null,
     primaryFailureTimestamps: [],
     heartbeatTimer: null,
+    loopWatchdogWorker: null,
     status: { state: "signaling", token, pairingUrl: shortUrl, qrUrl: shortUrl },
     onStatus,
   };
@@ -1040,6 +1048,9 @@ export function startMobileBridgePairing(
     bridgeWindows.add(win);
     // 诊断面包屑：windows CI 上窗口创建后完全静默（无 offer-ready/异常/导航
     // 失败），需分辨「file:// 导航永不完成」vs「preload 从未执行」。
+    win.webContents.once("dom-ready", () => {
+      logger.info("[zcode-go-mobile-bridge] 桥窗口 dom-ready", { token, offerId: entry.offerId });
+    });
     win.webContents.on("did-finish-load", () => {
       logger.info("[zcode-go-mobile-bridge] 桥窗口导航完成", { token, offerId: entry.offerId });
     });
@@ -1579,6 +1590,44 @@ export function startMobileBridgePairing(
     });
   }, 5_000);
   session.heartbeatTimer.unref?.();
+  // 启动后首个事件循环周转：证明 Start 返回后循环至少还转过一圈。
+  setImmediate(() => {
+    if (activeSession === session) {
+      sessionLogger?.info("[zcode-go-mobile-bridge] 桥启动后首个事件循环周转", { token });
+    }
+  });
+  // worker 线程看门狗：独立事件循环 + 共享 stdout（app.log 管道）——主线程
+  // 冻结时它仍能发声。每 5s ping 主线程，12s 无 pong 即宣告冻结（每轮只宣告
+  // 一次）。两分钟后自行退出。
+  try {
+    const watchdog = new Worker(
+      [
+        "const { parentPort } = require('node:worker_threads');",
+        "let lastPong = Date.now(); let declared = false; let alive = true;",
+        "parentPort.on('message', (m) => { if (m && m.type === 'pong') { lastPong = Date.now(); declared = false; } });",
+        "const timer = setInterval(() => {",
+        "  if (!alive) return;",
+        "  if (Date.now() - lastPong > 12000 && !declared) {",
+        "    declared = true;",
+        "    process.stdout.write(new Date().toISOString() + ' [watchdog-worker] 主线程事件循环冻结确认（worker 线程仍存活）\\n');",
+        "  }",
+        "  parentPort.postMessage({ type: 'ping' });",
+        "}, 5000);",
+        "setTimeout(() => { alive = false; clearInterval(timer); process.exit(0); }, 120000);",
+      ].join("\n"),
+      { eval: true },
+    );
+    watchdog.on("message", () => {
+      watchdog.postMessage({ type: "pong" });
+    });
+    watchdog.unref?.();
+    session.loopWatchdogWorker = watchdog;
+  } catch (watchdogError) {
+    logger.warn("[zcode-go-mobile-bridge] 看门狗 worker 启动失败", {
+      token,
+      error: String(watchdogError),
+    });
+  }
   setTimeout(() => {
     if (session.heartbeatTimer) {
       clearInterval(session.heartbeatTimer);
