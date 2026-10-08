@@ -501,11 +501,16 @@ try {
     }
   }
   let qr = "";
-  for (let i = 0; i < 30 && !qr; i += 1) {
+  for (let i = 0; i < 40 && !qr; i += 1) {
     await sleep(1200);
-    const st = await ev("window.zcode.zcodeGoMobileBridgeGetStatus().then(s => JSON.stringify(s))");
-    const parsed = JSON.parse(st);
-    if (parsed.pairingUrl) qr = parsed.pairingUrl;
+    // 桥启动窗口期（预生成 offer ≤8s）主进程忙，status IPC 可能悬死——
+    // 超时按本轮无响应跳过继续轮询（windows 实测），不作为致命错误
+    const st = await ev("window.zcode.zcodeGoMobileBridgeGetStatus().then(s => JSON.stringify(s))").catch(() => null);
+    if (!st) continue;
+    try {
+      const parsed = JSON.parse(st);
+      if (parsed.pairingUrl) qr = parsed.pairingUrl;
+    } catch { /* 坏响应按无响应处理 */ }
   }
   if (!qr) throw new Error("pairingUrl 未就绪（移动桥启动失败；看 app.log）");
   if (!qr.startsWith(`http://127.0.0.1:${wranglerPort}`)) {
