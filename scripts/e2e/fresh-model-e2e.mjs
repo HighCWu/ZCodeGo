@@ -107,18 +107,33 @@ async function cdp() {
     const m = JSON.parse(ev.data);
     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
   };
+  // CDP 调用一律 30s 超时：WS 静默死亡/渲染进程停摆时 evaluate 永不回包
+  //（windows 实测桥 Stop/Start 处悬死 17 分钟靠熔断收场）——超时转 reject
+  // 走有界失败路径
   const ev = (expr) => new Promise((resolve, reject) => {
     const mid = ++id;
+    const timer = setTimeout(() => {
+      pending.delete(mid);
+      reject(new Error("CDP evaluate 超时（30s）"));
+    }, 30_000);
     pending.set(mid, (m) => {
+      clearTimeout(timer);
       if (m.result?.exceptionDetails) reject(new Error(JSON.stringify(m.result.exceptionDetails).slice(0, 200)));
       else resolve(m.result?.result?.value);
     });
     ws0.send(JSON.stringify({ id: mid, method: "Runtime.evaluate", params: { expression: expr, returnByValue: true, awaitPromise: true } }));
   });
   const input = (method, params) =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       const mid = ++id;
-      pending.set(mid, () => resolve());
+      const timer = setTimeout(() => {
+        pending.delete(mid);
+        reject(new Error(`CDP Input.${method} 超时（30s）`));
+      }, 30_000);
+      pending.set(mid, () => {
+        clearTimeout(timer);
+        resolve();
+      });
       ws0.send(JSON.stringify({ id: mid, method: `Input.${method}`, params }));
     });
   const trustedClick = async (x, y) => {
@@ -465,9 +480,26 @@ try {
   if (!prewarmed) throw new Error("假 Provider 通道未就绪（agent 运行时未读到沙箱 provider 配置；看 app.log）");
 
   // ── 2. 移动桥 → 本地信令 pairingUrl → web 连接 ──
-  await ev("window.zcode.zcodeGoMobileBridgeStop()");
+  // 桥启停各带一次重试（windows 实测此处的 evaluate 会偶发悬死/超时）
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await ev("window.zcode.zcodeGoMobileBridgeStop()");
+      break;
+    } catch (e) {
+      if (attempt === 1) throw e;
+      await sleep(2000);
+    }
+  }
   await sleep(2000);
-  await ev("window.zcode.zcodeGoMobileBridgeStart()");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await ev("window.zcode.zcodeGoMobileBridgeStart()");
+      break;
+    } catch (e) {
+      if (attempt === 1) throw e;
+      await sleep(2000);
+    }
+  }
   let qr = "";
   for (let i = 0; i < 30 && !qr; i += 1) {
     await sleep(1200);
