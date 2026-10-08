@@ -111,7 +111,7 @@ jobs:
           cd squashfs-root
           xvfb-run -a bash -c '
             set -e
-            env -i HOME=/tmp/zg-smoke/home DISPLAY="$DISPLAY" PATH=/usr/bin:/bin \
+            env -i HOME=/tmp/zg-smoke/home DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" PATH=/usr/bin:/bin \
               XDG_RUNTIME_DIR=/tmp/zg-smoke/xdg APPDIR="$PWD" \
               ./AppRun --remote-debugging-port=3939 > /tmp/zg-smoke/boot.log 2>&1 &
             APP_PID=$!
