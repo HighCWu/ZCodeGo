@@ -484,7 +484,9 @@ try {
   browser = await chromium.launch({
     ...(browserPath ? { executablePath: browserPath } : {}),
     headless: false,
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    // web 侧同样去 mDNS 混淆：CI runner 无 mDNS 解析器，页面应答里的 .local
+    // 候选桌面端解析不了 → ICE 失败（p2pFailed，实测 ubuntu CI 间歇性命中）
+    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-features=WebRtcHideLocalIpsWithMdns"],
   });
   const context = await browser.newContext({ locale: "zh-CN", viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
@@ -523,6 +525,9 @@ try {
         webRetries += 1;
         console.log(`2. web pairing retry #${webRetries}（page reload + desktop Start）`);
         await ev("window.zcode.zcodeGoMobileBridgeStart()").catch(() => {});
+        // 退避：Start 恢复挂起信令（WS 重连 + register + 房间续期）需 1-2s
+        // 落地，页面立即重载会再撞 desktop_offline 形成空转
+        await sleep(6000);
       }
     }
   }
@@ -541,7 +546,10 @@ try {
   // web 端 onboarding：web 远程是独立浏览器态（桌面过完不代表 web 过），
   // 显示「连接账号」时走同款 API key 路径（设置经 shim RPC 落桌面侧，幂等）。
   // 状态机覆盖：入口按钮态 / API-key 表单态（输入框出现即先填再继续）。
-  for (let step = 0; step < 20; step += 1) {
+  // 停滞检测：同一动作连做 5 步无进展 → 转储 body（重试后设置部分同步会
+  // 出现「API Key/BigModel」选择页等中间态，便于定位卡点）。
+  let lastAction = "", stagnant = 0;
+  for (let step = 0; step < 30; step += 1) {
     const r = await page.evaluate(() => {
       const d = document.querySelector("iframe")?.contentDocument;
       if (!d) return "wait";
@@ -560,6 +568,14 @@ try {
       return "wait";
     }).catch(() => "wait");
     if (r === "composer") break;
+    stagnant = r === lastAction ? stagnant + 1 : 0;
+    lastAction = r;
+    if (stagnant === 4) {
+      const stuck = await page.evaluate(
+        () => document.querySelector("iframe")?.contentDocument?.body.innerText.slice(0, 200) ?? "",
+      ).catch(() => "");
+      console.log(`2. web onboarding stagnant (${r}): ${JSON.stringify(stuck)}`);
+    }
     if (r === "fill" || r === "apikey") {
       await sleep(1200);
       await page.evaluate(() => {
