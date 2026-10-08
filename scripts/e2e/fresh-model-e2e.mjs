@@ -345,6 +345,7 @@ try {
     LANG: process.env.LANG ?? "zh_CN.UTF-8",
     HOME: sandboxHome,
     ZCODE_GO_SIGNALING_ORIGIN: `http://127.0.0.1:${wranglerPort}`,
+    ZCODE_GO_BRIDGE_ICE_SERVERS: "",
     ...(process.platform === "linux"
       ? {
           DISPLAY: E2E_DISPLAY,
@@ -501,7 +502,8 @@ try {
     }
   }
   let qr = "";
-  for (let i = 0; i < 40 && !qr; i += 1) {
+  const qrDeadline = Date.now() + 90_000; // 总时限：逐次 30s 超时会把轮数放大成 21 分钟
+  for (let i = 0; i < 40 && !qr && Date.now() < qrDeadline; i += 1) {
     await sleep(1200);
     // 桥启动窗口期（预生成 offer ≤8s）主进程忙，status IPC 可能悬死——
     // 超时按本轮无响应跳过继续轮询（windows 实测），不作为致命错误
@@ -523,7 +525,8 @@ try {
   // register）再开浏览器——pairingUrl 在本地生成即可读，秒连会撞 desktop_
   // offline/bad_secret（mac CI 实测三连快速失败即此竞态）
   let bridgeReady = false;
-  for (let i = 0; i < 30 && !bridgeReady; i += 1) {
+  const readyDeadline = Date.now() + 90_000;
+  for (let i = 0; i < 30 && !bridgeReady && Date.now() < readyDeadline; i += 1) {
     const st = JSON.parse(await ev("window.zcode.zcodeGoMobileBridgeGetStatus().then(s => JSON.stringify(s))").catch(() => "{}"));
     if (st.state === "waiting-mobile" || st.state === "connected") bridgeReady = true;
     else await sleep(1000);
