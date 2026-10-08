@@ -115,3 +115,25 @@ pnpm install && pnpm run build
 ```
 
 `maxRounds` 限制同一 goal 的复核-重触发轮数（防循环，1–10）；`enabled=false` 停用。
+
+## E2E 测试套件（零真人介入，CI 三平台）
+
+四条假 Provider 真链 E2E（`scripts/e2e/`），全部 HOME 沙箱隔离（真实凭证物理
+不可达，模型调用只可能打到本地假 Provider），CI 在 ubuntu/macos/windows 三
+平台矩阵串跑（失败不中断，一次跑全量）：
+
+| 脚本 | 验证链路 |
+| --- | --- |
+| `goal-verify-e2e.mjs` | goal 完成→复核判定→未完成重触发闭环（含判定消息落库） |
+| `silent-fork-auto-e2e.mjs` | 压缩边界→静默点触发→自动 fork→redirect 落盘→尾部裁剪→原会话完好 |
+| `lazy-history-e2e.mjs` | 巨会话冷打开→合成尾窗即时渲染→auto-open fork（种子双路径：本地真实库整段拷贝 / CI boot1 真实消息扩增） |
+| `fresh-model-e2e.mjs` | fresh 环境双端模型自动勾选 + 桌面↔web 双向消息同步（本地 wrangler dev 信令 Worker + playwright chromium web 端，全部自包含） |
+
+本地运行（Linux 需 Xvfb `:103`）：
+
+```bash
+node scripts/e2e/goal-verify-e2e.mjs        # 其余同理
+```
+
+本地调试沙箱保留：失败自动保留现场（app.log / provider.log.jsonl /
+wrangler.log）；`ZCODE_GO_E2E_KEEP_SANDBOX=1` 通过判据也保留。
