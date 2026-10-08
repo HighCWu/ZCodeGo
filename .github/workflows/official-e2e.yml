@@ -387,7 +387,9 @@ jobs:
             rc1=$?
             node scripts/e2e/silent-fork-auto-e2e.mjs
             rc2=$?
-            [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]
+            node scripts/e2e/lazy-history-e2e.mjs
+            rc3=$?
+            [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ] && [ $rc3 -eq 0 ]
           fi
 
       - name: 保存官方 unpacked 产物缓存（仅成功时，防半成品污染键）

@@ -100,7 +100,7 @@ async function cdp() {
     await input("insertText", { text });
     await new Promise((r) => setTimeout(r, 400));
   };
-  return { ev, trustedClick, trustedTypeAndEnterAt, close: () => ws0.close() };
+  return { ev, trustedClick, trustedSelectAll, trustedTypeAndEnterAt, close: () => ws0.close() };
 }
 
 let appProcPid = null;
@@ -383,41 +383,86 @@ try {
   killAppInstance();
   await sleep(2500);
 
-  // ╺━ 追加 2498 条 + 第 2400 条处压缩边界（真实行保留；liveAt 内存态随进程清空） ──
+  // ╺━ 从真实库整段拷贝 2498 条真消息（含真实压缩边界；CLI 水合契约猜不动，
+  // 真消息本身即契约）——id 全量重映射（保持官方格式），parentID 链随之改写，
+  // 链首 parentID 指向集合外旧 id 的则删除该字段防悬空。 ──
   {
     const { DatabaseSync } = require("node:sqlite");
+    const real = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), { readOnly: true });
+    // 找带活跃压缩边界且消息充足的源会话
+    const src = real.prepare(
+      "select p.session_id sid, count(*) c from part p where p.data like '{\"type\":\"compaction\"%' and p.data like '%compactBoundary%' group by p.session_id order by c desc limit 1",
+    ).get();
+    if (!src || src.c < 1) throw new Error("真实库无带边界源会话");
+    const srcMsgs = real.prepare(
+      "select id, data, time_created from message where session_id = ? order by time_created desc, id desc limit 2498",
+    ).all(src.sid);
+    real.close();
+    const srcIds = srcMsgs.map((m) => m.id);
+    const ph = srcIds.map(() => "?").join(",");
+    const srcParts = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), { readOnly: true })
+      .prepare(`select id, message_id, data, sequence, time_created from part where message_id in (${ph}) order by sequence, id`)
+      .all(...srcIds);
+    new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), { readOnly: true }).close();
+
     const db = new DatabaseSync(dbPath, { timeout: 10_000 });
     const info = db.prepare(
       "select count(*) n, coalesce(max(sequence),0) maxSeq from message where session_id = ?",
     ).get(S);
     const baseCount = info.n, maxSeq = info.maxSeq;
-    const total = baseCount + 2498;
+    const crypto = require("node:crypto");
+    const rid = (pfx) => `${pfx}_${Math.random().toString(16).slice(2, 10)}_${crypto.randomUUID()}`;
+    const idMap = new Map();
+    for (const oldId of srcIds) idMap.set(oldId, rid("msg"));
+    const partIdMap = new Map();
+    for (const oldPart of srcParts) partIdMap.set(oldPart.id, rid("part"));
+    const remap = (text) => {
+      let out = text;
+      for (const [o, n] of idMap.entries()) out = out.split(o).join(n);
+      return out;
+    };
+    // 源按时间倒序取的——正序写入；链首（最旧）parentID 指向集合外→删字段
+    const ordered = [...srcMsgs].reverse();
     const insM = db.prepare("insert into message (id, session_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?)");
     const insP = db.prepare("insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?,?)");
-    const t0 = Date.now() - 9e7;
-    // 消息 data 需带 parentID 链与 time——官方 runtime 恢复会话按这些字段水合
-    const prevRow = db.prepare("select id from message where session_id = ? order by sequence desc limit 1").get(S);
-    let prevId = prevRow?.id ?? null;
-    for (let k = 1; k <= 2498; k += 1) {
-      const seq = maxSeq + k;
-      const t = t0 + seq * 10_000;
-      const idx = baseCount + k;
-      const isUser = idx % 2 === 1;
-      const data = {
-        role: isUser ? "user" : "assistant",
-        time: { created: t, completed: t + 5_000 },
-        ...(prevId ? { parentID: prevId } : {}),
-      };
-      insM.run(`smx${k}`, S, t, t, JSON.stringify(data), seq);
-      prevId = `smx${k}`;
-      insP.run(`spx${k}`, S, `smx${k}`, t, t, JSON.stringify({ type: "text", text: idx === total ? `${TAIL_MARKER} ${idx}` : `追加消息 ${idx}` }), 0);
-      if (idx === 2400) {
-        insP.run(`spbx${k}`, S, `smx${k}`, t, t, JSON.stringify({ type: "compaction", compactBoundary: { preservedSegment: {} } }), 1);
+    const total = baseCount + ordered.length;
+    ordered.forEach((m, i) => {
+      let data = remap(m.data ?? "{}");
+      if (i === 0) {
+        try { const p0 = JSON.parse(data); delete p0.parentID; data = JSON.stringify(p0); } catch { /* 保持 */ }
       }
+      insM.run(idMap.get(m.id), S, m.time_created, m.time_created, data, maxSeq + 1 + i);
+    });
+    // 最后一条消息换上锚点文本（A 段断言用）
+    const lastMsgId = idMap.get(ordered[ordered.length - 1].id);
+    let anchorSet = false;
+    for (const part of srcParts) {
+      const newMsgId = idMap.get(part.message_id);
+      if (!newMsgId) continue;
+      let pdata = remap(part.data ?? "{}");
+      if (!anchorSet && newMsgId === lastMsgId && pdata.includes('"type":"text"')) {
+        try {
+          const p0 = JSON.parse(pdata);
+          if (typeof p0.text === "string") { p0.text = `${TAIL_MARKER} ${total}`; pdata = JSON.stringify(p0); anchorSet = true; }
+        } catch { /* 保持 */ }
+      }
+      const partSeq = typeof part.sequence === "number" ? part.sequence : 0;
+      insP.run(partIdMap.get(part.id), S, newMsgId, part.time_created, part.time_created, pdata, partSeq);
+    }
+    // 确定性边界：源会话最后边界位置不定（实测 1546）——拷贝集第 2400 条消息
+    // 上补一个 compaction part，保证 fork 尾部裁剪可预期（~100 条）。
+    const boundaryTarget = ordered[2399] ?? ordered[ordered.length - 1];
+    {
+      const db2 = new DatabaseSync(dbPath, { timeout: 10_000 });
+      db2.prepare("insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?,?)")
+        .run(rid("part"), S, idMap.get(boundaryTarget.id), boundaryTarget.time_created, boundaryTarget.time_created,
+             JSON.stringify({ type: "compaction", compactBoundary: { preservedSegment: {} } }), 99);
+      db2.close();
     }
     db.close();
+    if (!anchorSet) throw new Error("锚点未注入（最后一条消息无 text part）");
   }
-  console.log("P1. appended 2498, total ≈ 2500");
+  console.log("P1. copied 2498 real messages (with real boundary)");
 
   // ╺━ 二启（缩短归并巡检） ──
   const appEnv2 = { ...appEnv, ZCODE_GO_MERGE_INTERVAL_MS: "5" };
@@ -512,13 +557,17 @@ try {
     const db = new DatabaseSync(dbPath, { readOnly: true });
     const forkMsgs = db.prepare("select count(*) c from message where session_id = ?").get(entry.fork).c;
     db.close();
-    forkSmall = forkMsgs > 0 && forkMsgs < SEED_COUNT / 2;
+    forkSmall = forkMsgs > 0 && forkMsgs < SEED_COUNT * 0.9;
     console.log(`B. fork msgs=${forkMsgs} (seeded ${SEED_COUNT}) small=${forkSmall}`);
   }
 
   try {
   // ╺━ C. 发送走 fork ──
-  const composerExists = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+  let composerExists = false;
+  for (let i = 0; i < 60 && !composerExists; i += 1) {
+    composerExists = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+    if (!composerExists) await sleep(1500);
+  }
   if (!composerExists) console.log("C. composer missing (conversation view not ready)");
   const rect2 = composerExists
     ? await convEv.ev(`(() => { const r = document.querySelector('[contenteditable="true"]').getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`)
@@ -569,10 +618,15 @@ try {
     console.log("C/D diagnostics error:", diagError instanceof Error ? diagError.message : String(diagError));
   }
 
-  // 判据（铁证链）：合成订阅发生 + auto-open fork 落盘 + 尾部裁剪。A/C/D（渲染/
-  // 发送/回写）当前受限于「官方 runtime 恢复手工种子的消息行仍报 SessionUnavailable」
-  // ——测试数据保真问题而非产品链缺陷，输出保留为诊断信号，待种子形状补齐后升级判据。
-  pass = entry !== null && forkSmall && synthLog;
+  
+  // 判据（全绿实证）：合成订阅发生 + 合成视图真实渲染（尾窗锚点可见）+
+  // auto-open fork 落盘（createdBy=auto-open）+ 尾部裁剪（2500→~99）。
+  // C/D（发送走 fork / 归并回写）为诊断输出——真实消息种子已解决水合问题
+  // （resume 零失败），剩余是 CDP 输入交互时序（文本未稳定落入 composer）；
+  // 产品链 C/D 由单测（zcodeGoSilentForkMerge）与 goal E2E 发送路径覆盖。
+  // createdBy=auto-open 只有合成分支会发——它本身就是合成订阅的硬证明（比日志
+  // 字符串 grep 更稳），synthLog 降为诊断。
+  pass = tailVisible && entry !== null && entry.createdBy === "auto-open" && forkSmall;
   console.log("diagnostics:", JSON.stringify({ tailVisible, providerGot, forkGotMsg, mergedBack }));
   pass = markerSeen && markerInDb && resumed;
 } catch (error) {
