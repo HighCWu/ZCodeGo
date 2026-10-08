@@ -13,6 +13,11 @@ on:
   push:
     tags: ["zcode-go-v*"]
 
+# tag → Prerelease 需要写 releases 权限（默认 GITHUB_TOKEN 只读，
+# 实测 softprops/action-gh-release 报 Resource not accessible by integration）。
+permissions:
+  contents: write
+
 concurrency:
   group: standalone-build-${{ github.ref }}
   cancel-in-progress: true
