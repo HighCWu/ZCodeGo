@@ -9,6 +9,11 @@ export const WINDOWS_WINDOW_CONTROLS_BASE_RIGHT_PADDING_PX = 136;
 export const WINDOWS_TITLE_BAR_HEIGHT_PX = 48;
 const MACOS_TRAFFIC_LIGHT_MIN_POSITION_PX = 4;
 const customWindowsControls = new WeakSet<BrowserWindow>();
+/** 创建时带原生 titleBarOverlay 的窗口（win32）。setTitleBarOverlay 只对
+ *  这批窗口合法——对无 overlay 样式的隐藏窗口（如 zcode-go 移动桥窗口）调用
+ *  会在 windows 上触发原生 DWM 死锁，冻结主进程事件循环（CI 四轮探针实测：
+ *  overlay-ready IPC 后主线程 >12s 无周转，看门狗 worker 宣告冻结）。 */
+const nativeTitleBarOverlayWindows = new WeakSet<BrowserWindow>();
 
 export function registerCustomWindowsControls(window: BrowserWindow) {
   customWindowsControls.add(window);
@@ -16,6 +21,10 @@ export function registerCustomWindowsControls(window: BrowserWindow) {
 
 export function hasCustomWindowsControls(window: BrowserWindow) {
   return customWindowsControls.has(window);
+}
+
+export function registerNativeTitleBarOverlayWindow(window: BrowserWindow) {
+  nativeTitleBarOverlayWindows.add(window);
 }
 
 function resolveMacOSWindowButtonPositionForZoomLevel(zoomLevel: number): Point {
@@ -92,6 +101,12 @@ export function syncWindowControlsOverlayForZoomLevel(
       targetWindow.webContents.send(PlatformChannels.WindowControlsOverlayChanged, {
         rightPaddingPx: WINDOWS_WINDOW_CONTROLS_BASE_RIGHT_PADDING_PX,
       });
+      return;
+    }
+    // 只有创建时显式带 titleBarOverlay 的窗口才能安全走 setTitleBarOverlay；
+    // 其余窗口（隐藏工具窗、默认边框窗）一律跳过——对无 overlay 样式的窗口
+    // 做原生调用在 windows 上可能死锁主进程（见 nativeTitleBarOverlayWindows 注释）。
+    if (!nativeTitleBarOverlayWindows.has(targetWindow)) {
       return;
     }
     // Windows titleBarOverlay 的原生窗控不会跟 renderer 页面缩放自动同步。

@@ -134,6 +134,7 @@ import {
 } from "./startupWorkspaceDeepLinkGate.js";
 import { executeDesktopCommand } from "./desktopCommandHandlers.js";
 import { clampDesktopZoomLevel, resolveDesktopZoomLevelFromFactor } from "./desktopZoom.js";
+import { registerNativeTitleBarOverlayWindow } from "./desktopWindowButtonPosition.js";
 import {
   getDesktopMenuLabel as getDesktopMenuLabelByLocale,
   rebuildApplicationMenu,
@@ -1682,6 +1683,11 @@ function openUpdateStatusWindow() {
   win.setMinimizable(true);
   win.setMaximizable(false);
   win.setFullScreenable(false);
+  if (process.platform === "win32") {
+    // 本窗口是 win32 上唯一创建时带原生 titleBarOverlay 的窗口——登记后
+    // syncWindowControlsOverlayForZoomLevel 才允许对它 setTitleBarOverlay。
+    registerNativeTitleBarOverlayWindow(win);
+  }
   if (process.platform === "darwin") {
     syncUpdateStatusWindowChrome(win);
   }
