@@ -168,6 +168,8 @@ interface Session {
   resumeSignaling: (() => void) | null;
   /** primary PC 失败的时间戳（10 分钟滑窗内 ≥5 次才判定网络禁 WebRTC）。 */
   primaryFailureTimestamps: number[];
+  /** 启动期诊断心跳（证明主进程事件循环存活；首个 offer-ready 后停止）。 */
+  heartbeatTimer: NodeJS.Timeout | null;
 }
 
 let activeSession: Session | null = null;
@@ -390,6 +392,10 @@ function teardown(session: Session, reason: string): void {
   if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
   if (session.idleWatchdog) clearInterval(session.idleWatchdog);
   if (session.closeFuse) clearTimeout(session.closeFuse);
+  if (session.heartbeatTimer) {
+    clearInterval(session.heartbeatTimer);
+    session.heartbeatTimer = null;
+  }
   if (session.suspendTimer) {
     clearTimeout(session.suspendTimer);
     session.suspendTimer = null;
@@ -422,6 +428,14 @@ const PRELOAD_SCRIPT_SOURCE = String.raw`
 var ipcRenderer = require("electron").ipcRenderer;
 var fs = require("node:fs");
 var path = require("node:path");
+// 首行面包屑：区分「preload 从未执行」与「执行后死在半路」（windows CI
+// 静默死亡排查）。尽力而为，不因上报失败中断。
+try {
+  ipcRenderer.send("zcode-go-bridge-event", {
+    kind: "preload-boot",
+    href: typeof location !== "undefined" ? location.href : "",
+  });
+} catch (bootReportError) {}
 
 var pc = null;
 var channels = {};
@@ -967,6 +981,7 @@ export function startMobileBridgePairing(
     suspendSignaling: null,
     resumeSignaling: null,
     primaryFailureTimestamps: [],
+    heartbeatTimer: null,
     status: { state: "signaling", token, pairingUrl: shortUrl, qrUrl: shortUrl },
     onStatus,
   };
@@ -1023,6 +1038,21 @@ export function startMobileBridgePairing(
       },
     });
     bridgeWindows.add(win);
+    // 诊断面包屑：windows CI 上窗口创建后完全静默（无 offer-ready/异常/导航
+    // 失败），需分辨「file:// 导航永不完成」vs「preload 从未执行」。
+    win.webContents.on("did-finish-load", () => {
+      logger.info("[zcode-go-mobile-bridge] 桥窗口导航完成", { token, offerId: entry.offerId });
+    });
+    win.webContents.on("did-fail-load", (_event, code, desc, url, isMain) => {
+      logger.warn("[zcode-go-mobile-bridge] 桥窗口导航失败事件", {
+        token,
+        offerId: entry.offerId,
+        code,
+        desc: String(desc ?? ""),
+        url: String(url ?? ""),
+        isMain: !!isMain,
+      });
+    });
     const entry: BridgeWindowEntry = {
       offerId,
       win,
@@ -1036,8 +1066,9 @@ export function startMobileBridgePairing(
     };
     session.windows.push(entry);
     // 桥窗口 preload 的 console/异常唯一可见出口（隐藏窗口，否则静默）。
+    // info 级也放行：静默死亡排查期，噪音代价远小于盲区。
     win.webContents.on("console-message", (_event, level, message) => {
-      if (level >= 2) {
+      if (level >= 1) {
         logger.warn("[zcode-go-bridge-page]", { token, level, message: message.slice(0, 300) });
       }
     });
@@ -1052,7 +1083,13 @@ export function startMobileBridgePairing(
       const detached = activeSession !== session;
       if (!session.windows.includes(entry)) return;
       if (detached && payload.kind !== "pc-state") return;
-      if (payload.kind === "offer-ready") {
+      if (payload.kind === "preload-boot") {
+        logger.info("[zcode-go-mobile-bridge] 桥窗口 preload 已启动", {
+          token,
+          offerId: entry.offerId,
+          href: typeof payload.href === "string" ? payload.href.slice(0, 120) : "",
+        });
+      } else if (payload.kind === "offer-ready") {
         const offer = payload.offer as { type: string; sdp: string };
         const compressed = typeof payload.compressed === "string" ? payload.compressed : null;
         entry.offer = offer;
@@ -1526,6 +1563,28 @@ export function startMobileBridgePairing(
   })();
 
   logger.info("[zcode-go-mobile-bridge] 配对开始", { token });
+  // 启动期诊断心跳：windows CI 实测「配对开始后主进程 IPC 无响应」，但信令
+  // WS 的 register 已发出——需区分主进程事件循环冻结 vs 处理器级死锁。
+  // 心跳停两分钟即止（首个 offer-ready 也会停），日志噪音有界。
+  session.heartbeatTimer = setInterval(() => {
+    if (activeSession !== session) {
+      if (session.heartbeatTimer) clearInterval(session.heartbeatTimer);
+      session.heartbeatTimer = null;
+      return;
+    }
+    sessionLogger?.info("[zcode-go-mobile-bridge] 桥心跳（主进程事件循环存活）", {
+      token,
+      windows: session.windows.length,
+      state: session.status.state,
+    });
+  }, 5_000);
+  session.heartbeatTimer.unref?.();
+  setTimeout(() => {
+    if (session.heartbeatTimer) {
+      clearInterval(session.heartbeatTimer);
+      session.heartbeatTimer = null;
+    }
+  }, 120_000).unref?.();
   emit(session);
   return { ...session.status };
 }
