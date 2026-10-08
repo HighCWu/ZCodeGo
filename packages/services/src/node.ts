@@ -1684,6 +1684,10 @@ export function createLocalServices(options: {
   const pluginSyncService = createPluginSyncService();
   const subagentsService = createSubagentsService({
     isDesktopRuntime: true,
+    // subagent 模型覆盖/增删改只在 runtime 进程 bootstrap 读一次——变更后立即
+    // 回收闲置 agent 进程，下一次派发/新会话读到新配置，免重启应用生效。
+    // 惰性闭包：zcodeAgentService 在本语句之后创建。
+    onRuntimeAffectingChange: () => zcodeAgentService.recycleIdleAgentsForSubagentConfigChange(),
   });
   const commandsService = createCommandsService({ isDesktopRuntime: true });
   const hooksService = createHooksService({

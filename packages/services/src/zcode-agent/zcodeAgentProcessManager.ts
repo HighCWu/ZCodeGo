@@ -133,6 +133,8 @@ type AgentProcessCleanupReason =
   | "manager-dispose-retry"
   | "protocol-close"
   | "request-timeout"
+  | "subagent-config-change"
+  | "subagent-config-change-retry"
   | "workspace-dispose"
   | "workspace-dispose-retry";
 
@@ -1481,6 +1483,44 @@ export class ZCodeAgentProcessManager {
         "workspace dispose",
       );
     }
+  }
+
+  /**
+   * Subagent/Agent 配置变更后的即时回收。runtime 在进程 bootstrap 时一次性读入
+   * subagent profiles 与模型覆盖（launcher 闭包冻结，无热更新通道），已存在的
+   * 进程会继续用旧模型派发新 subagent。这里按与 idle-timeout 完全相同的判定
+   * （无在飞 RPC 且非存储迁移中）立即回收——正在跑任务的进程不动（等它自然
+   * 结束后由闲置回收兜底），下一次 spawn 重新读盘即拿到新配置。
+   * 打开着的空闲会话会被断开订阅，但 renderer 的 runtime-restart 恢复机制
+   * 会在下次交互时自动重连重订阅（与 idle-timeout 走同一条已验证路径）。
+   */
+  recycleIdleProcessesForSubagentConfigChange(): number {
+    if (this.disposed) return 0;
+    let recycled = 0;
+    for (const [workspaceKey, managed] of [...this.processesByWorkspaceKey]) {
+      if (managed.exited) continue;
+      if (
+        managed.client.pendingOperationRequestCount > 0 ||
+        managed.client.storageStartup.isWaiting
+      ) {
+        continue;
+      }
+      log("ZCode agent process recycling for subagent config change", {
+        workspaceKey,
+        pid: managed.child.pid,
+        runtimeIdentity: managed.runtimeIdentity.identity,
+      });
+      this.processesByWorkspaceKey.delete(workspaceKey);
+      this.reportRuntimeUnavailable(managed);
+      void this.cleanupManagedProcessWithRetry(
+        managed,
+        "subagent-config-change",
+        "subagent-config-change-retry",
+        "subagent config change",
+      ).catch(() => undefined);
+      recycled += 1;
+    }
+    return recycled;
   }
 
   private abortPendingStarts(

@@ -1092,7 +1092,10 @@ function resolveOffPeakToolSelection(
 }
 export function createZCodeAgentService(
   options?: CreateZCodeAgentServiceOptions,
-): IZCodeAgentService & { disposeAllAndWait(): Promise<void> } {
+): IZCodeAgentService & {
+    disposeAllAndWait(): Promise<void>;
+    recycleIdleAgentsForSubagentConfigChange(): number;
+  } {
   const processManager = new ZCodeAgentProcessManager(options);
   // Windows indicator 与 macOS producer lifecycle client 共用已校验、去重的 sideband facts。
   const cuaOperationTurnTracker =
@@ -3390,8 +3393,22 @@ export function createZCodeAgentService(
 
   // zcode-go 懒历史拦截需要字面量内部方法引用服务自身（后台真实订阅/退订）；
   // 字面量自引用是 TDZ，前置 ref + 构造后赋值（运行时调用必然晚于赋值）。
-  let serviceRef: IZCodeAgentService & { disposeAllAndWait(): Promise<void> } | null = null;
-  const result: IZCodeAgentService & { disposeAllAndWait(): Promise<void> } = {
+  let serviceRef: IZCodeAgentService & {
+    disposeAllAndWait(): Promise<void>;
+    recycleIdleAgentsForSubagentConfigChange(): number;
+  } | null = null;
+  const result: IZCodeAgentService & {
+    disposeAllAndWait(): Promise<void>;
+    recycleIdleAgentsForSubagentConfigChange(): number;
+  } = {
+    /**
+     * Subagent/Agent 配置变更后的闲置进程回收（见 processManager 同名方法）：
+     * runtime 的 subagent 模型覆盖在进程 bootstrap 冻结，改完设置后旧进程继续
+     * 用旧模型派发；这里立即回收空闲进程让下一次 spawn 读到新配置。
+     */
+    recycleIdleAgentsForSubagentConfigChange(): number {
+      return processManager.recycleIdleProcessesForSubagentConfigChange();
+    },
     async prepareStorage(params) {
       const client = await processManager.getClient(params);
       wireClient(client, params, "chat");

@@ -73,6 +73,13 @@ interface InstalledPluginRecord {
 
 interface SubagentsServiceOptions extends SubagentStorageOptions {
   isDesktopRuntime?: boolean;
+  /**
+   * 任一影响 runtime subagent 解析的配置落盘后触发（模型覆盖/启停/增删改）。
+   * runtime 进程在 bootstrap 时一次性读入这些配置（launcher 闭包冻结，无热更
+   * 新通道），host 借此回调做闲置进程回收，让下一次派发读到新配置——否则用户
+   * 改完默认模型要重启应用才生效。
+   */
+  onRuntimeAffectingChange?: () => void;
 }
 
 interface PluginAgentDiscovery {
@@ -545,8 +552,18 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
   prepareRuntimeState(): Promise<void>;
 } {
   let writeQueue = Promise.resolve();
-  const storageOptions: SubagentsServiceOptions = {
+  const storageOptions: SubagentStorageOptions = {
     homeDir: options?.homeDir,
+  };
+  // 配置落盘后的 runtime 回收通知：尽力而为，通知失败不影响写盘结果。
+  const notifyRuntimeAffectingChange = (): void => {
+    try {
+      options?.onRuntimeAffectingChange?.();
+    } catch (error) {
+      subagentLogger.warn(undefined, "subagent 配置变更通知失败（忽略）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   return {
@@ -645,6 +662,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       const queued = writeQueue.then(runUpdate, runUpdate);
       writeQueue = queued.catch(() => {});
       await queued;
+      notifyRuntimeAffectingChange();
     },
 
     async setBuiltInModelOverride(params: BuiltInSubagentModelOverrideParams): Promise<void> {
@@ -671,6 +689,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       const queued = writeQueue.then(runUpdate, runUpdate);
       writeQueue = queued.catch(() => {});
       await queued;
+      notifyRuntimeAffectingChange();
     },
 
     async setPluginAgentModelOverride(params: PluginSubagentModelOverrideParams): Promise<void> {
@@ -690,6 +709,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       const queued = writeQueue.then(runUpdate, runUpdate);
       writeQueue = queued.catch(() => {});
       await queued;
+      notifyRuntimeAffectingChange();
     },
 
     async getPrimaryUserAgentsDirectory(_params: { provider: ZCodeProvider }): Promise<{
@@ -719,6 +739,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       const agent = parseSavedAgent(content, filePath, scope, params.workspacePath);
       // 先验证即将写入的 Markdown 可解析，避免 serializer 回归时把坏 profile 落盘。
       await writeFile(filePath, content, { encoding: "utf-8", flag: "wx" });
+      notifyRuntimeAffectingChange();
       return { agent };
     },
 
@@ -748,6 +769,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       if (params.oldFilePath && params.oldFilePath !== filePath) {
         await rm(params.oldFilePath, { force: true });
       }
+      notifyRuntimeAffectingChange();
       return { agent };
     },
 
@@ -759,6 +781,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       disabledSet.delete(params.agentId);
       state.disabledAgentIds = [...disabledSet].sort();
       await writeAgentStateFile(state, storageOptions);
+      notifyRuntimeAffectingChange();
     },
   };
 }
