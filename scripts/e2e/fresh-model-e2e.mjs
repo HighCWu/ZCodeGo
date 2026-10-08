@@ -181,6 +181,16 @@ function pickFreePort() {
   });
 }
 
+// 硬超时熔断：单个无超时 await（CDP 回复丢失 / 子进程挂起）会拖死整个 CI
+// 步骤（windows 实测 41 分钟无输出靠人工取消）——到点强退，孤儿进程由
+// runner 清理兜底。ZCODE_GO_E2E_FUSE_MS（秒）可调。
+const E2E_FUSE_MS = (Number(process.env.ZCODE_GO_E2E_FUSE_MS) || 18) * 60_000;
+setTimeout(() => {
+  console.error(`E2E 硬超时熔断（${E2E_FUSE_MS}ms）触发，强制退出`);
+  try { killAppInstance(); } catch { /* 尽力而为 */ }
+  process.exit(1);
+}, E2E_FUSE_MS).unref?.();
+
 let pass = false;
 let providerProc = null;
 let wranglerProc = null;

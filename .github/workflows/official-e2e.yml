@@ -353,6 +353,7 @@ jobs:
       - name: Playwright Chromium（fresh-model E2E web 端浏览器）
         run: node node_modules/playwright-core/cli.js install chromium
       - name: zcode-go 假 Provider E2E（多平台）
+        timeout-minutes: 50 # 步骤级兜底：正常 ~20min；单条 E2E 挂起由脚本内 18min 熔断先触发
         shell: bash
         env:
           ZCODE_OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
