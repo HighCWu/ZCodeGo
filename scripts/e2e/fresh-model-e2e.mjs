@@ -664,7 +664,7 @@ try {
   // ── 3. 桌面发 → 双端收回复（desktop→web 同步） ──
   const b1 = { web: await webCount(), dt: await dtCount() };
   const sent3 = await sendViaComposer("桌面端发起同步验证");
-  const r3 = sent3 ? await waitBoth(b1, 40) : { web: false, desk: false };
+  const r3 = sent3 ? await waitBoth(b1, 28) : { web: false, desk: false };
   console.log(`3. desktop→web: sent=${sent3} web=${r3.web} desktop=${r3.desk} (base web=${b1.web} dt=${b1.dt})`);
   if (!r3.web) {
     const webState = await page.evaluate(() => {

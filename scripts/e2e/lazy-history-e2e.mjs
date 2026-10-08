@@ -671,7 +671,7 @@ try {
   const btnR = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (!b) return 'null'; const r = b.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
   if (btnR !== "null") { const bb = JSON.parse(btnR); await convEv.trustedClick(bb.x, bb.y); }
   let providerGot = false;
-  for (let i = 0; i < 40 && !providerGot; i += 1) {
+  for (let i = 0; i < 14 && !providerGot; i += 1) {
     await sleep(1500);
     providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
   }
@@ -693,7 +693,7 @@ try {
   if (entry) {
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
-    for (let i = 0; i < 30 && !forkGotMsg; i += 1) {
+    for (let i = 0; i < 10 && !forkGotMsg; i += 1) {
       await sleep(2000);
       const c = db.prepare("select count(*) c from part where session_id = ? and data like ?").get(entry.fork, `%${sendMsg}%`).c;
       forkGotMsg = c > 0;
@@ -707,7 +707,7 @@ try {
   {
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
-    for (let i = 0; i < 45 && !mergedBack; i += 1) {
+    for (let i = 0; i < 15 && !mergedBack; i += 1) {
       await sleep(2000);
       const c = db.prepare("select count(*) c from message where session_id = ? and id like 'msg_zgk_mb_%'").get(S).c;
       mergedBack = c > 0;
