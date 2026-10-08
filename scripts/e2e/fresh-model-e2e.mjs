@@ -143,6 +143,8 @@ async function cdp() {
 let appProcPid = null;
 let appExitInfo = null;
 
+/** 应用 iframe 精确选择器（evaluate 内联用；泛匹配会撞上 UI 动态插入的
+ * 其它 iframe——命令面板预览等，ubuntu CI 实测步骤 4 因此点错 composer）。 */
 function killProcTree(pid) {
   if (!pid) return;
   try {
@@ -513,7 +515,7 @@ try {
   for (let i = 0; i < 90 && !webReady; i += 1) {
     await sleep(2000);
     const st = await page.evaluate(() => {
-      const fs = document.querySelectorAll("iframe");
+      const fs = document.querySelectorAll('iframe[src="/app/"]');
       if (!fs.length) return { f: 0 };
       const d = fs[fs.length - 1].contentDocument;
       if (!d || !d.body || !d.body.innerText.trim()) return { f: 0 };
@@ -561,7 +563,7 @@ try {
   let lastAction = "", stagnant = 0;
   for (let step = 0; step < 30; step += 1) {
     const r = await page.evaluate(() => {
-      const d = document.querySelector("iframe")?.contentDocument;
+      const d = document.querySelector('iframe[src="/app/"]')?.contentDocument;
       if (!d) return "wait";
       if (d.querySelector('[contenteditable="true"]')) return "composer";
       const btns = Array.from(d.querySelectorAll("button")).filter(b => b.offsetParent !== null);
@@ -582,14 +584,14 @@ try {
     lastAction = r;
     if (stagnant === 4) {
       const stuck = await page.evaluate(
-        () => document.querySelector("iframe")?.contentDocument?.body.innerText.slice(0, 200) ?? "",
+        () => document.querySelector('iframe[src="/app/"]')?.contentDocument?.body.innerText.slice(0, 200) ?? "",
       ).catch(() => "");
       console.log(`2. web onboarding stagnant (${r}): ${JSON.stringify(stuck)}`);
     }
     if (r === "fill" || r === "apikey") {
       await sleep(1200);
       await page.evaluate(() => {
-        const d = document.querySelector("iframe")?.contentDocument;
+        const d = document.querySelector('iframe[src="/app/"]')?.contentDocument;
         if (!d) return;
         const inp = Array.from(d.querySelectorAll("input")).find(i => i.offsetParent !== null);
         if (!inp) return;
@@ -599,7 +601,7 @@ try {
       }).catch(() => {});
       await sleep(600);
       await page.evaluate(() => {
-        const d = document.querySelector("iframe")?.contentDocument;
+        const d = document.querySelector('iframe[src="/app/"]')?.contentDocument;
         if (!d) return;
         const next = Array.from(d.querySelectorAll("button"))
           .find(b => b.offsetParent !== null && ["继续", "Continue"].includes((b.innerText || "").trim()) && !b.disabled);
@@ -613,18 +615,18 @@ try {
   let webComposerOk = false;
   for (let i = 0; i < 40 && !webComposerOk; i += 1) {
     webComposerOk = await page.evaluate(
-      () => !!document.querySelector("iframe")?.contentDocument?.querySelector('[contenteditable="true"]'),
+      () => !!document.querySelector('iframe[src="/app/"]')?.contentDocument?.querySelector('[contenteditable="true"]'),
     ).catch(() => false);
     if (!webComposerOk) await sleep(1500);
   }
   const webModel = await page.evaluate(() => {
-    const d = document.querySelector("iframe")?.contentDocument;
+    const d = document.querySelector('iframe[src="/app/"]')?.contentDocument;
     if (!d) return "no-frame";
     if (!d.querySelector('[contenteditable="true"]')) return "no-composer";
     return d.body.innerText.includes("选择模型") ? "placeholder" : "selected";
   }).catch(() => "err");
   const webBody = await page.evaluate(
-    () => document.querySelector("iframe")?.contentDocument?.body.innerText.slice(0, 200) ?? "",
+    () => document.querySelector('iframe[src="/app/"]')?.contentDocument?.body.innerText.slice(0, 200) ?? "",
   ).catch(() => "");
   console.log(`2. web composer: ${webComposerOk} model: ${webModel} body: ${JSON.stringify(webBody.slice(0, 120))}`);
   // web 打开既有会话：onboarding 后 composer 多停在空白新会话（问候语态），
@@ -632,20 +634,20 @@ try {
   // 会话（唯一会话；对已打开会话重复点击幂等）
   if (webComposerOk) {
     await page.evaluate(() => {
-      const d = document.querySelector("iframe")?.contentDocument;
+      const d = document.querySelector('iframe[src="/app/"]')?.contentDocument;
       const row = d?.querySelector('li[data-testid^="task-item-"]');
       row?.click();
     }).catch(() => {});
     await sleep(2500);
     const body2 = await page.evaluate(
-      () => document.querySelector("iframe")?.contentDocument?.body.innerText.slice(0, 300) ?? "",
+      () => document.querySelector('iframe[src="/app/"]')?.contentDocument?.body.innerText.slice(0, 300) ?? "",
     ).catch(() => "");
     console.log(`2. after task-row click body: ${JSON.stringify(body2.slice(0, 160))}`);
   }
 
   // 双端回复计数器（假 Provider 回复带 REPLY_TOKEN；预热轮的回复计入基线）
   const webCount = () => page.evaluate(
-    () => (document.querySelector("iframe")?.contentDocument?.body.innerText.match(/ZGFRESHOK/g) || []).length,
+    () => (document.querySelector('iframe[src="/app/"]')?.contentDocument?.body.innerText.match(/ZGFRESHOK/g) || []).length,
   ).catch(() => 0);
   const dtCount = () => ev(`(document.body.innerText.match(/ZGFRESHOK/g) || []).length`);
   const waitBoth = async (before, tries) => {
@@ -666,7 +668,7 @@ try {
   console.log(`3. desktop→web: sent=${sent3} web=${r3.web} desktop=${r3.desk} (base web=${b1.web} dt=${b1.dt})`);
   if (!r3.web) {
     const webState = await page.evaluate(() => {
-      const d = document.querySelector("iframe")?.contentDocument;
+      const d = document.querySelector('iframe[src="/app/"]')?.contentDocument;
       return {
         body: d?.body?.innerText.slice(0, 400) ?? "(no-frame)",
         composers: d?.querySelectorAll('[contenteditable="true"]').length ?? -1,
@@ -679,7 +681,7 @@ try {
   // ── 4. web 发 → 双端回复再 +1（web→desktop 同步） ──
   let r4 = { web: false, desk: false };
   try {
-    const composer = page.frameLocator("iframe").locator('[contenteditable="true"]').first();
+    const composer = page.frameLocator('iframe[src="/app/"]').locator('[contenteditable="true"]').first();
     await composer.click({ timeout: 15000 });
     await composer.type("web 端发起同步验证");
     await page.waitForTimeout(300);
@@ -687,9 +689,9 @@ try {
   } catch (e) {
     await page.screenshot({ path: join(ws, "web-step4-fail.png") }).catch(() => {});
     const webState = await page.evaluate(() => ({
-      iframes: document.querySelectorAll("iframe").length,
-      composers: document.querySelector("iframe")?.contentDocument?.querySelectorAll('[contenteditable="true"]').length ?? -1,
-      body: document.querySelector("iframe")?.contentDocument?.body?.innerText.slice(0, 300) ?? "",
+      iframes: document.querySelectorAll('iframe[src="/app/"]').length,
+      composers: document.querySelector('iframe[src="/app/"]')?.contentDocument?.querySelectorAll('[contenteditable="true"]').length ?? -1,
+      body: document.querySelector('iframe[src="/app/"]')?.contentDocument?.body?.innerText.slice(0, 300) ?? "",
     })).catch(() => ({}));
     console.log("4. web composer 失败（截图已存）：", JSON.stringify(webState), String(e).slice(0, 120));
   }
