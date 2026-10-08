@@ -38,10 +38,8 @@ export function TaskActionMenuContent({
   onCopyTaskPath,
   onCopyTaskLogPath,
   onCopySessionId,
-  onDeriveCompactSession,
   onViewModelTrajectory,
   onOpenInNewWindow,
-  zcodeGoForkDisabled,
 }: {
   intl: {
     formatMessage: (desc: { id: string }, values?: Record<string, string>) => string;
@@ -76,12 +74,10 @@ export function TaskActionMenuContent({
   onCopyTaskPath: () => void;
   onCopyTaskLogPath: () => void;
   onCopySessionId?: () => void;
-  onDeriveCompactSession?: () => void;
   onViewModelTrajectory?: () => void;
   /** zcode-go：在新窗口打开会话（同实例多窗口，仅桌面 shell 传入）。 */
   onOpenInNewWindow?: () => void;
   /** zcode-go：会话已打开显示（fork 走会话内横幅）或分叉进行中时禁用菜单项。 */
-  zcodeGoForkDisabled?: boolean;
 }) {
   const taskTargetActionsDisabled = disableTaskActions || disableTaskTargetActions;
 
@@ -206,20 +202,6 @@ export function TaskActionMenuContent({
             onSelect={onViewModelTrajectory}
           >
             {intl.formatMessage({ id: "taskList.viewModelTrajectory" })}
-          </Item>
-        </>
-      ) : null}
-      {activeSessionId ? (
-        <>
-          <Separator />
-          <Item
-            disabled={taskTargetActionsDisabled || zcodeGoForkDisabled === true}
-            title={zcodeGoForkDisabled === true ? intl.formatMessage({ id: "taskList.forkCompactHistoryDisabled" }) : taskTargetActionsDisabled ? disabledReason : undefined}
-            onSelect={() => {
-              onDeriveCompactSession?.();
-            }}
-          >
-            {intl.formatMessage({ id: "taskList.forkCompactHistory" })}
           </Item>
         </>
       ) : null}

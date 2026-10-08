@@ -26,8 +26,6 @@ export function TaskListItemContextMenu({
   onCopyTaskLogPath,
   onCopySessionId,
   onViewModelTrajectory,
-  onDeriveCompactSession,
-  zcodeGoForkDisabled,
   disableTaskActions = false,
   disabledReason,
 }: {
@@ -59,9 +57,6 @@ export function TaskListItemContextMenu({
   onCopyTaskLogPath: () => void;
   onCopySessionId?: () => void;
   onViewModelTrajectory?: () => void;
-  /** 「分叉压缩历史会话」点击后导航到该会话（SessionPane 消费意图自动派生）。 */
-  onDeriveCompactSession?: () => void;
-  zcodeGoForkDisabled?: boolean;
   disableTaskActions?: boolean;
   disabledReason?: string;
 }) {
@@ -90,8 +85,6 @@ export function TaskListItemContextMenu({
         onCopyTaskLogPath={onCopyTaskLogPath}
         onCopySessionId={onCopySessionId}
         onViewModelTrajectory={onViewModelTrajectory}
-        onDeriveCompactSession={onDeriveCompactSession}
-        zcodeGoForkDisabled={zcodeGoForkDisabled}
         disableTaskActions={disableTaskActions}
         disabledReason={disabledReason}
       />

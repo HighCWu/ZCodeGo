@@ -1631,7 +1631,7 @@ const zhCN: Record<string, string> = {
   "webRemoteControl.mobileQr.description": "用手机相机扫码，在手机上打开这个工作区。",
   "webRemoteControl.generating": "正在准备二维码...",
   "zcodeGoMobileBridge.signalingOrigin.title": "P2P 信令服务器",
-  "zcodeGoMobileBridge.signalingOrigin.description": "默认使用官方服务；自部署可改为你的 Worker 地址（见 DEPLOY.md）。",
+  "zcodeGoMobileBridge.signalingOrigin.description": "默认使用官方服务；自部署可改为你的 Worker 地址。",
   "zcodeGoMobileBridge.signalingOrigin.apply": "确认变更",
   "zcodeGoMobileBridge.signalingOrigin.applied": "已保存，二维码已刷新",
   "zcodeGoMobileBridge.signalingOrigin.resetHint": "清空后确认可恢复默认服务",
@@ -6528,14 +6528,7 @@ const zhCN: Record<string, string> = {
   "scheduledPreview.toast.view": "查看",
   "scheduledPreview.addSchedule": "添加计划",
 
-  "zcodeGo.oversizedBanner.hint": "此会话历史已达 {count} 条，切换与发送可能变慢。建议分叉压缩历史的新会话继续。",
-  "zcodeGo.oversizedBanner.action": "分叉压缩历史会话",
-  "zcodeGo.oversizedBanner.dismiss": "本会话不再提醒",
-  "zcodeGo.forkIntent.noForkableTurn": "当前会话没有可分叉的完成轮（需要最近一轮回复已成功完成）",
   "zcodeGo.fork.inProgress": "正在分叉 {count} 条历史（官方分叉完整复制需较长时间；模型上下文从压缩摘要处继续），完成后自动切换…",
-  "zcodeGo.forkCompact.failed": "分叉压缩历史会话失败：{error}",
-  "taskList.forkCompactHistoryDisabled": "会话已打开（请使用会话内横幅分叉）或正在分叉中",
-  "taskList.forkCompactHistory": "分叉压缩历史会话",
   "taskList.openInNewWindow": "在新窗口打开",
   "taskList.openInNewWindowFailed": "在新窗口打开会话失败：{error}",
 };

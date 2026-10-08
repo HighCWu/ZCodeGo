@@ -795,9 +795,7 @@ export function TaskListItemContextMenuContent({
   onMarkTaskAsUnread,
   disableTaskActions = false,
   disabledReason,
-  onDeriveCompactSession,
   onOpenInNewWindow,
-  zcodeGoForkDisabled,
 }: {
   workspacePath: string;
   remoteSessionId?: string;
@@ -810,11 +808,8 @@ export function TaskListItemContextMenuContent({
   onMarkTaskAsUnread: (taskId: string) => void;
   disableTaskActions?: boolean;
   disabledReason?: string;
-  /** 「分叉压缩历史会话」点击后导航到该会话（SessionPane 消费意图自动派生）。 */
-  onDeriveCompactSession?: () => void;
   /** zcode-go：在新窗口打开该会话（同实例多窗口）。 */
   onOpenInNewWindow?: () => void;
-  zcodeGoForkDisabled?: boolean;
 }) {
   const workspaceActionsDisabled = useOptionalTabStore(
     (state) =>
@@ -962,9 +957,7 @@ export function TaskListItemContextMenuContent({
           title: taskTitle,
         });
       }}
-      onDeriveCompactSession={onDeriveCompactSession}
       onOpenInNewWindow={onOpenInNewWindow}
-      zcodeGoForkDisabled={zcodeGoForkDisabled}
     />
   );
 }

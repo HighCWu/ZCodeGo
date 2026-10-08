@@ -421,7 +421,6 @@ export const PlatformChannels = {
   /** Renderer → Main：分叉 ack 后裁剪子会话存储（剔除最后压缩边界前的惰性历史） */
   ZcodeGoTrimForkedSessionHistory: "zcode:zcode-go-trim-forked-history",
   /** Renderer → Main：直连分叉压缩历史会话（主进程建子会话，不打开父会话） */
-  ZcodeGoForkCompactSession: "zcode:zcode-go-fork-compact-session",
   /** Renderer → Main：在新窗口打开会话（同实例多窗口，共享配置/会话库/托盘） */
   ZcodeGoOpenSessionInNewWindow: "zcode:zcode-go-open-session-in-new-window",
   ZcodeGoSilentFork: "zcode:zcode-go-silent-fork",
@@ -1191,10 +1190,6 @@ export interface PlatformChannelMap {
       keptMessages: number;
       error?: string;
     };
-  };
-  [PlatformChannels.ZcodeGoForkCompactSession]: {
-    request: { parentSessionId: string };
-    response: { ok: boolean; childSessionId: string; copiedMessages: number; workspacePath?: string; error?: string };
   };
   [PlatformChannels.ZcodeGoSilentFork]: {
     request: { sessionId: string };

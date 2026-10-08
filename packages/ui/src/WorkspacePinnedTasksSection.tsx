@@ -12,7 +12,6 @@ import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { resolveTaskFileTreeTargetFromTabs } from "@/lib/taskFileTreeTarget.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
-import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
 import { openSessionInNewWindow } from "@/v4/zcodeGoNewWindowState.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -589,15 +588,10 @@ export function WorkspacePinnedTasksSection({
             task={contextMenuItem}
             isPinned
             intl={intl}
-            onDeriveCompactSession={() => {
-              // zcode-go：直连 fork（不打开父会话）。
-              void forkCompactSessionViaHost(contextMenuItem.taskId, intl.formatMessage);
-            }}
             onOpenInNewWindow={() => {
               // zcode-go：同实例新窗口打开（多任务并行查看）。
               void openSessionInNewWindow(contextMenuItem, intl.formatMessage);
             }}
-            zcodeGoForkDisabled={isZcodeGoForking(contextMenuItem.taskId)}
             onTogglePinTask={(_taskId, pinned) => {
               if (contextMenuItem.workspaceIdentity) {
                 useRemotePinnedTaskStore

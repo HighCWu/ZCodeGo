@@ -14,7 +14,6 @@ import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { buildWorkspaceServiceLookup } from "@/lib/workspaceServiceResolver.js";
 import { logger } from "@/logger.js";
 import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
-import { forkCompactSessionViaHost, isZcodeGoForking } from "@/v4/zcodeGoForkingState.js";
 import { openSessionInNewWindow } from "@/v4/zcodeGoNewWindowState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskListRemoteSyncHint } from "@/TaskListRemoteSyncHint.js";
@@ -363,10 +362,6 @@ export function WorkspaceTimelineTasksSection({
   const selectTimelineItem = useCallback((itemKey: string) => {
     const item = itemByKeyRef.current.get(itemKey);
     if (!item) {
-      return;
-    }
-    // zcode-go：分叉进行中的会话禁止打开（与分叉/裁剪竞态）。
-    if (isZcodeGoForking(item.taskId)) {
       return;
     }
     onSelectTaskRef.current(item.workspacePath, item.taskId, item.workspaceIdentity, item.unreadAt);
@@ -740,13 +735,6 @@ export function WorkspaceTimelineTasksSection({
             task={contextMenuItem}
             isPinned={false}
             intl={intl}
-            zcodeGoForkDisabled={
-              contextMenuItem.taskId === activeTaskId || isZcodeGoForking(contextMenuItem.taskId)
-            }
-            onDeriveCompactSession={() => {
-              // zcode-go：直连 fork（不打开父会话）；完成后侧栏立即出现子任务。
-              void forkCompactSessionViaHost(contextMenuItem.taskId, intl.formatMessage);
-            }}
             onOpenInNewWindow={() => {
               // zcode-go：同实例新窗口打开（多任务并行查看）。
               void openSessionInNewWindow(contextMenuItem, intl.formatMessage);

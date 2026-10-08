@@ -134,7 +134,6 @@ import { ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
 import { SessionSubscriptionErrorPanel } from "@/v4/SessionSubscriptionErrorPanel.js";
 import { ConversationTimeline } from "@/v4/ConversationTimeline.js";
 import { filterZcodeGoGoalVerifyRows } from "@/v4/zcodeGoGoalVerifyRows.js";
-import { consumeZcodeGoForkIntent, peekZcodeGoForkIntent } from "@/v4/zcodeGoForkIntent.js";
 import { invalidateTaskQueryCacheByScopes } from "@/store/taskQueryCacheStore.js";
 import { ConversationShareImportNotice } from "@/v4/ConversationShareImportNotice.js";
 import { ConversationShareConfirmationDock } from "@/v4/ConversationShareConfirmationDock.js";
@@ -728,16 +727,6 @@ export function SessionPane({
   // state——直接 remove() 掉 React 管理的 DOM 节点会让后续 commit 的 DOM 操作与
   // 虚拟树错位（节点已被摘除），流式 delta 触发重渲染时抛异常导致整个会话 pane
   // 被 error boundary 卸载（侧边栏另一棵树不受影响）。
-  const [oversizedDismissed, setOversizedDismissed] = useState<Record<string, number>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}") as Record<
-        string,
-        number
-      >;
-    } catch {
-      return {};
-    }
-  });
   const selectedShareTurnFingerprints = useMemo(
     () =>
       new Map(
@@ -3800,57 +3789,6 @@ export function SessionPane({
     !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
       ? snapshot
       : null;
-  // zcode-go：侧栏「分叉压缩历史会话」意图的消费点。必须在 effect 里消费（渲染期
-  // 副作用会双触发/丢触发）；fork 目标行未就绪（快照加载中）时保留意图等下一轮。
-  // 触发路径一：会话打开/切换/快照更新；路径二：intent 设置时的 window 广播
-  // （覆盖菜单作用于当前已打开会话的场景）。
-  const zcodeGoForkTriggerRef = useRef<() => void>(() => {});
-  zcodeGoForkTriggerRef.current = () => {
-    if (!sessionId || !forkActionsEnabled || !timelineSnapshot) return;
-    if (!peekZcodeGoForkIntent(sessionId)) return;
-    const rowsWindow = timelineSnapshot.rows.window;
-    for (let i = rowsWindow.length - 1; i >= 0; i -= 1) {
-      const row = rowsWindow[i]!;
-      // 与官方 fork 按钮同源：完全读取 row.actions.canFork；entityId 是
-      // ConversationRowTarget 必需项，旧转录行可能缺省。
-      if (
-        row.kind === "assistantText" &&
-        row.actions?.canFork === true &&
-        typeof row.entityId === "string"
-      ) {
-        consumeZcodeGoForkIntent(sessionId);
-        handleFork({ rowId: row.rowId, entityId: row.entityId });
-        return;
-      }
-    }
-    // 快照已就绪仍无可分叉行（最新轮未成功完成/无 entityId）：消费掉意图并给出
-    // 可见反馈，避免菜单点击表现为"什么都没发生"。窗口尚无任何 turnHeader 时视为
-    // 快照未就绪，保留意图等下一轮。
-    let hasTurnHeader = false;
-    for (const row of rowsWindow) {
-      if (row.kind === "turnHeader") {
-        hasTurnHeader = true;
-        break;
-      }
-    }
-    if (!hasTurnHeader) return;
-    consumeZcodeGoForkIntent(sessionId);
-    toast(
-      intl.formatMessage({ id: "zcodeGo.forkIntent.noForkableTurn" }),
-    );
-  };
-  useEffect(() => {
-    zcodeGoForkTriggerRef.current();
-  }, [sessionId, timelineSnapshot, forkActionsEnabled]);
-  useEffect(() => {
-    if (!sessionId) return;
-    const handler = (event: Event): void => {
-      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
-      if (detail?.sessionId === sessionId) zcodeGoForkTriggerRef.current();
-    };
-    window.addEventListener("zcode-go:fork-intent", handler);
-    return () => window.removeEventListener("zcode-go:fork-intent", handler);
-  }, [sessionId]);
   const shareHandoverContext =
     snapshot?.sharedContextImport && "contextId" in snapshot.sharedContextImport
       ? snapshot.sharedContextImport
@@ -4702,70 +4640,6 @@ export function SessionPane({
           snapshot={snapshot}
         />
       ) : null}
-      {(() => {
-        // zcode-go：超大历史会话引导派生。forkAssistant（官方 v4 fork）逐字复制
-        // active transcript（含 compaction 摘要消息及其 compactBoundary part，官方
-        // 明确不做 compact provider-scope 裁剪）；子会话 hydrator 在同一压缩边界
-        // 截断 → 送模型的 post-compact 前缀（摘要 + 边界后消息 + 保留段）与父逐
-        // 字节一致 → provider 前缀缓存命中。压缩前的行随官方语义一并落库，但
-        // 永不进入模型上下文（协议面没有「只复制压缩后」的 fork 入口，host 层
-        // 无法在不动官方运行时的前提下裁剪落库内容）。
-        const totalRows = timelineSnapshot?.rows.totalCount ?? 0;
-        if (!forkActionsEnabled || totalRows < 5000 || !sessionId) return null;
-        // 按会话持久化忽略（localStorage；重载后仍生效）
-        if (oversizedDismissed[sessionId]) return null;
-        const windowRows = timelineSnapshot?.rows.window ?? [];
-        let latestForkTarget: { rowId: number; entityId: string } | null = null;
-        for (let i = windowRows.length - 1; i >= 0; i -= 1) {
-          const row = windowRows[i]!;
-          if (
-            row.kind === "assistantText" &&
-            row.actions?.canFork === true &&
-            typeof row.entityId === "string"
-          ) {
-            latestForkTarget = { rowId: row.rowId, entityId: row.entityId };
-            break;
-          }
-        }
-        if (!latestForkTarget) return null;
-        return (
-          <div
-            data-testid="zcode-go-oversized-banner"
-            className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
-          >
-            <span className="text-amber-200/90">
-              {intl.formatMessage(
-                { id: "zcodeGo.oversizedBanner.hint" },
-                { count: totalRows.toLocaleString() },
-              )}
-            </span>
-            <span className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-amber-400/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20"
-                onClick={() => handleFork(latestForkTarget)}
-              >
-                {intl.formatMessage({ id: "zcodeGo.oversizedBanner.action" })}
-              </button>
-              <button
-                type="button"
-                className="rounded-md px-2 py-1 text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200"
-                onClick={() => {
-                  setOversizedDismissed((current) => ({ ...current, [sessionId]: Date.now() }));
-                  try {
-                    const raw = localStorage.getItem("zcodeGoOversizedDismissed") ?? "{}";
-                    const map = JSON.parse(raw) as Record<string, number>;
-                    map[sessionId] = Date.now();
-                    localStorage.setItem("zcodeGoOversizedDismissed", JSON.stringify(map));
-                  } catch { /* 尽力而为 */ }
-                }}
-              >
-                {intl.formatMessage({ id: "zcodeGo.oversizedBanner.dismiss" })}
-              </button>
-            </span>
-          </div>
-        );
-      })()}
       {composerNode}
       {/* 办公模式显示主动任务推荐；编程模式保留原有小型场景入口。 */}
       {isDraft && (!isOfficeMode || sharedSettings?.proactiveSuggestionsEnabled === true) ? (
