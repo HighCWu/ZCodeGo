@@ -162,8 +162,15 @@ A/B（合成尾窗渲染 + auto-open fork 落盘与裁剪）为硬判据全绿�
 > 结论会被污染（CI 每次新鲜构建故始终全绿）。另注意 mtime 同步只增不删，
 > `out/renderer/assets/` 会积累无引用的旧 chunk，属无害残留。
 
-### windows fresh-model（CI 已知失败）
+### windows 主进程死锁（已修复，56d56af）
 
-windows runner 上移动桥窗口不创建、"配对开始"后主进程 IPC 冻结
-（<2min 干净失败 + 产物上传，不影响其余三条 E2E 与其它平台）。属
-Electron/windows runner 深层问题，ubuntu/macos 全绿。
+windows 上移动桥启动失败的根因：桥窗口（隐藏、默认边框）的 preload 求值期
+发送 `window-controls-overlay-ready` → main 的 win32 分支对**无 titleBarOverlay
+样式的窗口**调用 `setTitleBarOverlay` → 原生 DWM 调用死锁主进程事件循环
+（信令 WS 与渲染进程均存活，仅主线程冻结——四轮探针 + worker 线程看门狗
+定位，2026-10-08）。修复：`nativeTitleBarOverlayWindows` 注册门控，仅对
+创建时显式带 overlay 的窗口调用。修复后 CI 三平台 × 四条 E2E 首次全绿
+（含 windows fresh-model 桥配对+双向同步）。
+
+诊断基建保留在桥模块（面包屑 + 5s 心跳 + worker 看门狗双通道输出 +
+watchdog.log 随产物上传），后续同类静默死亡可一轮定位。
