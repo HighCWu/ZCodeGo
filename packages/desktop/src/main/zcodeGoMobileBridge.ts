@@ -575,6 +575,12 @@ ipcRenderer.on("zcode-go-bridge-req-offer", function () {
 // 真 preload 的 contextBridge 需要隔离环境；本 preload 本身就在隔离世界里，
 // 伪造 contextBridge.exposeInMainWorld 后求值 bundle，捕获其构造的 API 对象
 // （闭包内即真 ipcRenderer.invoke 直连——方法名→通道映射零维护）。
+// 诊断面包屑：windows CI 实测主进程事件循环在 preload-boot 后冻结——
+// 假设是本求值段发出的同步 IPC（sendSync）令主进程 handler 死锁。start/done
+// 二报把死亡段落切到捕获段内/外。
+try {
+  ipcRenderer.send("zcode-go-bridge-event", { kind: "preload-capture-start" });
+} catch (captureStartReportError) {}
 try {
   var electronModule = require("electron");
   var fakeElectron = {};
@@ -617,6 +623,12 @@ try {
     error: String(error),
   });
 }
+try {
+  ipcRenderer.send("zcode-go-bridge-event", {
+    kind: "preload-capture-done",
+    ok: !!capturedApi,
+  });
+} catch (captureDoneReportError) {}
 
 // ── MessagePort 仿真：ServicePort/ScopedServicePort 端到端桥接 ──
 // 远端 UI 的服务层跑在 MessagePort 上（VSBuffer 二进制帧 + 流控对象，均不可
@@ -1099,6 +1111,14 @@ export function startMobileBridgePairing(
           token,
           offerId: entry.offerId,
           href: typeof payload.href === "string" ? payload.href.slice(0, 120) : "",
+        });
+      } else if (payload.kind === "preload-capture-start") {
+        logger.info("[zcode-go-mobile-bridge] preload 官方 bundle 捕获开始", { token, offerId: entry.offerId });
+      } else if (payload.kind === "preload-capture-done") {
+        logger.info("[zcode-go-mobile-bridge] preload 官方 bundle 捕获完成", {
+          token,
+          offerId: entry.offerId,
+          ok: payload.ok === true,
         });
       } else if (payload.kind === "offer-ready") {
         const offer = payload.offer as { type: string; sdp: string };
@@ -1596,29 +1616,49 @@ export function startMobileBridgePairing(
       sessionLogger?.info("[zcode-go-mobile-bridge] 桥启动后首个事件循环周转", { token });
     }
   });
-  // worker 线程看门狗：独立事件循环 + 共享 stdout（app.log 管道）——主线程
-  // 冻结时它仍能发声。每 5s ping 主线程，12s 无 pong 即宣告冻结（每轮只宣告
-  // 一次）。两分钟后自行退出。
+  // worker 线程看门狗：独立事件循环——主线程冻结时唯一仍能发声的通道。
+  // 每 5s ping 主线程，12s 无 pong 即宣告冻结（每轮只宣告一次），两分钟后自退。
+  // 输出双通道：stdout（Electron main 的 stdout 补丁不保证覆盖 worker，实测
+  // 不可靠）+ 直接 appendFileSync 到 STATE_DIR 日志（随 E2E 产物上传，最可靠）。
   try {
+    const watchdogFile = join(STATE_DIR, "mobile-bridge-watchdog.log");
     const watchdog = new Worker(
       [
         "const { parentPort } = require('node:worker_threads');",
+        "const fs = require('node:fs');",
+        "const OUT = process.env.ZCODE_GO_WATCHDOG_FILE || '';",
         "let lastPong = Date.now(); let declared = false; let alive = true;",
+        "const say = (line) => {",
+        "  try { process.stdout.write(new Date().toISOString() + ' [watchdog-worker] ' + line + '\\n'); } catch (e) {}",
+        "  if (OUT) { try { fs.appendFileSync(OUT, new Date().toISOString() + ' [watchdog-worker] ' + line + '\\n'); } catch (e) {} }",
+        "};",
+        "say('看门狗启动（worker 线程事件循环独立运行）');",
         "parentPort.on('message', (m) => { if (m && m.type === 'pong') { lastPong = Date.now(); declared = false; } });",
         "const timer = setInterval(() => {",
         "  if (!alive) return;",
         "  if (Date.now() - lastPong > 12000 && !declared) {",
         "    declared = true;",
-        "    process.stdout.write(new Date().toISOString() + ' [watchdog-worker] 主线程事件循环冻结确认（worker 线程仍存活）\\n');",
+        "    say('主线程事件循环冻结确认（worker 线程仍存活，>12s 无 pong）');",
         "  }",
         "  parentPort.postMessage({ type: 'ping' });",
         "}, 5000);",
         "setTimeout(() => { alive = false; clearInterval(timer); process.exit(0); }, 120000);",
       ].join("\n"),
-      { eval: true },
+      { eval: true, env: { ...process.env, ZCODE_GO_WATCHDOG_FILE: watchdogFile } },
     );
     watchdog.on("message", () => {
       watchdog.postMessage({ type: "pong" });
+    });
+    watchdog.on("error", (error) => {
+      logger.warn("[zcode-go-mobile-bridge] 看门狗 worker 错误", {
+        token,
+        error: String(error),
+      });
+    });
+    watchdog.on("exit", (code) => {
+      if (activeSession === session) {
+        logger.info("[zcode-go-mobile-bridge] 看门狗 worker 退出", { token, code });
+      }
     });
     watchdog.unref?.();
     session.loopWatchdogWorker = watchdog;

@@ -514,7 +514,15 @@ try {
       if (parsed.pairingUrl) qr = parsed.pairingUrl;
     } catch { /* 坏响应按无响应处理 */ }
   }
-  if (!qr) throw new Error("pairingUrl 未就绪（移动桥启动失败；看 app.log）");
+  if (!qr) {
+    // 看门狗文件直读：主线程冻结时 app.log 不再更新，但 worker 线程仍能
+    // 写文件（windows 冻结排查的决定性证据）。
+    try {
+      const wd = join(sandboxHome, ".zcode-go", "mobile-bridge-watchdog.log");
+      if (existsSync(wd)) console.log("watchdog.log:", readFileSync(wd, "utf8").trim().split("\n").slice(-5).join(" | "));
+    } catch { /* 尽力而为 */ }
+    throw new Error("pairingUrl 未就绪（移动桥启动失败；看 app.log / watchdog.log）");
+  }
   if (!qr.startsWith(`http://127.0.0.1:${wranglerPort}`)) {
     throw new Error(`pairingUrl 未指向本地信令：${qr}（ZCODE_GO_SIGNALING_ORIGIN 未生效？）`);
   }
