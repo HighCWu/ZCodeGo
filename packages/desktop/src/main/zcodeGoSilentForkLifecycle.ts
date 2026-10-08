@@ -40,7 +40,11 @@ export function runZcodeGoSilentForkFinalMerge(input: {
 }
 
 let workerTimer: ReturnType<typeof setInterval> | null = null;
-const WORKER_INTERVAL_MS = 60_000;
+// 测试可缩短巡检周期（E2E 断言归并回写用）；生产缺省 60s
+const WORKER_INTERVAL_MS = Math.max(
+  1_000,
+  Number(process.env.ZCODE_GO_MERGE_INTERVAL_MS ?? "60") * 1_000 || 60_000,
+);
 
 /** 启动周期归并（60s；unref 不拖住进程退出）。幂等。 */
 export function startZcodeGoSilentForkMergeWorker(

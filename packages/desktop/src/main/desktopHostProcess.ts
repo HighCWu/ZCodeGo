@@ -188,6 +188,7 @@ export function spawnHostProcess(
       sessionId: string;
       workspacePath: string;
       workspaceIdentity?: string;
+      createdBy?: "auto-compaction" | "auto-open";
     }) => void;
     onCuaOperationStateSourceExited?: (source: ElectronUtilityProcess) => void;
     handleBotRemoteWorkspaceReconnectRequest?: (params: {
@@ -421,6 +422,7 @@ export function spawnHostProcess(
         ...(result.data.workspaceIdentity
           ? { workspaceIdentity: result.data.workspaceIdentity }
           : {}),
+        ...(result.data.createdBy ? { createdBy: result.data.createdBy } : {}),
       });
       return;
     }

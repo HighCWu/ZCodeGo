@@ -22,6 +22,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { openSessionHistoryLazyReader } from "./sessionHistoryLazyReader.js";
+import { resolveZcodeGoSessionId } from "../zcode-agent/zcodeGoSessionRedirect.js";
 import {
   SYNTHETIC_TAIL_MESSAGES,
   SYNTHETIC_PAGE_MESSAGES,
@@ -96,6 +97,8 @@ export function beginSyntheticHistorySubscription(
 ): { subscriptionId: string; frame: unknown } | null {
   const sessionId = params.sessionId;
   if (!sessionId.startsWith("sess_")) return null;
+  // 已有 redirect（此前 fork 过）→ 正常路径直接订阅小 fork，不再合成
+  if (resolveZcodeGoSessionId(sessionId) !== sessionId) return null;
   // V1 仅本地桌面（远程 web 模式的 replayable 语义另议）
   if (params.workspaceIdentity?.trim()) return null;
   if (params.clientMode === "web-remote-replayable") return null;
@@ -183,9 +186,22 @@ export function rewriteSyntheticFrame<T extends { topic?: unknown; subscriptionI
   const rewrite = topicRewrites.get(topic)?.get(subId);
   if (!rewrite) return wire;
   const patched = { ...wire, subscriptionId: rewrite } as T;
-  const inner = (wire as { frame?: { subscriptionId?: unknown } }).frame;
+  const inner = (wire as { frame?: { subscriptionId?: unknown; payload?: { kind?: unknown; snapshot?: { logEpoch?: unknown } } } })
+    .frame;
   if (inner && typeof inner === "object") {
-    (patched as { frame?: unknown }).frame = { ...inner, subscriptionId: rewrite };
+    // 内部快照的 logEpoch 一并改成合成 ack 的 epoch：否则 renderer 按 epoch
+    // 失配走恢复环（fault.subscribe.resumeFailed 实测 ×10）。
+    const payload =
+      inner.payload && typeof inner.payload === "object" && inner.payload.kind === "snapshot"
+        ? {
+            ...inner.payload,
+            snapshot:
+              inner.payload.snapshot && typeof inner.payload.snapshot === "object"
+                ? { ...inner.payload.snapshot, logEpoch: "zcode-go-synthetic" }
+                : inner.payload.snapshot,
+          }
+        : inner.payload;
+    (patched as { frame?: unknown }).frame = { ...inner, subscriptionId: rewrite, ...(payload ? { payload } : {}) };
   }
   return patched;
 }

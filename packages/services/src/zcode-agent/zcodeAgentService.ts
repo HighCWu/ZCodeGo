@@ -934,6 +934,7 @@ interface CreateZCodeAgentServiceOptions extends Omit<
     sessionId: string;
     workspacePath: string;
     workspaceIdentity?: string;
+    createdBy?: "auto-compaction" | "auto-open";
   }) => void;
   /**
    * 官方 Server MCP 身份头解析器。Agent 进程不持有用户身份权威，
@@ -5023,8 +5024,21 @@ export function createZCodeAgentService(
             subscriptionId,
           });
           getConversationFrameEmitter(params).fire(frame as never);
+          // 冷打开自动种子 fork：巨会话必经合成路径 → 用库里既有压缩边界 direct
+          // fork（无需真实 compaction——那本身要先水合 30s，鸡生蛋）→ redirect
+          // 落盘后发送/后台订阅都寻址到小 fork，水合秒级。先 arm 再延迟起后台
+          // 订阅，保证 redirect 先于订阅的 topic 解析。
+          try {
+            options?.silentForkArmSignal?.({
+              sessionId: params.sessionId,
+              workspacePath: params.workspacePath,
+              ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
+              createdBy: "auto-open",
+            });
+          } catch { /* main 侧处理，失败回落合成视图 */ }
           void (async () => {
             try {
+              await new Promise((r) => setTimeout(r, 500));
               const real = await serviceRef!.subscribeConversationV4({
                 ...params,
                 __skipSyntheticHistory: true,

@@ -28,7 +28,7 @@ export interface ZcodeGoSessionRedirectEntry {
   /** 活跃隐形子会话（silent fork）。 */
   forkSessionId: string;
   createdAt: number;
-  createdBy: "manual" | "auto-compaction";
+  createdBy: "manual" | "auto-compaction" | "auto-open";
   /** fork 快照时原会话 message max(rowid)——迟到写入注入的判定边界（batch 3）。 */
   parentMaxMessageRowid?: number;
   /** fork 完成时子会话 message max(rowid)——增量归并回原会话的水位线（batch 3）。 */

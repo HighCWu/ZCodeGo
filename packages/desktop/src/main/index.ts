@@ -1976,27 +1976,30 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
           // zcode-go 静默 fork 第二批：host 帧观测 armed + 静默巡检命中后请求
           // main 执行 fork 事务（host 侧已设派发门闩，redirect 落盘即放行）。
           onZcodeGoSilentForkArm: (event) => {
-            const attempt = () =>
-              executeZcodeGoSilentForkTransaction(event.sessionId, "auto-compaction");
+            const createdBy = event.createdBy ?? "auto-compaction";
+            const attempt = () => executeZcodeGoSilentForkTransaction(event.sessionId, createdBy);
             const reportFailure = (error?: string) => {
               logger.warn("[zcode-go-silent-fork] 自动触发失败，回落原会话继续", {
                 sessionId: event.sessionId,
                 workspacePath: event.workspacePath,
+                createdBy,
                 error,
               });
             };
+            const benign = (error?: string) =>
+              error === "no active compaction boundary" || error === "no fresh compaction boundary";
             const result = attempt();
             if (!result.ok && result.error === "another silent fork transaction is in flight") {
               // 双会话同窗 arm：事务互斥撞车。host 侧 armed 已清，不重试就丢失
               // 到下次 compaction——等当前事务结束后补跑一次。
               const retry = setTimeout(() => {
                 const retried = attempt();
-                if (!retried.ok) reportFailure(retried.error);
+                if (!retried.ok && !benign(retried.error)) reportFailure(retried.error);
               }, 1_500);
               retry.unref?.();
               return;
             }
-            if (!result.ok) reportFailure(result.error);
+            if (!result.ok && !benign(result.error)) reportFailure(result.error);
           },
           onAgentProcessExited: (event) => reportAgentProcessExitToArms(event, logger),
           onAgentProcessError: (event) => reportAgentProcessSpawnErrorToArms(event, logger),

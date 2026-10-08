@@ -1383,8 +1383,9 @@ export function createLocalServices(options: {
   /** zcode-go 静默 fork：host 观测到 compaction + 静默点后通知 main（desktop 装配注入）。 */
   silentForkArmSignal?: (params: {
     sessionId: string;
-    workspacePath: string;
     workspaceIdentity?: string;
+    workspacePath: string;
+    createdBy?: "auto-compaction" | "auto-open";
   }) => void;
 }): ServiceCollection {
   const isDesktopAttachedRemote = options?.serviceAuthorityMode === "desktop-attached-remote";

@@ -134,6 +134,11 @@ export function forkCompactSessionDirect(input: {
    * （整库全拷）由此在事务前拦下。缺省不校验（首个 fork 的边界本就可能很老）。
    */
   requireBoundaryNewerThanMs?: number;
+  /**
+   * 自动种子 fork（巨会话冷打开）用：要求存在活跃压缩边界——无边界时全量
+   * 复制毫无意义，返回专用错误由调用方按良性跳过处理。
+   */
+  requireActiveBoundary?: boolean;
   /** 测试注入的库路径（缺省用真实共享库）。 */
   sessionDbPath?: string;
   tasksIndexDbPath?: string;
@@ -223,6 +228,9 @@ export function forkCompactSessionDirect(input: {
       boundaryTime < input.requireBoundaryNewerThanMs
     ) {
       return { ...base, error: "no fresh compaction boundary" };
+    }
+    if (input.requireActiveBoundary && boundarySeq < 0) {
+      return { ...base, error: "no active compaction boundary" };
     }
     const inPreservedSegment =
       headSeq <= tailSeq
