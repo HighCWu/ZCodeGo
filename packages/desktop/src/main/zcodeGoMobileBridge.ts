@@ -1060,6 +1060,15 @@ export function startMobileBridgePairing(
     bridgeWindows.add(win);
     // 诊断面包屑：windows CI 上窗口创建后完全静默（无 offer-ready/异常/导航
     // 失败），需分辨「file:// 导航永不完成」vs「preload 从未执行」。
+    // ipc-message 在 main 侧 handler 运行前触发：沉默前最后一条 channel 即
+    // 冻结元凶的候选（三轮实测冻结点落在官方 preload 求值窗口内）。
+    win.webContents.on("ipc-message", (_event, channel) => {
+      logger.info("[zcode-go-mobile-bridge] 桥窗口 ipc send", {
+        token,
+        offerId: entry.offerId,
+        channel: String(channel).slice(0, 80),
+      });
+    });
     win.webContents.once("dom-ready", () => {
       logger.info("[zcode-go-mobile-bridge] 桥窗口 dom-ready", { token, offerId: entry.offerId });
     });
