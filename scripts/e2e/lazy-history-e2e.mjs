@@ -383,27 +383,51 @@ try {
   killAppInstance();
   await sleep(2500);
 
-  // ╺━ 从真实库整段拷贝 2498 条真消息（含真实压缩边界；CLI 水合契约猜不动，
-  // 真消息本身即契约）——id 全量重映射（保持官方格式），parentID 链随之改写，
-  // 链首 parentID 指向集合外旧 id 的则删除该字段防悬空。 ──
+  // ╺━ 种子源：本地真实库优先（真实压缩边界保真，CLI 水合契约猜不动——真
+  // 消息本身即契约）；CI 无真实历史时回退为 boot1 自建会话真实消息的重复
+  // 扩增（形状仍是真实运行时产物）：每段克隆全量重映射，段首 parentID 改接
+  // 前段末条保持单一连续链，防悬空引用。 ──
   {
     const { DatabaseSync } = require("node:sqlite");
-    const real = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), { readOnly: true });
-    // 找带活跃压缩边界且消息充足的源会话
-    const src = real.prepare(
-      "select p.session_id sid, count(*) c from part p where p.data like '{\"type\":\"compaction\"%' and p.data like '%compactBoundary%' group by p.session_id order by c desc limit 1",
-    ).get();
-    if (!src || src.c < 1) throw new Error("真实库无带边界源会话");
-    const srcMsgs = real.prepare(
-      "select id, data, time_created from message where session_id = ? order by time_created desc, id desc limit 2498",
-    ).all(src.sid);
-    real.close();
-    const srcIds = srcMsgs.map((m) => m.id);
-    const ph = srcIds.map(() => "?").join(",");
-    const srcParts = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), { readOnly: true })
-      .prepare(`select id, message_id, data, sequence, time_created from part where message_id in (${ph}) order by sequence, id`)
-      .all(...srcIds);
-    new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), { readOnly: true }).close();
+    const realDbPath = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+    const readParts = (db, ids) => {
+      const ph = ids.map(() => "?").join(",");
+      return db.prepare(`select id, message_id, data, sequence, time_created from part where message_id in (${ph}) order by sequence, id`).all(...ids);
+    };
+    /** 每项一次克隆段：messages 升序 + 对应源 parts。 */
+    let occurrences = [];
+    let replicated = false;
+    if (existsSync(realDbPath)) {
+      const real = new DatabaseSync(realDbPath, { readOnly: true });
+      const src = real.prepare(
+        "select p.session_id sid, count(*) c from part p where p.data like '{\"type\":\"compaction\"%' and p.data like '%compactBoundary%' group by p.session_id order by c desc limit 1",
+      ).get();
+      if (src && src.c >= 1) {
+        const srcMsgs = real.prepare(
+          "select id, data, time_created from message where session_id = ? order by time_created desc, id desc limit 2498",
+        ).all(src.sid);
+        if (srcMsgs.length >= 2) {
+          occurrences = [{ messages: [...srcMsgs].reverse(), parts: readParts(real, srcMsgs.map((m) => m.id)) }];
+        }
+      }
+      real.close();
+    }
+    if (occurrences.length === 0) {
+      replicated = true;
+      const db0 = new DatabaseSync(dbPath, { readOnly: true });
+      const baseMsgs = db0.prepare(
+        "select id, data, time_created from message where session_id = ? order by time_created, id",
+      ).all(S);
+      if (baseMsgs.length < 2) { db0.close(); throw new Error("boot1 会话消息不足，无法扩增种子"); }
+      const baseParts = readParts(db0, baseMsgs.map((m) => m.id));
+      db0.close();
+      let total = 0;
+      while (total < SEED_COUNT - 2) {
+        const take = Math.min(baseMsgs.length, SEED_COUNT - 2 - total);
+        occurrences.push({ messages: baseMsgs.slice(0, take), parts: baseParts });
+        total += take;
+      }
+    }
 
     const db = new DatabaseSync(dbPath, { timeout: 10_000 });
     const info = db.prepare(
@@ -412,57 +436,68 @@ try {
     const baseCount = info.n, maxSeq = info.maxSeq;
     const crypto = require("node:crypto");
     const rid = (pfx) => `${pfx}_${Math.random().toString(16).slice(2, 10)}_${crypto.randomUUID()}`;
-    const idMap = new Map();
-    for (const oldId of srcIds) idMap.set(oldId, rid("msg"));
-    const partIdMap = new Map();
-    for (const oldPart of srcParts) partIdMap.set(oldPart.id, rid("part"));
-    const remap = (text) => {
-      let out = text;
-      for (const [o, n] of idMap.entries()) out = out.split(o).join(n);
-      return out;
-    };
-    // 源按时间倒序取的——正序写入；链首（最旧）parentID 指向集合外→删字段
-    const ordered = [...srcMsgs].reverse();
     const insM = db.prepare("insert into message (id, session_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?)");
     const insP = db.prepare("insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?,?)");
-    const total = baseCount + ordered.length;
-    ordered.forEach((m, i) => {
-      let data = remap(m.data ?? "{}");
-      if (i === 0) {
-        try { const p0 = JSON.parse(data); delete p0.parentID; data = JSON.stringify(p0); } catch { /* 保持 */ }
-      }
-      insM.run(idMap.get(m.id), S, m.time_created, m.time_created, data, maxSeq + 1 + i);
-    });
-    // 最后一条消息换上锚点文本（A 段断言用）
-    const lastMsgId = idMap.get(ordered[ordered.length - 1].id);
+    /** 全序已插入消息（链改接与边界/锚点定位用）。 */
+    const inserted = [];
     let anchorSet = false;
-    for (const part of srcParts) {
-      const newMsgId = idMap.get(part.message_id);
-      if (!newMsgId) continue;
-      let pdata = remap(part.data ?? "{}");
-      if (!anchorSet && newMsgId === lastMsgId && pdata.includes('"type":"text"')) {
+    const lastOccurrence = occurrences[occurrences.length - 1];
+    for (const occ of occurrences) {
+      const idMap = new Map();
+      for (const m of occ.messages) idMap.set(m.id, rid("msg"));
+      const partIdMap = new Map();
+      for (const p of occ.parts) partIdMap.set(p.id, rid("part"));
+      const remap = (text) => {
+        let out = text;
+        for (const [o, n] of idMap.entries()) out = out.split(o).join(n);
+        return out;
+      };
+      for (const m of occ.messages) {
+        let data = remap(m.data ?? "{}");
         try {
-          const p0 = JSON.parse(pdata);
-          if (typeof p0.text === "string") { p0.text = `${TAIL_MARKER} ${total}`; pdata = JSON.stringify(p0); anchorSet = true; }
+          const p0 = JSON.parse(data);
+          if (inserted.length === 0) {
+            delete p0.parentID; // 链首：指向集合外旧 id 的悬空引用删除
+          } else if (p0.parentID !== undefined && p0.parentID !== inserted[inserted.length - 1].newId) {
+            p0.parentID = inserted[inserted.length - 1].newId; // 克隆段首/窗口外引用改接前条
+          }
+          data = JSON.stringify(p0);
         } catch { /* 保持 */ }
+        // 克隆时间戳单调递增：懒读取尾窗按 time_created DESC 取（克隆共享
+        // 源时间戳会让尾窗变成同时间戳内的随机抽样——锚点可能落在窗外）
+        const t = m.time_created + inserted.length * 10;
+        insM.run(idMap.get(m.id), S, t, t, data, maxSeq + 1 + inserted.length);
+        inserted.push({ newId: idMap.get(m.id), timeCreated: t });
       }
-      const partSeq = typeof part.sequence === "number" ? part.sequence : 0;
-      insP.run(partIdMap.get(part.id), S, newMsgId, part.time_created, part.time_created, pdata, partSeq);
+      for (const part of occ.parts) {
+        const newMsgId = idMap.get(part.message_id);
+        if (!newMsgId) continue;
+        let pdata = remap(part.data ?? "{}");
+        // 锚点注入最后一段末条消息的 text part（A 段断言用）
+        if (!anchorSet && occ === lastOccurrence && newMsgId === inserted[inserted.length - 1].newId && pdata.includes('"type":"text"')) {
+          try {
+            const p0 = JSON.parse(pdata);
+            if (typeof p0.text === "string") { p0.text = `${TAIL_MARKER} ${baseCount + inserted.length}`; pdata = JSON.stringify(p0); anchorSet = true; }
+          } catch { /* 保持 */ }
+        }
+        const partSeq = typeof part.sequence === "number" ? part.sequence : 0;
+        insP.run(partIdMap.get(part.id), S, newMsgId, part.time_created, part.time_created, pdata, partSeq);
+      }
     }
-    // 确定性边界：源会话最后边界位置不定（实测 1546）——拷贝集第 2400 条消息
-    // 上补一个 compaction part，保证 fork 尾部裁剪可预期（~100 条）。
-    const boundaryTarget = ordered[2399] ?? ordered[ordered.length - 1];
+    // 确定性边界：第 2400 条消息上补一个 compaction part，保证 fork 尾部
+    // 裁剪可预期（~100 条）。
+    const boundaryTarget = inserted[2399] ?? inserted[inserted.length - 1];
     {
       const db2 = new DatabaseSync(dbPath, { timeout: 10_000 });
       db2.prepare("insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?,?)")
-        .run(rid("part"), S, idMap.get(boundaryTarget.id), boundaryTarget.time_created, boundaryTarget.time_created,
+        .run(rid("part"), S, boundaryTarget.newId, boundaryTarget.timeCreated, boundaryTarget.timeCreated,
              JSON.stringify({ type: "compaction", compactBoundary: { preservedSegment: {} } }), 99);
       db2.close();
     }
     db.close();
     if (!anchorSet) throw new Error("锚点未注入（最后一条消息无 text part）");
+    console.log(`P1. seeded ${inserted.length} messages (${replicated ? "boot1 真实消息扩增（CI 路径）" : "真实库整段拷贝（含真实边界）"})`);
   }
-  console.log("P1. copied 2498 real messages (with real boundary)");
 
   // ╺━ 二启（缩短归并巡检） ──
   const appEnv2 = { ...appEnv, ZCODE_GO_MERGE_INTERVAL_MS: "5" };

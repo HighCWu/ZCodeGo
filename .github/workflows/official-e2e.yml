@@ -339,12 +339,19 @@ jobs:
           else
             node scripts/e2e/run.mjs
           fi
-      # ── 5. zcode-go 假 Provider 真链 E2E（goal 复核 + 静默 fork 自动触发）────
+      # ── 5. zcode-go 假 Provider 真链 E2E（goal 复核 + 静默 fork + 懒读取 + web 双向同步）──
       # HOME 沙箱隔离实例 + 官方运行时 + 脚本化假 Provider，零真人介入闭环：
       # 复用本 job 的桌面 out/ 与官方 unpacked（ensure 组装 ~/.zcode-go/electron，
-      # 并从官方包补齐 packaged builtin provider 配置）。三平台同跑——脚本内
-      # 按 --lang=zh-CN 固定 UI 语言、HOME/USERPROFILE 沙箱、pid+平台工具终止；
-      # Linux 包 xvfb-run+openbox（脚本经 ZCODE_GO_E2E_DISPLAY 接动态 display）。
+      # 并从官方包补齐 packaged builtin provider 配置）。四条 E2E 全平台同跑
+      # ——脚本内按 --lang=zh-CN 固定 UI 语言、HOME/USERPROFILE 沙箱、pid+平台
+      # 工具终止；Linux 包 xvfb-run+openbox（脚本经 ZCODE_GO_E2E_DISPLAY 接动态
+      # display）。失败不中断（|| rc=1）——一次跑全量，报告完整。
+      # fresh-model 额外依赖：mobile-bridge/worker 的 wrangler（本地信令 dev）
+      # 与 playwright chromium（web 端浏览器），见上方两个准备步骤。
+      - name: 移动桥 Worker 依赖（fresh-model E2E 本地信令 wrangler dev）
+        run: cd mobile-bridge/worker && npm install --no-audit --no-fund
+      - name: Playwright Chromium（fresh-model E2E web 端浏览器）
+        run: node node_modules/playwright-core/cli.js install chromium
       - name: zcode-go 假 Provider E2E（多平台）
         shell: bash
         env:
@@ -375,21 +382,21 @@ jobs:
               openbox >/tmp/openbox-fp.log 2>&1 &
               sleep 2
               export ZCODE_GO_E2E_DISPLAY="$DISPLAY"
-              node scripts/e2e/goal-verify-e2e.mjs
-              rc1=$?
-              node scripts/e2e/silent-fork-auto-e2e.mjs
-              rc2=$?
+              rc=0
+              for e in goal-verify silent-fork-auto lazy-history fresh-model; do
+                echo "== E2E: $e =="
+                node "scripts/e2e/$e-e2e.mjs" || rc=1
+              done
               kill %1 2>/dev/null || true
-              [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]
+              exit $rc
             '
           else
-            node scripts/e2e/goal-verify-e2e.mjs
-            rc1=$?
-            node scripts/e2e/silent-fork-auto-e2e.mjs
-            rc2=$?
-            node scripts/e2e/lazy-history-e2e.mjs
-            rc3=$?
-            [ $rc1 -eq 0 ] && [ $rc2 -eq 0 ] && [ $rc3 -eq 0 ]
+            rc=0
+            for e in goal-verify silent-fork-auto lazy-history fresh-model; do
+              echo "== E2E: $e =="
+              node "scripts/e2e/$e-e2e.mjs" || rc=1
+            done
+            exit $rc
           fi
 
       - name: 保存官方 unpacked 产物缓存（仅成功时，防半成品污染键）
@@ -429,7 +436,7 @@ jobs:
         run: |
           $dst = "ci-logs-win"
           New-Item -ItemType Directory -Force -Path "$dst" | Out-Null
-          foreach ($src in @("$env:USERPROFILE\.zcode-go", "$env:LOCALAPPDATA\Temp\zg-goal-e2e-*", "$env:LOCALAPPDATA\Temp\zg-sfk-e2e-*")) {
+          foreach ($src in @("$env:USERPROFILE\.zcode-go", "$env:LOCALAPPDATA\Temp\zg-goal-e2e-*", "$env:LOCALAPPDATA\Temp\zg-sfk-e2e-*", "$env:LOCALAPPDATA\Temp\zg-lazy-e2e-*", "$env:LOCALAPPDATA\Temp\zg-fresh-e2e-*")) {
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$dst" -ErrorAction SilentlyContinue }
           }
           if (Test-Path "$dst\.zcode-go\electron") { Remove-Item -Recurse -Force "$dst\.zcode-go\electron" -ErrorAction SilentlyContinue }
@@ -445,6 +452,8 @@ jobs:
             ~/Library/Logs/DiagnosticReports/
             /tmp/zg-goal-e2e-*/
             /tmp/zg-sfk-e2e-*/
+            /tmp/zg-lazy-e2e-*/
+            /tmp/zg-fresh-e2e-*/
           if-no-files-found: ignore
           include-hidden-files: true
       - name: 上传排障产物（Windows 收拢目录）
