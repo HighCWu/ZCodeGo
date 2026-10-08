@@ -442,6 +442,7 @@ jobs:
           if (Test-Path "$dst\.zcode-go\electron") { Remove-Item -Recurse -Force "$dst\.zcode-go\electron" -ErrorAction SilentlyContinue }
       - name: 上传排障产物
         if: always() && runner.os != 'Windows'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.os }}

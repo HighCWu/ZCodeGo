@@ -159,6 +159,8 @@ interface Session {
   closeFuse: NodeJS.Timeout | null;
   /** 信令挂起：有客户端连接期间停 WS/ping/心跳 → 信令零流量，按需恢复。 */
   signalingSuspended: boolean;
+  /** 延迟挂起计时（P2P 通后宽限，防 peer-left 误杀慢客户端）。 */
+  suspendTimer: NodeJS.Timeout | null;
   /** 最近一次有客户端在连的时刻（空闲计时基准，会话创建时初始化）。 */
   lastClientActivityAt: number;
   /** 挂起/恢复信令（startMobileBridgePairing 内部赋值）。 */
@@ -388,6 +390,10 @@ function teardown(session: Session, reason: string): void {
   if (session.roomHeartbeat) clearInterval(session.roomHeartbeat);
   if (session.idleWatchdog) clearInterval(session.idleWatchdog);
   if (session.closeFuse) clearTimeout(session.closeFuse);
+  if (session.suspendTimer) {
+    clearTimeout(session.suspendTimer);
+    session.suspendTimer = null;
+  }
   for (const entry of [...session.windows]) destroyEntry(session, entry);
   try {
     session.ws?.close();
@@ -956,6 +962,7 @@ export function startMobileBridgePairing(
     idleWatchdog: null,
     closeFuse: null,
     signalingSuspended: false,
+    suspendTimer: null,
     lastClientActivityAt: Date.now(),
     suspendSignaling: null,
     resumeSignaling: null,
@@ -1101,7 +1108,19 @@ export function startMobileBridgePairing(
           session.lastClientActivityAt = Date.now();
           // P2P 已通：信令（WS/ping/心跳）不再必要——挂起归零 CF 流量；
           // 新配对需求（重开对话框/新标签页）经 Start 自动恢复。
-          if (!session.signalingSuspended) session.suspendSignaling?.();
+          // 延迟挂起：立即关 WS 会让 room 向客户端发 peer-left，而慢客户端
+          // （UI 资源仍在 DataChannel 拉取、done 未置）会把它当致命错误——
+          // 「桌面端已断开」误杀（mac CI 稳定复现）。宽限 10s 让控制通道/
+          // 应用就绪先行。
+          if (!session.signalingSuspended && !session.suspendTimer) {
+            session.suspendTimer = setTimeout(() => {
+              session.suspendTimer = null;
+              if (activeSession === session && !session.signalingSuspended) {
+                session.suspendSignaling?.();
+              }
+            }, 10_000);
+            session.suspendTimer.unref?.();
+          }
           entry.everConnected = true;
           if (!detached && session.status.state !== "connected") {
             session.status = { ...session.status, state: "connected" };
@@ -1162,7 +1181,16 @@ export function startMobileBridgePairing(
         entry.everConnected = true;
         session.lastClientActivityAt = Date.now();
         // 同 pc-state 路径：P2P 已通即挂起信令（零 CF 流量），Start 按需恢复。
-        if (!session.signalingSuspended) session.suspendSignaling?.();
+        // 同样延迟挂起（控制通道开 ≠ 客户端应用就绪，peer-left 仍可能误杀）。
+        if (!session.signalingSuspended && !session.suspendTimer) {
+          session.suspendTimer = setTimeout(() => {
+            session.suspendTimer = null;
+            if (activeSession === session && !session.signalingSuspended) {
+              session.suspendSignaling?.();
+            }
+          }, 10_000);
+          session.suspendTimer.unref?.();
+        }
         if (!detached && session.status.state !== "connected") {
           session.status = { ...session.status, state: "connected" };
           emit(session);
@@ -1481,6 +1509,11 @@ export function startMobileBridgePairing(
       session.resumeSignaling = () => {
         if (activeSession !== session || !session.signalingSuspended) return;
         session.signalingSuspended = false;
+        // 取消在途的延迟挂起：新客户端配对中途不能再被挂起拆台
+        if (session.suspendTimer) {
+          clearTimeout(session.suspendTimer);
+          session.suspendTimer = null;
+        }
         sessionLogger?.info("[zcode-go-mobile-bridge] 信令恢复（新客户端配对需求）", {
           token,
         });
