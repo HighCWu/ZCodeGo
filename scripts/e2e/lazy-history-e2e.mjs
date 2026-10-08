@@ -485,13 +485,32 @@ try {
       }
     }
     // 确定性边界：第 2400 条消息上补一个 compaction part，保证 fork 尾部
-    // 裁剪可预期（~100 条）。
+    // 裁剪可预期（~100 条）。字段镜像真实边界的完整形态（缺 auto 等会令
+    // task-index 回源同步 Zod 校验失败，fork 水合亦受协议校验牵连）。
     const boundaryTarget = inserted[2399] ?? inserted[inserted.length - 1];
     {
       const db2 = new DatabaseSync(dbPath, { timeout: 10_000 });
       db2.prepare("insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) values (?,?,?,?,?,?,?)")
         .run(rid("part"), S, boundaryTarget.newId, boundaryTarget.timeCreated, boundaryTarget.timeCreated,
-             JSON.stringify({ type: "compaction", compactBoundary: { preservedSegment: {} } }), 99);
+             JSON.stringify({
+               type: "compaction",
+               auto: true,
+               trigger: "auto",
+               phase: "mid_turn",
+               compactReason: "context_limit",
+               tail_start_id: boundaryTarget.newId,
+               compactBoundary: {
+                 boundaryId: rid("compact"),
+                 trigger: "auto",
+                 phase: "mid_turn",
+                 compactReason: "context_limit",
+                 summarySource: "model",
+                 preCompactTokenCount: 1234640,
+                 postCompactTokenCount: 60000,
+                 truePostCompactTokenCount: 60000,
+               },
+               operationId: crypto.randomUUID(),
+             }), 99);
       db2.close();
     }
     db.close();
@@ -607,11 +626,38 @@ try {
   const rect2 = composerExists
     ? await convEv.ev(`(() => { const r = document.querySelector('[contenteditable="true"]').getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`)
     : '{"x":640,"y":700}';
-  const rc = JSON.parse(rect2);
-  await convEv.trustedClick(rc.x, rc.y);
-  await convEv.trustedSelectAll();
+  // 输入落盘校验 + 重试：fork 订阅/重订阅渲染会短暂卸载 composer（取坐标
+  // 会撞 null），输入也可能打到被替换的节点上（editorText 空 + 按钮
+  // disabled）——每次先等 composer 出现、重取坐标，最多 5 次
   const sendMsg = "发送走fork验证消息";
-  await convEv.trustedTypeAndEnterAt(sendMsg, rc.x, rc.y);
+  let typedOk = false;
+  for (let attempt = 0; attempt < 5 && !typedOk; attempt += 1) {
+    let has = false;
+    for (let i = 0; i < 20 && !has; i += 1) {
+      has = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+      if (!has) await sleep(1000);
+    }
+    if (!has) { console.log(`C. attempt ${attempt + 1}: composer 未出现（视图重订阅），重试`); continue; }
+    const rcRaw = await convEv.ev(`(() => { const el = document.querySelector('[contenteditable="true"]'); if (!el) return 'null'; const r = el.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
+    if (rcRaw === "null") continue;
+    const rcFresh = JSON.parse(rcRaw);
+    await convEv.trustedClick(rcFresh.x, rcFresh.y);
+    await convEv.trustedSelectAll();
+    await convEv.trustedTypeAndEnterAt(sendMsg, rcFresh.x, rcFresh.y);
+    await sleep(600);
+    typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
+    if (!typedOk) console.log(`C. type attempt ${attempt + 1} 未落编辑器（视图渲染竞态），重试`);
+  }
+  // 等发送按钮启用再点（goal E2E 既证教训：输入后按钮才可能启用，点击前
+  // 不等启用 = 静默丢弃；事后轮询只会误报）
+  for (let i = 0; i < 40; i += 1) {
+    const state = await convEv.ev(`(() => {
+      const submit = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]');
+      return submit && !submit.disabled ? 'ready' : 'wait';
+    })()`);
+    if (state === "ready") break;
+    await sleep(1500);
+  }
   const btnR = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (!b) return 'null'; const r = b.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
   if (btnR !== "null") { const bb = JSON.parse(btnR); await convEv.trustedClick(bb.x, bb.y); }
   let providerGot = false;
@@ -620,6 +666,19 @@ try {
     providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
   }
   console.log("C. provider received send:", providerGot);
+  if (!providerGot) {
+    const cd = await convEv.ev(`(() => {
+      const ed = document.querySelector('[contenteditable="true"]');
+      const submit = ed?.closest('form')?.querySelector('button[type="submit"]');
+      return JSON.stringify({
+        editorText: ed?.innerText?.slice(0, 60) ?? null,
+        submitDisabled: submit?.disabled ?? null,
+        bodyHasSend: document.body.innerText.includes(${JSON.stringify(sendMsg)}),
+        body: document.body.innerText.slice(0, 250),
+      });
+    })()`);
+    console.log("C. send-miss dump:", cd);
+  }
   let forkGotMsg = false;
   if (entry) {
     const { DatabaseSync } = require("node:sqlite");
@@ -674,7 +733,8 @@ try {
   try { killAppInstance(); } catch { /* 尽力而为 */ }
   await sleep(1500);
   try { providerProc?.kill(); } catch { /* 尽力而为 */ }
-  if (pass) { try { rmSync(ws, { recursive: true, force: true }); } catch { /* 尽力而为 */ } }
+  // ZCODE_GO_E2E_KEEP_SANDBOX=1：判据通过也保留现场（C/D 等诊断项排查用）
+  if (pass && process.env.ZCODE_GO_E2E_KEEP_SANDBOX !== "1") { try { rmSync(ws, { recursive: true, force: true }); } catch { /* 尽力而为 */ } }
   else console.log(`沙箱保留于 ${ws}（app.log / provider.log.jsonl）`);
 }
 console.log(pass ? "LAZY-HISTORY-E2E-OK ✓" : "LAZY-HISTORY-E2E-FAIL ✗");
