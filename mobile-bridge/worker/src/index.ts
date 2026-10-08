@@ -833,7 +833,11 @@ function containerPage(origin: string): string {
     });
   }
 
-  var ORIGIN_WS = ${JSON.stringify(origin)}.replace(/^http/, "ws");
+  // 信令回连地址取「实际伺服本页的 origin」：生产同域等价；本地 wrangler dev
+  // 与反代场景下 request.url 会按 routes 配置重写为路由域名（烘焙值会把信令
+  // 指到错误的服务器），location.origin 才是浏览器真正可达的地址。服务端值
+  // 仅作 location 异常时的兜底。
+  var ORIGIN_WS = String(location.origin || ${JSON.stringify(origin)}).replace(/^http/, "ws");
   $("retry").addEventListener("click", function () { location.reload(); });
   // 文档加载期间创建的 WebSocket 在部分嵌入浏览器（guest view）里事件会被挂起
   // （e2e 实测：升级成功但 onopen/onmessage 永不触发）——推迟到 load 后启动。
@@ -1194,7 +1198,11 @@ const SHIM_JS = String.raw`
       }
       return function () {
         var args = Array.prototype.slice.call(arguments);
-        if (/^on[A-Z]/.test(prop) && typeof args[0] === "function") {
+        // 订阅约定：onXxx 或 zcode-go 的 zcodeGoOnXxx（首参为函数；返回
+        // disposer）。漏认 zcodeGoOn* 会走普通 invoke 返回 Promise——UI 侧
+        // 的 disposer 调用（e?.()）对真值非函数直接 TypeError（会话视图
+        // 渲染崩溃，错误边界吞成「这块界面出了点问题」）。
+        if ((/^on[A-Z]/.test(prop) || /^zcodeGoOn[A-Z]/.test(prop)) && typeof args[0] === "function") {
           var cb = args[0];
           var rest = args.slice(1);
           var subId = ++subSeq;

@@ -30,33 +30,84 @@ import { randomBytes, randomInt } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, app, ipcMain } from "electron";
 
 const STATE_DIR = join(homedir(), ".zcode-go");
 const ICE_SERVERS = [
   { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
 ];
-/** 桌面 renderer 产物根（resource 通道的只读白名单根）。 */
-const RENDERER_ROOT = join(
-  homedir(),
-  ".zcode-go",
-  "electron",
-  "resources",
-  "app",
-  "out",
-  "renderer",
-);
-/** 官方桌面 preload bundle（桥窗口求值它以捕获原生 zcode API）。 */
-const PRELOAD_BUNDLE_PATH = join(
-  homedir(),
-  ".zcode-go",
-  "electron",
-  "resources",
-  "app",
-  "out",
-  "preload",
-  "index.cjs",
-);
+/** 测试缝（ZCODE_GO_BRIDGE_ICE_SERVERS）：JSON 数组覆盖 ICE 服务器；
+ * 空串 = 不用任何 STUN（同机 E2E/CI——host candidates 直连即可，避免
+ * 外网 STUN 依赖与 VPN 环境的打洞抖动）。 */
+function resolveIceServers(): Array<{ urls: string[] }> {
+  const raw = process.env.ZCODE_GO_BRIDGE_ICE_SERVERS;
+  if (raw === "") return [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Array<{ urls: string[] }>;
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* 坏值回落默认 */
+    }
+  }
+  return ICE_SERVERS;
+}
+/** 桥窗口所需产物位置（renderer 根 + 官方 preload bundle）。
+ *
+ * 解析优先级：env 显式覆盖（E2E/异常布局排查）> 运行中应用自身目录
+ * （app.getAppPath()，组装态即 resources/app）> 旧组装位置
+ * （~/.zcode-go/electron，HOME 沙箱下不存在——曾致桥窗口「preload API
+ * 捕获失败（rpc 通道不可用）」）。以 preload bundle 实际存在为准。
+ */
+function resolveBridgeBundlePaths(): { rendererRoot: string; preloadBundle: string } {
+  const candidates: Array<{ rendererRoot: string; preloadBundle: string }> = [];
+  const envRoot = process.env.ZCODE_GO_APP_BUNDLE_ROOT?.trim();
+  if (envRoot) {
+    candidates.push({
+      rendererRoot: join(envRoot, "out", "renderer"),
+      preloadBundle: join(envRoot, "out", "preload", "index.cjs"),
+    });
+  }
+  try {
+    const appPath = app.getAppPath();
+    if (appPath) {
+      candidates.push({
+        rendererRoot: join(appPath, "out", "renderer"),
+        preloadBundle: join(appPath, "out", "preload", "index.cjs"),
+      });
+    }
+  } catch {
+    /* app 未就绪按不可用处理 */
+  }
+  const legacy = {
+    rendererRoot: join(
+      homedir(),
+      ".zcode-go",
+      "electron",
+      "resources",
+      "app",
+      "out",
+      "renderer",
+    ),
+    preloadBundle: join(
+      homedir(),
+      ".zcode-go",
+      "electron",
+      "resources",
+      "app",
+      "out",
+      "preload",
+      "index.cjs",
+    ),
+  };
+  candidates.push(legacy);
+  for (const candidate of candidates) {
+    if (existsSync(candidate.preloadBundle) && existsSync(candidate.rendererRoot)) {
+      return candidate;
+    }
+  }
+  return legacy;
+}
 
 export interface MobileBridgeStatus {
   state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
@@ -837,15 +888,16 @@ ipcRenderer.send("zcode-go-bridge-event", { kind: "ready" });
  */
 function writeBridgeWindowFiles(): { htmlPath: string; preloadPath: string } {
   new Function("rendererRoot", "iceServers", "realPreload", PRELOAD_SCRIPT_SOURCE);
+  const { rendererRoot, preloadBundle } = resolveBridgeBundlePaths();
   const preloadSource =
     "const rendererRoot = " +
-    JSON.stringify(RENDERER_ROOT) +
+    JSON.stringify(rendererRoot) +
     ";\n" +
     "const iceServers = " +
-    JSON.stringify(ICE_SERVERS) +
+    JSON.stringify(resolveIceServers()) +
     ";\n" +
     "const realPreload = " +
-    JSON.stringify(PRELOAD_BUNDLE_PATH) +
+    JSON.stringify(preloadBundle) +
     ";\n" +
     PRELOAD_SCRIPT_SOURCE;
   mkdirSync(STATE_DIR, { recursive: true });
