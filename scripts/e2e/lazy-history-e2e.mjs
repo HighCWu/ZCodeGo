@@ -701,35 +701,54 @@ try {
   // 竞态本质：redirect 后 store 换代会重挂视图，坐标输入的草稿可能随编辑器
   // 卸载而丢（实测 form 有文本而编辑器已换新）。策略：紧凑「focus+insertText
   // → 验证 → 等按钮启用 → JS click → 查 provider」循环，文本丢失即重输。
-  for (let round = 0; round < 6 && !providerGot; round += 1) {
-    let editorSeen = false;
-    for (let i = 0; i < 20 && !editorSeen; i += 1) {
-      editorSeen = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
-      if (!editorSeen) await sleep(1000);
+  // 编辑器可编辑 = 真实订阅接管完成（connecting 态下 composer 只读：
+  // contenteditable="false"，选择器查不到即未就绪）。redirect 后需要 spawn
+  // runtime + 水合 + 订阅 ack，mac 冷启动实测可超 60s——单次长等待到稳定
+  // （连续 3s 可编辑），不做多轮短等。
+  let editorReady = false;
+  for (let i = 0; i < 100 && !editorReady; i += 1) {
+    const seen = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+    editorReady = seen
+      ? await convEv.ev(`(() => { const ed = document.querySelector('[contenteditable="true"]'); if (!ed) return false; let streak = 0; return true; })()`)
+      : false;
+    if (editorReady) {
+      await sleep(1000);
+      editorReady = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+      if (editorReady) {
+        await sleep(1000);
+        editorReady = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+      }
     }
-    if (!editorSeen) continue;
-    // 全选后 insertText 替换选区：重试轮不会把文本追加成双份（mac 实测踩中）。
+    if (!editorReady) await sleep(1000);
+  }
+  // 输入 → 等启用 → 双保险点击（首点可能落在启用前一瞬）。
+  for (let attempt = 0; attempt < 3 && !providerGot; attempt += 1) {
+    if (!editorReady) break;
+    // 可信点击编辑器拿真实焦点（JS focus 会被 React 焦点管理在重渲染瞬间
+    // 抢走——insertText 落空，实测三连失败），再全选替换 + 插入。
+    const er = await convEv.ev(`(() => { const r = document.querySelector('[contenteditable="true"]')?.getBoundingClientRect(); return r ? JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}) : null; })()`);
+    if (er) {
+      const { x, y } = JSON.parse(er);
+      await convEv.trustedClick(Math.round(x), Math.round(y));
+    }
     await convEv.ev(`(() => { const ed = document.querySelector('[contenteditable="true"]'); ed?.focus(); document.execCommand("selectAll"); return "ok"; })()`);
     await convEv.insertText(sendMsg);
     await sleep(400);
     const typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
-    if (!typedOk) continue;
-    // mac 忙渲染（合成视图 2500 行）下按钮启用可超 3s——预算放到 15s。
+    if (!typedOk) { await sleep(1500); continue; }
     let ready = false;
     for (let i = 0; i < 30 && !ready; i += 1) {
       ready = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); return b && !b.disabled; })()`);
       if (!ready) await sleep(500);
     }
-    if (ready) {
-      await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); b?.click(); return "ok"; })()`);
-      await sleep(1800);
+    if (!ready) continue;
+    await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); b?.click(); return "ok"; })()`);
+    await sleep(2000);
+    providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
+    if (!providerGot) {
+      await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (b && !b.disabled) b.click(); return "ok"; })()`);
+      await sleep(3000);
       providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
-      if (!providerGot) {
-        // 首点可能落在启用前一瞬：文本仍在则补点一次。
-        await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (b && !b.disabled) b.click(); return "ok"; })()`);
-        await sleep(2500);
-        providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
-      }
     }
   }
   console.log("C. provider received send:", providerGot);
@@ -756,6 +775,8 @@ try {
       if (!modelChip) await sleep(800);
     }
     console.log("C. composer toolbar:", modelChip);
+    const formDump = await convEv.ev(`(() => { const els = Array.from(document.querySelectorAll('[contenteditable]')); return JSON.stringify(els.map(e => ({ attr: e.getAttribute('contenteditable'), role: e.getAttribute('role'), cls: (e.className || '').slice(0, 40) }))); })()`);
+    console.log("C. editable elements:", formDump);
   }
   if (entry) {
     const { DatabaseSync } = require("node:sqlite");
