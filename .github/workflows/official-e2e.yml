@@ -384,7 +384,7 @@ jobs:
               sleep 2
               export ZCODE_GO_E2E_DISPLAY="$DISPLAY"
               rc=0
-              for e in goal-verify silent-fork-auto lazy-history fresh-model; do
+              for e in goal-verify silent-fork-auto lazy-history takeover fresh-model; do
                 echo "== E2E: $e =="
                 node "scripts/e2e/$e-e2e.mjs" || rc=1
               done
@@ -393,7 +393,7 @@ jobs:
             '
           else
             rc=0
-            for e in goal-verify silent-fork-auto lazy-history fresh-model; do
+            for e in goal-verify silent-fork-auto lazy-history takeover fresh-model; do
               echo "== E2E: $e =="
               node "scripts/e2e/$e-e2e.mjs" || rc=1
             done
