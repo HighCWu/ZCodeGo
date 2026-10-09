@@ -935,7 +935,8 @@ interface CreateZCodeAgentServiceOptions extends Omit<
     sessionId: string;
     workspacePath: string;
     workspaceIdentity?: string;
-    createdBy?: "auto-compaction" | "auto-open";
+    /** 触发来源：静默期 compaction 观测（唯一自动来源）或手动 IPC。 */
+    createdBy?: "auto-compaction" | "manual";
   }) => void;
   /**
    * 官方 Server MCP 身份头解析器。Agent 进程不持有用户身份权威，
@@ -5042,18 +5043,12 @@ export function createZCodeAgentService(
             subscriptionId,
           });
           getConversationFrameEmitter(params).fire(frame as never);
-          // 冷打开自动种子 fork：巨会话必经合成路径 → 用库里既有压缩边界 direct
-          // fork（无需真实 compaction——那本身要先水合 30s，鸡生蛋）→ redirect
-          // 落盘后发送/后台订阅都寻址到小 fork，水合秒级。先 arm 再延迟起后台
-          // 订阅，保证 redirect 先于订阅的 topic 解析。
-          try {
-            options?.silentForkArmSignal?.({
-              sessionId: params.sessionId,
-              workspacePath: params.workspacePath,
-              ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
-              createdBy: "auto-open",
-            });
-          } catch { /* main 侧处理，失败回落合成视图 */ }
+          // 注意：冷打开**不**触发任何 fork（用户设计定稿）：静默 fork 只由
+          // 「compaction 成功标记（online 增量）+ 正确静默时机（无活跃 turn ∧
+          // 无未决后台——后台终端/subagents 结算完）」触发（zcodeGoSilentForkTrigger）。
+          // 历史上这里曾接 auto-open 种子 fork（321d4a4，2026-10-08 误判需求
+          // 引入），已按用户裁决移除——陈旧边界克隆过重且冷打开路径暴露订阅层
+          // connectionId 冲突（2026-10-09 真实事故）。
           void (async () => {
             try {
               await new Promise((r) => setTimeout(r, 500));

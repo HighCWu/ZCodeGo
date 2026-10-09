@@ -5,7 +5,8 @@
  * 两段启动：首启让应用建好真实 schema 的库 → 杀掉后预种 2500 消息巨会话（含
  * 压缩边界 + 任务行）→ 二启打开该任务，断言全链：
  *   A. 合成订阅（app.log「巨会话合成订阅」）【判据】；
- *   B. 冷打开种子 fork：redirect S→fork（createdBy=auto-open）+ fork 消息数 <<
+ *   B. 零副作用断言：无 redirect 落盘、无 fork 会话（用户设计定稿：
+ *      冷打开只合成尾窗；静默 fork 只由 compaction+静默时机触发）
  *      原会话（既有边界截尾，无需真实 compaction）【判据】；
  *   C. 发送走 fork / D. 归并回写：诊断输出——官方 runtime 恢复手工种子行仍报
  *      SessionUnavailable（数据保真问题），产品链 C/D 已由单测覆盖。
@@ -394,6 +395,7 @@ try {
     return true;
   };
   const dbPath = join(sandboxHome, ".zcode", "cli", "db", "db.sqlite");
+  const redirectFile = join(sandboxHome, ".zcode-go", "session-redirect.json");
   const created0 = await sendViaComposer2("预热：创建懒读取巨会话");
   console.log("P0. seed conversation sent:", created0);
   let S = null;
@@ -598,21 +600,14 @@ try {
   console.log("P2. boot2 composer:", composer2);
   if (!composer2) throw new Error("二启未进入主界面");
 
-  // ╺━ A/B. 侧栏点开真实任务行 → 合成视图 + 种子 fork ──
+  // ╺━ A. 侧栏点开真实任务行 → 合成尾窗即时渲染（且**零副作用**） ──
   let rowSeen = false;
   for (let i = 0; i < 40 && !rowSeen; i += 1) {
     rowSeen = await ev2(`!!document.querySelector('li[data-testid="task-item-${S}"]')`);
     if (!rowSeen) await sleep(1500);
   }
   console.log("A0. task row visible:", rowSeen);
-  if (!rowSeen) {
-    const dump = await ev2(`(() => {
-      const items = Array.from(document.querySelectorAll('[data-testid*="task-item"]')).map(e => e.getAttribute('data-testid')).slice(0, 5);
-      return JSON.stringify({ items, body: document.body.innerText.slice(0, 350) });
-    })()`);
-    console.log("A0 dump:", dump);
-    throw new Error("任务行未出现在侧栏");
-  }
+  if (!rowSeen) throw new Error("任务行未出现在侧栏");
   await ev2(`document.querySelector('li[data-testid="task-item-${S}"]').click(); "ok"`);
   let tailVisible = false;
   for (let i = 0; i < 75 && !tailVisible; i += 1) {
@@ -620,252 +615,46 @@ try {
     tailVisible = await ev2(`document.body.innerText.includes(${JSON.stringify(TAIL_MARKER)})`);
   }
   console.log("A. tail window visible:", tailVisible);
-  if (!tailVisible) {
+
+  // ── B. 零副作用断言（用户设计定稿）：冷打开只合成尾窗，不触发任何 fork——
+  //    无 redirect 落盘、无新会话行（session 表无 fork）、无任务索引行。
+  //    静默 fork 只由「compaction online 标记 + 正确静默时机」触发（本 E2E
+  //    的种子会话无 runtime 压缩事件，冷打开路径不应有任何 DB 写入）。
+  await sleep(3000);
+  const redirectExists = existsSync(redirectFile);
+  let redirectEntry = null;
+  if (redirectExists) {
     try {
-      const shot = join(ws, "a-fail.png");
-      await c2.rawCall("Page.captureScreenshot", { format: "png" }).then((m) => {
-        if (m?.result?.data) writeFileSync(shot, Buffer.from(m.result.data, "base64"));
-      });
-      console.log("A. failure screenshot:", shot);
-    } catch { /* 截图尽力而为 */ }
-    const bodyDump = await ev2(`document.body.innerText.slice(0, 600)`);
-    console.log("A. body dump:", JSON.stringify(bodyDump));
-    const cl = c2.consoleLines().filter((l) => /v4-store|recovery|fault|resync|notOwned|redirect/i.test(l));
-    console.log("A. console (filtered, last 40):");
-    for (const line of cl.slice(-40)) console.log("  ", line);
-    if (cl.length === 0) {
-      const all = c2.consoleLines();
-      console.log("A. console (unfiltered, last 30):");
-      for (const line of all.slice(-30)) console.log("  ", line);
-    }
-    // React fiber 探针：从错误卡 DOM 沿 fiber 向上扫 hooks，找持有 topic+recovery
-    // 的 store 实例，dump 活体状态（终态 fault 从哪来：超时 or fault 帧 or 世代错配）。
-    const probe = await ev2(`(() => {
-      const out = [];
-      try {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        let node; let startEl = null;
-        while ((node = walker.nextNode())) if (node.textContent.includes("recoveryFailed")) { startEl = node.parentElement; break; }
-        if (!startEl) return "no-error-card";
-        const fiberKey = Object.keys(startEl).find((k) => k.startsWith("__reactFiber$"));
-        if (!fiberKey) return "no-fiber";
-        let f = startEl[fiberKey];
-        for (let depth = 0; f && depth < 60; depth += 1, f = f.return) {
-          let hook = f.memoizedState;
-          for (let h = 0; hook && h < 40; h += 1, hook = hook.next) {
-            const v = hook.memoizedState;
-            const candidates = v && typeof v === "object" ? (Array.isArray(v) ? v : [v]) : [];
-            for (const c of candidates) {
-              if (c && typeof c === "object" && "topic" in c && "recovery" in c) {
-                const s = { depth, topic: c.topic, status: c.status, lastError: c.lastError, subscriptionId: c.state && c.state.subscriptionId, snapshotSeq: c.state && c.state.snapshot && c.state.snapshot.seq, hasBase: !!(c.subscriptionHasAppliedBase), recovery: c.recovery && { sub: c.recovery.subscriptionId, forceSnapshot: c.recovery.forceSnapshot, ackReceived: c.recovery.ackReceived, ackMode: c.recovery.ackMode, validFrameSeen: c.recovery.validFrameSeen, requestInFlight: c.recovery.requestInFlight, upgradePending: c.recovery.upgradePending, contentFault: c.recovery.contentFault, frameDeadline: c.recovery.frameDeadline && String(c.recovery.frameDeadline) } };
-                out.push(JSON.stringify(s));
-              }
-            }
-          }
-        }
-      } catch (e) { return "probe-error: " + (e && e.message); }
-      return out.length ? out.join("\\n") : "no-store-found";
-    })()`);
-    console.log("A. store probe:", probe);
+      const parsed = JSON.parse(readFileSync(redirectFile, "utf8"));
+      redirectEntry = parsed.redirects?.[S] ?? null;
+    } catch { /* 坏文件按无表项 */ }
   }
-  const convEv = c2;
-
-  const redirectFile = join(sandboxHome, ".zcode-go", "session-redirect.json");
-  let entry = null;
-  for (let i = 0; i < 40 && !entry; i += 1) {
-    await sleep(1000);
-    try {
-      const raw = JSON.parse(readFileSync(redirectFile, "utf8"));
-      const es = Object.entries(raw.redirects ?? {});
-      if (es.length > 0) entry = { original: es[0][0], fork: es[0][1].forkSessionId, createdBy: es[0][1].createdBy };
-    } catch { /* 未落盘 */ }
-  }
-  console.log("B. redirect:", JSON.stringify(entry));
-  let forkSmall = false;
-  if (entry) {
-    await sleep(1000);
-    const { DatabaseSync } = require("node:sqlite");
-    const db = new DatabaseSync(dbPath, { readOnly: true });
-    const forkMsgs = db.prepare("select count(*) c from message where session_id = ?").get(entry.fork).c;
-    db.close();
-    forkSmall = forkMsgs > 0 && forkMsgs < SEED_COUNT * 0.9;
-    console.log(`B. fork msgs=${forkMsgs} (seeded ${SEED_COUNT}) small=${forkSmall}`);
-  }
-
-  // C/D 为硬判据：变量在外层主 try 作用域声明，诊断 try 内只赋值。
-  let providerGot = false;
-  let forkGotMsg = false;
-  let mergedBack = false;
-  let editorReady = false;
-  let stormFree = false;
-  try {
-  const sendMsg = `发送走fork验证消息 ${Date.now()}`;
-  // ╺━ C. 发送走 fork ──
-  // 竞态本质：redirect 后 store 换代会重挂视图，坐标输入的草稿可能随编辑器
-  // 卸载而丢（实测 form 有文本而编辑器已换新）。策略：紧凑「focus+insertText
-  // → 验证 → 等按钮启用 → JS click → 查 provider」循环，文本丢失即重输。
-  // 编辑器可编辑 = 真实订阅接管完成（connecting 态下 composer 只读：
-  // contenteditable="false"，选择器查不到即未就绪）。redirect 后需要 spawn
-  // runtime + 水合 + 订阅 ack，mac 冷启动实测可超 60s——单次长等待到稳定
-  // （连续 3s 可编辑），不做多轮短等。
-  for (let i = 0; i < 150 && !editorReady; i += 1) {
-    const seen = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
-    editorReady = seen
-      ? await convEv.ev(`(() => { const ed = document.querySelector('[contenteditable="true"]'); if (!ed) return false; let streak = 0; return true; })()`)
-      : false;
-    if (editorReady) {
-      await sleep(1000);
-      editorReady = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
-      if (editorReady) {
-        await sleep(1000);
-        editorReady = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
-      }
-    }
-    if (!editorReady) await sleep(1000);
-  }
-  // 输入 → 等启用 → 双保险点击（首点可能落在启用前一瞬）。
-  for (let attempt = 0; attempt < 3 && !providerGot; attempt += 1) {
-    if (!editorReady) break;
-    // 可信点击编辑器拿真实焦点（JS focus 会被 React 焦点管理在重渲染瞬间
-    // 抢走——insertText 落空，实测三连失败），再全选替换 + 插入。
-    const er = await convEv.ev(`(() => { const r = document.querySelector('[contenteditable="true"]')?.getBoundingClientRect(); return r ? JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}) : null; })()`);
-    if (er) {
-      const { x, y } = JSON.parse(er);
-      await convEv.trustedClick(Math.round(x), Math.round(y));
-    }
-    await convEv.ev(`(() => { const ed = document.querySelector('[contenteditable="true"]'); ed?.focus(); document.execCommand("selectAll"); return "ok"; })()`);
-    await convEv.insertText(sendMsg);
-    await sleep(400);
-    let typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
-    if (!typedOk) {
-      // insertText 落空（渲染窗口竞态）——退到逐字符 CDP 键盘（真实键入路径）。
-      await convEv.ev(`(() => { const ed = document.querySelector('[contenteditable="true"]'); ed?.focus(); document.execCommand("selectAll"); return "ok"; })()`);
-      await convEv.typeText(sendMsg);
-      await sleep(500);
-      typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
-    }
-    if (!typedOk) { await sleep(1500); continue; }
-    let ready = false;
-    for (let i = 0; i < 30 && !ready; i += 1) {
-      ready = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); return b && !b.disabled; })()`);
-      if (!ready) await sleep(500);
-    }
-    if (!ready) continue;
-    await convEv.ev(`(() => { const form = document.querySelector('[contenteditable="true"]')?.closest('form'); const b = form?.querySelector('button[type="submit"]'); if (b && !b.disabled) b.click(); return "ok"; })()`);
-    // fork 的 runtime 冷启动（spawn+水合+订阅+发送+HTTP）在 CI 慢机上端到端
-    // 可超 5s——轮询 30s；6s/12s 处文本仍在则补发（click 落空时用
-    // form.requestSubmit 强派 submit 事件——实测 JS click 偶发不触发提交）。
-    const resubmit = () => convEv.ev(`(() => { const form = document.querySelector('[contenteditable="true"]')?.closest('form'); const b = form?.querySelector('button[type="submit"]'); if (b && !b.disabled) { b.click(); form?.requestSubmit(b); } return "ok"; })()`);
-    for (let i = 0; i < 15 && !providerGot; i += 1) {
-      await sleep(2000);
-      providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
-      if (!providerGot && (i === 3 || i === 6)) await resubmit();
-    }
-  }
-  if (!editorReady) {
-    console.log("C. skipped: 编辑器 150s 未可编辑（真实订阅接管未完成——时序敏感，产品链已由本地多次全绿实证；A/B+单测守产品回归）");
-  }
-  console.log("C. provider received send:", providerGot, editorReady ? "" : "(skipped)");
-  if (!providerGot) {
-    const cd = await convEv.ev(`(() => {
-      const ed = document.querySelector('[contenteditable="true"]');
-      const submit = ed?.closest('form')?.querySelector('button[type="submit"]');
-      return JSON.stringify({
-        editorText: ed?.innerText?.slice(0, 60) ?? null,
-        submitDisabled: submit?.disabled ?? null,
-        pendingChips: document.querySelectorAll('[data-pending-command], [data-command-chip]').length,
-        bodyHasSend: document.body.innerText.includes(${JSON.stringify(sendMsg)}),
-      });
-    })()`);
-    console.log("C. send-miss dump:", cd);
-    let modelChip = null;
-    for (let i = 0; i < 10 && !modelChip; i += 1) {
-      modelChip = await convEv.ev(`(() => {
-        const ed = document.querySelector('[contenteditable="true"]');
-        const form = ed?.closest('form');
-        if (!form) return null;
-        return JSON.stringify({ formText: form.innerText.slice(0, 200) });
-      })()`);
-      if (!modelChip) await sleep(800);
-    }
-    console.log("C. composer toolbar:", modelChip);
-    const formDump = await convEv.ev(`(() => { const els = Array.from(document.querySelectorAll('[contenteditable]')); return JSON.stringify(els.map(e => ({ attr: e.getAttribute('contenteditable'), role: e.getAttribute('role'), cls: (e.className || '').slice(0, 40) }))); })()`);
-    console.log("C. editable elements:", formDump);
-  }
-  if (entry) {
-    const { DatabaseSync } = require("node:sqlite");
-    const db = new DatabaseSync(dbPath, { readOnly: true });
-    // 60s 预算：输入行持久化有批量时序，负载高时 20s 不够（实测）。
-    for (let i = 0; i < 20 && !forkGotMsg; i += 1) {
-      await sleep(3000);
-      const c = db.prepare("select count(*) c from part where session_id = ? and data like ?").get(entry.fork, `%${sendMsg}%`).c;
-      forkGotMsg = c > 0;
-    }
-    db.close();
-  }
-  console.log("C. send landed in fork:", forkGotMsg);
-
-  // ╺━ D. 归并回写（原会话出现 msg_zgk_mb_ 行） ──
+  let forkRowCount = 0;
   {
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
-    // 135s 预算：归并在 fork 空闲后由后台合并执行，时序随负载漂移。
-    for (let i = 0; i < 45 && !mergedBack; i += 1) {
-      await sleep(3000);
-      const c = db.prepare("select count(*) c from message where session_id = ? and id like 'msg_zgk_mb_%'").get(S).c;
-      mergedBack = c > 0;
-    }
+    forkRowCount = db.prepare(
+      "select count(*) c from session where id != ? and parent_id = ?",
+    ).get(S, S).c;
     db.close();
   }
-  console.log("D. merged back to original:", mergedBack);
+  const noFork = !redirectEntry && forkRowCount === 0;
+  console.log("B. cold-open side-effect free:", noFork,
+    `(redirect entry: ${redirectEntry ? "present!" : "none"}; fork rows: ${forkRowCount})`);
 
-  // ── E.（诊断输出，不计判据）重开已 redirect 会话 = 真实事故触发面。
-  //    已知产品 bug：redirect 存在时冷打开触发重订阅风暴（E2E 实测 832 代/16s，
-  //    52 代/秒，resync notOwned ×2 每代）——用户事故同源。修复方向已锁定
-  //    （后台合成订阅与 renderer 订阅在 fork topic 上共用 connectionId 互杀 +
-  //    路由登记键寻址），完整修复见专项。renderer 侧已加退避缓解。──
+  // C/D（发送走 fork / 归并回写）随 auto-open 移除而下线：冷打开回归纯合成
+  // 尾窗（只读视图，用户设计），发送链路由静默 fork（auto-compaction 路径）
+  // 的 silent-fork-auto E2E 与单测（zcodeGoSilentForkMerge）覆盖。
+
+  // E.（诊断输出，不计判据）合成尾窗的 live 接管：后台真实订阅建立后帧持续
+  // 流动（renderer 无感升级），观察 15s 无 notOwned 风暴。
   const notOwnedBefore = readFileSync(appLog, "utf8").split("fault.subscription.notOwned").length - 1;
-  await convEv.ev(`document.querySelector('li[data-testid="task-item-" + ${JSON.stringify(S)}]')?.click(); "ok"`);
-  await sleep(8000);
-  let reopened = false;
-  for (let i = 0; i < 20 && !reopened; i += 1) {
-    reopened = await convEv.ev(`document.body.innerText.includes(${JSON.stringify(TAIL_MARKER)})`);
-    if (!reopened) await sleep(1500);
-  }
-  await sleep(5000);
+  await sleep(15000);
   const notOwnedAfter = readFileSync(appLog, "utf8").split("fault.subscription.notOwned").length - 1;
-  stormFree = reopened && notOwnedAfter - notOwnedBefore <= 3;
-  console.log("E. reopened redirected session:", reopened, "| notOwned delta:", notOwnedAfter - notOwnedBefore);
+  console.log("E. live takeover notOwned delta (diagnostic):", notOwnedAfter - notOwnedBefore);
 
-  } catch (diagError) {
-    console.log("C/D diagnostics error:", diagError instanceof Error ? diagError.message : String(diagError));
-  }
-
-  
-  // 判据（全绿实证）：合成订阅发生 + 合成视图真实渲染（尾窗锚点可见）+
-  // auto-open fork 落盘（createdBy=auto-open）+ 尾部裁剪（2500→~99）。
-  // C/D（发送走 fork / 归并回写）为诊断输出——真实消息种子已解决水合问题
-  // （resume 零失败），剩余是 CDP 输入交互时序（文本未稳定落入 composer）；
-  // 产品链 C/D 由单测（zcodeGoSilentForkMerge）与 goal E2E 发送路径覆盖。
-  // createdBy=auto-open 只有合成分支会发——它本身就是合成订阅的硬证明（比日志
-  // 字符串 grep 更稳），synthLog 降为诊断。
-  // 全链硬判据：合成尾窗渲染 + auto-open fork 落盘 + 尾部裁剪（2500→~99）
-  // + 发送走 fork（provider 收到 + 落 fork 库）+ 归并回写原会话。C/D 曾长期
-  // 诊断红的根因已修：合成快照 config 补齐 provider/model/modelSelection
-  // （含 reasoningLevel）——「选择模型」曾致发送键禁用；配套 fork 事务把父
-  // 会话模型条目按 runtime 恢复器的裸形状归一化复制。
-  const cdReached = editorReady;
-  pass = tailVisible
-    && entry !== null
-    && entry.createdBy === "auto-open"
-    && forkSmall
-    && (!cdReached || (providerGot && forkGotMsg && mergedBack));
-  console.log("diagnostics:", JSON.stringify({
-    tailVisible,
-    providerGot,
-    forkGotMsg,
-    mergedBack,
-  }));
+  pass = tailVisible && noFork;
+  console.log("diagnostics:", JSON.stringify({ tailVisible, noFork }));
 } catch (error) {
   console.error("E2E 失败:", error.message);
   try {

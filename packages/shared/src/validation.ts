@@ -776,8 +776,8 @@ export const hostZcodeGoSilentForkArmResponseSchema = z
     sessionId: nonEmptyStringSchema,
     workspacePath: nonEmptyStringSchema,
     workspaceIdentity: nonEmptyStringSchema.optional(),
-    /** auto-open = 巨会话冷打开的自动种子 fork（合成历史路径触发）。 */
-    createdBy: z.enum(["auto-compaction", "auto-open"]).optional(),
+    /** fork 触发来源：静默期 compaction 观测或手动 IPC。 */
+    createdBy: z.enum(["auto-compaction", "manual"]).optional(),
   })
   .strict();
 

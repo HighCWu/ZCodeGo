@@ -1385,7 +1385,7 @@ export function createLocalServices(options: {
     sessionId: string;
     workspaceIdentity?: string;
     workspacePath: string;
-    createdBy?: "auto-compaction" | "auto-open";
+    createdBy?: "auto-compaction" | "manual";
   }) => void;
 }): ServiceCollection {
   const isDesktopAttachedRemote = options?.serviceAuthorityMode === "desktop-attached-remote";
