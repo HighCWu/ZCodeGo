@@ -143,17 +143,24 @@ try {
   }
   try { killAppInstance(); await sleep(1500); } catch { /* 尽力而为 */ }
 
-  // ── 0.5 官方 bin 沙箱镜像（安全隔离，本地必配）──
+  // ── 0.5 官方 bin 沙箱镜像（安全隔离，本地必配；darwin 除外）──
   // fork 桌面 takeover 语义 = 杀掉 exe 精确等于 official.json.bin 的进程。
   // 若直接用真实安装路径（本地 /opt/ZCode），会误杀本机正在运行的官方实例
   // （2026-10-09 两次事故：用户官方 app 被 SIGTERM 优雅退出）。镜像后整条链
   // （hook 祖先探测 / official.json / launcher / 杀官方）都只认沙箱副本路径。
+  // darwin 例外：官方 bin 在 .app bundle 内，镜像其 MacOS 目录会破坏 bundle
+  // 结构与签名（CI 实测 SIGABRT）；mac 的杀官方链走 osascript 按名退出，
+  // 镜像本也不改变其作用域——直接用官方 bin（CI 无用户实例可误杀）。
   const OFFICIAL_DIR = dirname(OFFICIAL_BIN);
-  const MIRROR_DIR = join(ws, "official-mirror");
-  mkdirSync(MIRROR_DIR, { recursive: true });
-  const mirrorBin = join(MIRROR_DIR, basename(OFFICIAL_BIN));
-  {
+  const mirrorBin =
+    process.platform === "darwin" ? OFFICIAL_BIN : join(ws, "official-mirror", basename(OFFICIAL_BIN));
+  const MIRROR_DIR = dirname(mirrorBin);
+  if (process.platform !== "darwin") mkdirSync(MIRROR_DIR, { recursive: true });
+  if (process.platform === "darwin") {
+    console.log("0.5 official bin mirror: skipped on darwin（.app bundle 直用）:", OFFICIAL_BIN);
+  } else {
     const binName = basename(OFFICIAL_BIN);
+    console.log("0.5 official bin mirrored (kill-chain scoped):", mirrorBin);
     for (const entry of readdirSync(OFFICIAL_DIR)) {
       if (entry === binName) continue;
       try { symlinkSync(join(OFFICIAL_DIR, entry), join(MIRROR_DIR, entry)); } catch { /* 已存在 */ }
@@ -165,7 +172,6 @@ try {
     try { spawnSync("chmod", ["+x", mirrorBin], { stdio: "ignore" }); } catch { /* 尽力而为 */ }
   }
   const APP_BIN = mirrorBin;
-  console.log("0.5 official bin mirrored (kill-chain scoped):", APP_BIN);
 
   // ── 0. HOME 沙箱 + 假 Provider（官方 onboarding 的 API key 路径同款） ──
   mkdirSync(join(sandboxHome, ".zcode", "v2"), { recursive: true });
