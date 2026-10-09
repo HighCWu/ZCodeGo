@@ -398,6 +398,14 @@ async function handleVerified(
   traceId: string,
 ): Promise<void> {
   if (!agent) return;
+  // 暂停意图消费：用户在续跑回合中点了暂停。跳过复核与重触发——goal 在
+  // 本回合自然收尾后停止自动续跑（icon 随终态翻转，不再停在 pause）。
+  if (consumeZcodeGoGoalPauseIntent(sessionId)) {
+    logger?.info(traceId, "[zcode-go goal 复核] 暂停意图生效，跳过复核与重触发", {
+      sessionId,
+    });
+    return;
+  }
   const snapshot = (await agent.readSession({
     sessionId,
     workspacePath: workspace.workspacePath,
@@ -564,4 +572,31 @@ export function disposeZCodeGoGoalVerify(): void {
   roundsByGoal.clear();
   inFlight.clear();
   replyCollectors.clear();
+  goalPauseIntents.clear();
+}
+
+/**
+ * zcode-go 暂停意图（用户在 UI 点了 goal 暂停）。runtime 的命令在续跑回合
+ * 期间被序列化推迟到回合结束后执行，彼时 goal 状态已流转，pauseGoal 对非
+ * active 静默 no-op——UI 无任何命令通道能在续跑回合内落地暂停（E2E 四轮
+ * 探针实证：回合内 status 恒 active、命令全部 accepted、却从未 paused；
+ * stop 无可停目标、canStop 恒 false、backgroundWorks 空）。keeper 在
+ * 「goal 完成边沿」消费意图：跳过复核与重触发，goal 停止自动续跑循环。
+ */
+const goalPauseIntents = new Set<string>();
+
+export function requestZcodeGoGoalPause(sessionId: string): void {
+  if (!sessionId.trim()) return;
+  goalPauseIntents.add(sessionId.trim());
+  logger?.info(undefined, "[zcode-go goal 复核] 已记录暂停意图（完成边沿落地）", {
+    sessionId,
+  });
+}
+
+export function hasZcodeGoGoalPauseIntent(sessionId: string): boolean {
+  return goalPauseIntents.has(sessionId.trim());
+}
+
+export function consumeZcodeGoGoalPauseIntent(sessionId: string): boolean {
+  return goalPauseIntents.delete(sessionId.trim());
 }

@@ -75,10 +75,20 @@ async function cdp() {
   await new Promise((res, rej) => { ws0.onopen = res; ws0.onerror = rej; });
   let id = 0;
   const pending = new Map();
+  const consoleBuffer = [];
   ws0.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
+    if (m.method === "Runtime.consoleAPICalled") {
+      const text = (m.params.args ?? []).map((a) => a.value ?? a.description ?? "").join(" ");
+      consoleBuffer.push(`${m.params.type}: ${text}`.slice(0, 300));
+    }
   };
+  await new Promise((resolve) => {
+    const mid = ++id;
+    pending.set(mid, () => resolve());
+    ws0.send(JSON.stringify({ id: mid, method: "Runtime.enable" }));
+  });
   const ev = (expr) => new Promise((resolve, reject) => {
     const mid = ++id;
     pending.set(mid, (m) => {
@@ -110,7 +120,7 @@ async function cdp() {
     await input("insertText", { text });
     await new Promise((r) => setTimeout(r, 400));
   };
-  return { ev, trustedClick, trustedTypeAndEnterAt, close: () => ws0.close() };
+  return { ev, consoleLines: () => consoleBuffer.slice(), trustedClick, trustedTypeAndEnterAt, close: () => ws0.close() };
 }
 
 let appProcPid = null;
@@ -466,6 +476,15 @@ try {
     if (!markerInDb) await sleep(2000);
   }
   console.log("4a. judgment message persisted in db:", markerInDb);
+  // 热加慢路由：r2 判定失败后的重触发续跑回合将被 hold 25s——既撑开步骤 5
+  // 的暂停点击窗口，也让 sessions-index 必见 active（防 verified 边沿被合并
+  // 吞掉，保证暂停意图在完成边沿被真实消费）。
+  writeRoutes([
+    { match: "Continue working toward the active session goal", delayMs: 25000, content: "我已经完成了这个目标：构建已修绿，全部测试通过。" },
+    { match: "zcode-go:goal-verify \\S*r2\\n", content: '{"passed": false, "reason": "二次核查发现构建还没跑通"}' },
+    { match: MARKER, content: '{"passed": true, "reason": "从上下文看目标已完成"}' },
+    { match: "(?i)goal|objective|complete|done|finish|完成", content: "我已经完成了这个目标：构建已修绿，全部测试通过。" },
+  ]);
 
   let resumed = false;
   for (let i = 0; i < 40 && !resumed; i += 1) {
@@ -474,7 +493,53 @@ try {
   }
   console.log("4b. goal resumed after retrigger:", resumed);
 
-  pass = markerSeen && markerInDb && resumed;
+  // ── 5. 暂停意图断言：重触发的续跑回合中点暂停——runtime 在续跑回合内
+  //    无法落地 pauseGoal（命令推迟 + 状态流转 → 静默 no-op，icon 卡 pause；
+  //    用户实测「目标打断时暂停 icon 不变继续」）。修复：keeper 暂停意图在
+  //    完成边沿生效——跳过复核/重触发，goal 停止续跑，icon 离开 pause 态。──
+  let pauseStoppedCycling = false;
+  {
+    const markerCountAtPause = providerEntries().filter((e) => (e.text || "").includes(MARKER)).length;
+    let pauseBtnSeen = false;
+    for (let i = 0; i < 30 && !pauseBtnSeen; i += 1) {
+      await sleep(1000);
+      pauseBtnSeen = await ev(`!!document.querySelector('[data-goal-action="pause"]')`);
+    }
+    console.log("5a. pause icon visible (goal cycling):", pauseBtnSeen);
+    if (pauseBtnSeen) {
+      const btnState = await ev(`(() => { const b = document.querySelector('[data-goal-action="pause"]'); return JSON.stringify({ disabled: b?.disabled ?? null, ariaDisabled: b?.getAttribute("aria-disabled") ?? null }); })()`);
+      console.log("5a2. pause button state:", btnState);
+      const rect = await ev(`(() => { const r = document.querySelector('[data-goal-action="pause"]').getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
+      if (rect) {
+        // JS .click() 直接触发 React onClick（trustedClick 的坐标点击会被
+        // ControlHintTooltip 悬浮层遮挡吃掉——实测命令零派发）。
+        await ev(`document.querySelector('[data-goal-action="pause"]').click(); "clicked"`);
+        let iconGone = false;
+        for (let i = 0; i < 45 && !iconGone; i += 1) {
+          await sleep(1000);
+          iconGone = await ev(`!document.querySelector('[data-goal-action="pause"]')`);
+        }
+        const markerCountAfter = providerEntries().filter((e) => (e.text || "").includes(MARKER)).length;
+        pauseStoppedCycling = iconGone && markerCountAfter <= markerCountAtPause;
+        console.log("5b. pause icon left pause state:", iconGone, "| keeper skipped further rounds:", markerCountAfter <= markerCountAtPause);
+        const cl = c.consoleLines().filter((l) => /v4-pane|pause|stale/i.test(l));
+        console.log("5b2. renderer console:", cl.slice(-8).join(" | ") || "(empty)");
+      }
+    } else {
+      console.log("5b skipped (pause icon 未出现)");
+    }
+  }
+
+  // 5c：暂停落地的权威确认——两条成功路径任一：
+  // ① stop 直通：看门狗确认「goal 手动暂停（权威状态 paused）」；
+  // ② keeper 兜底：完成边沿「暂停意图生效」（canStop=false 的续跑回合）。
+  let pauseConfirmed = false;
+  try {
+    const logText = readFileSync(appLog, "utf8");
+    pauseConfirmed = logText.includes("goal 手动暂停") || logText.includes("暂停意图生效");
+  } catch { /* 无日志按未确认处理 */ }
+  console.log("5c. pause confirmed (authoritative paused):", pauseConfirmed);
+  pass = markerSeen && markerInDb && resumed && pauseStoppedCycling && pauseConfirmed;
 } catch (error) {
   console.error("E2E 失败:", error.message);
   try {

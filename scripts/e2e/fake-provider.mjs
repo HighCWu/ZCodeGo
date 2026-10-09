@@ -78,14 +78,20 @@ function routeResponse(userText) {
   for (const route of loadRoutes()) {
     try {
       if (route.match && new RegExp(route.match, "s").test(userText)) {
-        return typeof route.content === "string" ? route.content : "ok";
+        return {
+          content: typeof route.content === "string" ? route.content : "ok",
+          // 可选整段 hold（ms）：撑开流式回合窗口（E2E 需在 turn 进行中做 UI 断言）
+          delayMs: Number.isFinite(route.delayMs) && route.delayMs > 0 ? route.delayMs : 0,
+        };
       }
     } catch {
       /* 非法正则跳过 */
     }
   }
-  return "ok";
+  return { content: "ok", delayMs: 0 };
 }
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const server = createServer((req, res) => {
   const url = req.url ?? "";
@@ -97,7 +103,7 @@ const server = createServer((req, res) => {
     });
     req.on("end", () => {
       const userText = lastUserText(body);
-      const content = routeResponse(userText);
+      const { content, delayMs } = routeResponse(userText);
       logRequest({ ts: Date.now(), url, text: userText.slice(0, 8192) });
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -111,23 +117,28 @@ const server = createServer((req, res) => {
           model: "fake-model",
           choices: [{ index: 0, delta, finish_reason: null }],
         })}\n\n`;
-      res.write(chunk({ role: "assistant" }));
-      // 长回复按片下发（与真实流式同构；触发上下文膨胀用于 compaction）
-      for (let i = 0; i < content.length; i += 200) {
-        res.write(chunk({ content: content.slice(i, i + 200) }));
-      }
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-zcode-go-e2e",
-          object: "chat.completion.chunk",
-          created: Math.floor(Date.now() / 1000),
-          model: "fake-model",
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-          usage: { prompt_tokens: 1, completion_tokens: Math.max(1, Math.ceil(content.length / 4)), total_tokens: 2 },
-        })}\n\n`,
-      );
-      res.write("data: [DONE]\n\n");
-      res.end();
+      // 客户端中断（turn 被 pause/stop abort）时静默收尾，不能让写挂死 provider。
+      res.on("error", () => {});
+      void (async () => {
+        res.write(chunk({ role: "assistant" }));
+        if (delayMs > 0) await sleep(delayMs);
+        // 长回复按片下发（与真实流式同构；触发上下文膨胀用于 compaction）
+        for (let i = 0; i < content.length; i += 200) {
+          res.write(chunk({ content: content.slice(i, i + 200) }));
+        }
+        res.write(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-zcode-go-e2e",
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: "fake-model",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: Math.max(1, Math.ceil(content.length / 4)), total_tokens: 2 },
+          })}\n\n`,
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      })();
     });
   } else if (req.method === "GET" && url.endsWith("/models")) {
     res.writeHead(200, { "content-type": "application/json" });

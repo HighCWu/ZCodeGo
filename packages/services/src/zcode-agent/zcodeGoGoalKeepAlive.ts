@@ -37,6 +37,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
+import { hasZcodeGoGoalPauseIntent } from "./zcodeGoGoalVerify.js";
 
 const STATE_DIR = join(homedir(), ".zcode-go");
 const SCAN_INTERVAL_MS = 60_000;
@@ -581,6 +582,13 @@ function resumeTookEffect(g: TrackedGoal): boolean {
 }
 
 async function resumeTrackedGoal(g: TrackedGoal, reason: string): Promise<void> {
+  // 暂停意图在位（用户点了暂停、等完成边沿落地）——看门狗不得 resume 抢跑。
+  if (hasZcodeGoGoalPauseIntent(g.sessionId)) {
+    logger?.info(trace(), "[zcode-go goal 看门狗] 暂停意图在位，跳过 resume", {
+      sessionId: g.sessionId,
+    });
+    return;
+  }
   const target = {
     sessionId: g.sessionId,
     workspacePath: g.workspacePath,

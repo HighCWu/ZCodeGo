@@ -10,6 +10,7 @@ import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
 import {
   observeZcodeGoConversationFrame,
   observeZcodeGoSessionsIndexFrame,
+  requestZcodeGoGoalPause,
 } from "./zcodeGoGoalVerify.js";
 import { observeZcodeGoGoalKeepAliveFrame, observeZcodeGoGoalKeepAliveConversationFrame } from "./zcodeGoGoalKeepAlive.js";
 import { observeZcodeGoQueueDrainFrame } from "./zcodeGoQueueDrain.js";
@@ -5244,6 +5245,12 @@ export function createZCodeAgentService(
     if (envelope.sessionId) {
       await waitForZcodeGoSilentForkGate(envelope.sessionId);
       envelope = { ...envelope, sessionId: resolveZcodeGoSessionId(envelope.sessionId) };
+      // zcode-go：UI 暂停按钮的 pauseGoal 在续跑回合内会被 runtime 推迟执行并
+      // 静默 no-op（icon 卡暂停态）。借道命令路径登记暂停意图——goal-keeper 在
+      // 完成边沿消费：跳过复核/重触发/看门狗 resume，goal 停止续跑循环。
+      if (envelope.type === "pauseGoal" && envelope.sessionId) {
+        requestZcodeGoGoalPause(envelope.sessionId);
+      }
     }
       // TTFT 首版只允许可信桌面本地 continuous，手机/远端透传不能开启本地观测。
       if (
@@ -5274,6 +5281,15 @@ export function createZCodeAgentService(
         }
       }
       const ack: CommandAck = await client.request(V4_METHODS.command, envelope, commandAckSchema);
+      // 命令 ack 全量留痕（类型+状态）：goal 暂停等 CAS 命令的 stale 拒绝与
+      // 静默 no-op 此前 host 侧完全不可见（UI 只在 renderer console warn）。
+      // 命令为用户驱动低频事件，日志量可控。
+      logger.info(undefined, "v4 命令 ack", {
+        type: envelope.type,
+        sessionId: envelope.sessionId ?? "",
+        status: ack.status,
+        reasonCode: "reasonCode" in ack ? String(ack.reasonCode ?? "") : "",
+      });
       // Prompt command 在 committed TurnStarted 或 committed WorkspaceHookReviewRequested
       // 任一 authority 到达后即返回；人工审核不能占用 Host RPC，因此继续使用统一默认
       // timeout/watchdog。放宽到审核领域 deadline 只会掩盖串行协议队列死锁。
