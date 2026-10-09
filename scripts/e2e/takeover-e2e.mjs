@@ -181,16 +181,28 @@ try {
   if (process.env.ZCODE_GO_E2E_SKIP_ACTIVE_SEED !== "1" && existsSync(realProviderRuntime)) {
     cpSync(realProviderRuntime, join(sandboxHome, ".zcode", "v2", "runtime", "provider"), { recursive: true });
   } else {
-    // CI（无真实 ~/.zcode 可种子）：官方包自带 bundled provider 配置，落到官方
-    // app 首启物化位置——缺它在 anchor preview 包上冷启动报 unsupported_runtime
-    // （Storage preparation failed: unsupported_runtime，实测 CI linux）。
+    // CI（无真实 ~/.zcode 可种子）：官方 runtime 解析器按序探测
+    // <resources>/glm 与 ~/.zcode/server/agents/glm（生产 bundle 反解实证）。
+    // 首选种到沙箱 HOME 的 server/agents——官方包零改动（mac 上改封官方 .app
+    // 会让其后任何 codesign 抛 bundle format unrecognized，37960650353 实测），
+    // 全新 HOME + server/agents 种子实测零 unsupported_runtime。
     try {
+      const plat = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+      const arch = process.arch === "arm64" ? "arm64" : "x64";
+      const glmSrc = join(REPO, "packages", "desktop", "bundled-agents", `${plat}-${arch}`, "glm");
+      if (existsSync(join(glmSrc, "zcode.cjs"))) {
+        const dst = join(sandboxHome, ".zcode", "server", "agents", "glm");
+        mkdirSync(dirname(dst), { recursive: true });
+        cpSync(glmSrc, dst, { recursive: true });
+        console.log("0. runtime agent seeded at ~/.zcode/server/agents/glm ←", `${plat}-${arch}`);
+      } else {
+        console.log("0. bundled-agents 缺 glm（先 pnpm --filter @zcode/desktop prepare:agent-bundle）——依赖官方包自带");
+      }
       const bundled = join(dirname(OFFICIAL_BIN), "resources", "config", "provider", "zcode-builtin.json");
       if (existsSync(bundled)) {
         const dstDir = join(sandboxHome, ".zcode", "v2", "runtime", "provider", "bundled");
         mkdirSync(dstDir, { recursive: true });
         copyFileSync(bundled, join(dstDir, "zcode-builtin.json"));
-        console.log("0. runtime provider seeded from official package bundle");
       }
     } catch { /* 尽力而为 */ }
   }

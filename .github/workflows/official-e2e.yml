@@ -349,36 +349,13 @@ jobs:
       # display）。失败不中断（|| rc=1）——一次跑全量，报告完整。
       # fresh-model 额外依赖：mobile-bridge/worker 的 wrangler（本地信令 dev）
       # 与 playwright chromium（web 端浏览器），见上方两个准备步骤。
-      # 官方 anchor 包缺 glm 运行时束时补齐（takeover E2E 的官方实例冷启动
-      # storage preparation 依赖：实测三平台 unsupported_runtime + "glm binary
-      # path: <not found>"）。用 fork 同源构建的 zcode.cjs 落到官方 unpacked
-      # resources/glm（同源代码，仅保证官方实例可完成存储准备与 onboarding，
-      # hook 链不涉及其模型调用）。必须排在上方 run.mjs 主 E2E 之后：改封官方
-      # .app（mac）会让其后第一次 ensure-official-electron 的 ad-hoc codesign
-      # 抛错，污染其「ensure 幂等」断言（37955295655 mac 实证）。
-      - name: 官方包 glm 运行时束补齐（缺失时）
-        env:
-          OFFICIAL_BIN: ${{ steps.officialbin.outputs.bin }}
-        run: |
-          pnpm --filter @zcode/desktop prepare:agent-bundle
-          node --input-type=module -e '
-            import { cpSync, existsSync, mkdirSync } from "node:fs";
-            import { dirname, join } from "node:path";
-            const bin = process.env.OFFICIAL_BIN;
-            if (!bin) throw new Error("officialbin 未就绪");
-            const resources = join(dirname(bin), "resources");
-            if (existsSync(join(resources, "glm", "zcode.cjs"))) {
-              console.log("官方包已含 glm/zcode.cjs，跳过补齐");
-            } else {
-              const plat = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
-              const arch = process.arch === "arm64" ? "arm64" : "x64";
-              const src = join("packages", "desktop", "bundled-agents", plat + "-" + arch, "glm");
-              if (!existsSync(join(src, "zcode.cjs"))) throw new Error("fork bundled-agents 缺产物: " + src);
-              mkdirSync(join(resources, "glm"), { recursive: true });
-              cpSync(src, join(resources, "glm"), { recursive: true });
-              console.log("已补齐官方包 glm 运行时束 ←", src);
-            }
-          '
+      # takeover E2E 的官方实例冷启动需要 glm 运行时束（anchor 官方包实测缺失，
+      # 报 unsupported_runtime）。只构建 fork 同源产物 bundled-agents/<plat>/glm
+      # ——E2E 会把它种到沙箱 HOME 的 ~/.zcode/server/agents/glm（官方 runtime
+      # 解析器的 HOME 候选位）。**不改动官方包**：mac 上改封官方 .app 会让其后
+      # 任何 ad-hoc codesign 抛 bundle format unrecognized（两轮 CI 实证）。
+      - name: 构建 agent 运行时束（takeover E2E 沙箱种子用）
+        run: pnpm --filter @zcode/desktop prepare:agent-bundle
       - name: 移动桥 Worker 依赖（fresh-model E2E 本地信令 wrangler dev）
         run: cd mobile-bridge/worker && npm install --no-audit --no-fund
       - name: Playwright Chromium（fresh-model E2E web 端浏览器）
