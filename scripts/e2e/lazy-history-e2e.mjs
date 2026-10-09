@@ -746,11 +746,45 @@ try {
       return JSON.stringify({
         editorText: ed?.innerText?.slice(0, 60) ?? null,
         submitDisabled: submit?.disabled ?? null,
+        editorReadonly: ed?.getAttribute("aria-readonly") ?? ed?.getAttribute("contenteditable") ?? null,
+        pendingChips: document.querySelectorAll('[data-pending-command], [data-command-chip]').length,
+        hasStopBtn: !!Array.from(document.querySelectorAll('button[type="button"]')).find((b) => (b.getAttribute("data-testid") || "").includes("stop")),
+        composerPlaceholder: ed?.getAttribute("data-placeholder")?.slice(0, 40) ?? ed?.getAttribute("aria-placeholder")?.slice(0, 40) ?? null,
         bodyHasSend: document.body.innerText.includes(${JSON.stringify(sendMsg)}),
         body: document.body.innerText.slice(0, 250),
       });
     })()`);
     console.log("C. send-miss dump:", cd);
+    // fiber 探针：从编辑器沿 fiber 找 conversation snapshot（inputRouting.mode
+    // 与 phase——submitDisabled 的两个非显性来源）。
+    const probe = await convEv.ev(`(() => {
+      const ed = document.querySelector('[contenteditable="true"]');
+      if (!ed) return "no-editor";
+      const fk = Object.keys(ed).find((k) => k.startsWith("__reactFiber$"));
+      if (!fk) return "no-fiber";
+      let f = ed[fk];
+      for (let d = 0; f && d < 80; d += 1, f = f.return) {
+        let hook = f.memoizedState;
+        for (let h = 0; hook && h < 50; h += 1, hook = hook.next) {
+          const v = hook.memoizedState;
+          const cands = v && typeof v === "object" ? (Array.isArray(v) ? v : [v]) : [];
+          for (const c of cands) {
+            if (c && typeof c === "object" && "inputRouting" in c && "control" in c) {
+              return JSON.stringify({ mode: c.inputRouting?.mode, reasonCode: c.inputRouting?.reasonCode ?? null, phase: c.control?.phase, sessionEnded: c.control?.sessionEnded ?? null });
+            }
+          }
+        }
+      }
+      return "no-snapshot-found";
+    })()`);
+    console.log("C. snapshot probe:", probe);
+    const modelChip = await convEv.ev(`(() => {
+      const ed = document.querySelector('[contenteditable="true"]');
+      const form = ed?.closest('form');
+      const chip = form?.querySelector('[data-testid*="model"], [data-testid*="composer-toolbar"]');
+      return JSON.stringify({ chipText: chip?.innerText?.slice(0, 80) ?? null, formText: form?.innerText?.slice(0, 200) ?? null });
+    })()`);
+    console.log("C. composer toolbar:", modelChip);
   }
   let forkGotMsg = false;
   if (entry) {

@@ -385,6 +385,44 @@ export function forkCompactSessionDirect(input: {
           now,
           parentModelSelection.data,
         );
+      } else {
+        // 父会话没有显式模型选择 entry（v4 会话创建时的选择只留内存，不落盘）——
+        // 从父会话最后一条 assistant 消息的 modelId/provider 补写。缺这条时 fork
+        // 水合后 composer 显示「选择模型」且发送键禁用（submissionReady=false），
+        // auto-open fork 用户必须手动重选模型才能继续对话。
+        const lastAssistant = sessionDb
+          .prepare(
+            "select data from message where session_id = ? and data like '%\"role\":\"assistant\"%' " +
+              "and data like '%\"modelId\"%' order by time_created desc limit 1",
+          )
+          .get(parentSessionId) as { data: string } | undefined;
+        let derived: { modelId: string; providerId: string } | null = null;
+        if (lastAssistant) {
+          try {
+            const parsed = JSON.parse(lastAssistant.data) as {
+              modelId?: unknown;
+              provider?: unknown;
+              providerId?: unknown;
+            };
+            if (typeof parsed.modelId === "string" && parsed.modelId.trim()) {
+              const providerId = String(parsed.providerId ?? parsed.provider ?? "").trim();
+              if (providerId) derived = { modelId: parsed.modelId.trim(), providerId };
+            }
+          } catch {
+            /* 坏消息数据按无兜底处理 */
+          }
+        }
+        if (derived) {
+          // 条目形状与 runtime 持久化一致：{"modelSelection":{providerId,modelId}}。
+          copyEntry.run(
+            `${childSessionId}:runtime-model-selection`,
+            childSessionId,
+            "runtime/model_selection",
+            now,
+            now,
+            JSON.stringify({ modelSelection: derived }),
+          );
+        }
       }
       const parentExecutionState = sessionDb
         .prepare(
