@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -319,4 +319,61 @@ test("观测判据：complete/fragment 均命中；重放/非 success/未接线 
     await checkArmedSessionsAndTrigger();
     assert.equal(notified2.length, 0, "未接线期间观测被跳过（无遗留 armed）");
   });
+});
+
+test("轮换去重泄漏回归：首次 arm 通知成功后，同会话的后续 arm 必须仍能通知", async () => {
+  resetZcodeGoSilentForkForTest();
+  resetZcodeGoSessionRedirectCacheForTest();
+  const dir = mkdtempSync(join(tmpdir(), "zg-sfk-rot-"));
+  process.env.ZCODE_GO_STATE_DIR_OVERRIDE = dir;
+  resetZcodeGoSessionRedirectCacheForTest();
+  try {
+    const S = "sess_rotcheck000001";
+    const notified: string[] = [];
+    setZcodeGoSilentForkDelegate({
+      notifyArm: (p) => notified.push(p.sessionId),
+      checkQuiescence: async () => true,
+      log: () => {},
+    });
+    // 第一次 arm + 静默 → 通知（首 fork）
+    observeZcodeGoSilentForkFrame(
+      { workspacePath: "/w" },
+      { topic: `conversation/${S}`, subscriptionId: "sub", deliveryKind: "online",
+        kind: "complete", logicalFrameId: "lf1", logicalFrameOrdinal: 1,
+        frame: { topic: `conversation/${S}`, subscriptionId: "sub", fromSeq: 0, toSeq: 1,
+          sentAt: 0, payload: { kind: "deltas", deltas: [
+            { op: "row.appended", row: { kind: "timelineMarker", marker: { type: "compact", status: "success" } } },
+          ] } } } as never,
+    );
+    backdateZcodeGoSilentForkArmedAtForTest(S, 10_000);
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified.length, 1, "首 fork 通知到达");
+
+    // main 完成首 fork：redirect 表项落盘（host 进程可见）
+    writeFileSync(join(dir, "session-redirect.json"), JSON.stringify({
+      version: 1,
+      redirects: { [S]: { forkSessionId: "sess_forked00000001", createdAt: Date.now() - 20_000, createdBy: "auto-compaction" } },
+    }), "utf8");
+    resetZcodeGoSessionRedirectCacheForTest();
+
+    // 第二次 compaction（晚于表项建立）→ 必须再次通知（轮换）
+    observeZcodeGoSilentForkFrame(
+      { workspacePath: "/w" },
+      { topic: `conversation/${S}`, subscriptionId: "sub", deliveryKind: "online",
+        kind: "complete", logicalFrameId: "lf2", logicalFrameOrdinal: 2,
+        frame: { topic: `conversation/${S}`, subscriptionId: "sub", fromSeq: 2, toSeq: 3,
+          sentAt: 0, payload: { kind: "deltas", deltas: [
+            { op: "row.appended", row: { kind: "timelineMarker", marker: { type: "compact", status: "success" } } },
+          ] } } } as never,
+    );
+    backdateZcodeGoSilentForkArmedAtForTest(S, 10_000);
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified.length, 2, `轮换通知必须到达（实际 ${notified.length}——notifiedSessions 去重泄漏会让它停在 1）`);
+  } finally {
+    setZcodeGoSilentForkDelegate(null);
+    resetZcodeGoSilentForkForTest();
+    delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
+    resetZcodeGoSessionRedirectCacheForTest();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

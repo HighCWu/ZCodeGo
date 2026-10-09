@@ -8,7 +8,9 @@
  *   - composer 发普通消息若干轮（不设 goal，turn 结束即静默点）；
  *   - 断言链：沙箱 DB 出现活跃压缩边界 part → 帧观察者 armed → 静默点门控 →
  *     host→main arm 信号 → direct fork + redirect 落盘（沙箱 ~/.zcode-go/
- *     session-redirect.json）→ fork 会话尾部裁剪 + 原会话任务行不动。
+ *     session-redirect.json）→ fork 会话尾部裁剪 + 原会话任务行不动；
+ *   - 转接后原会话内继续对话（无订阅风暴）+ 隐形 fork 零任务行泄漏；
+ *   - 轮换诊断段：二次 compaction → S'→S'' 表项更新 + 旧 fork 行删除。
  *
  * 运行：node scripts/e2e/silent-fork-auto-e2e.mjs（需 Xvfb :103 在跑）
  */
@@ -45,6 +47,14 @@ const httpGet = (path) =>
 
 function writeRoutes(routes) {
   writeFileSync(routesPath, JSON.stringify(routes, null, 1));
+}
+
+function providerEntries() {
+  try {
+    return readFileSync(providerLog, "utf8").trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 async function cdp() {
@@ -507,7 +517,62 @@ try {
     }
   }
 
-  pass = compactionSeen && redirectSeen && forkTrimmed && originalIntact && postRedirectLive && stormFree && forkRowLeakFree;
+  // ── 7. 轮换（batch 4）：二次 compaction → 活跃端点轮换 S'→S''（终末归并
+  //    旧 fork 增量 → redirect 表项更新 → 旧 fork 会话行删除）。曾因两处 bug
+  //    从未真正触发：notifiedSessions 去重泄漏（首 fork 后永久跳过，已修）+
+  //    resync 路由错位风暴（已修）——升级为判据。
+  let rotationOk = false;
+  if (entry) {
+    const oldFork = entry.fork;
+    let rotated = null;
+    const providerCount = () => providerEntries().length;
+    const forkStats = () => {
+      try {
+        const { DatabaseSync } = require("node:sqlite");
+        const db = new DatabaseSync(dbPath, { readOnly: true });
+        const msgs = db.prepare("select count(*) c from message where session_id = ?").get(oldFork).c;
+        const bounds = db.prepare(
+          "select count(*) c from part where session_id = ? and data like '{\"type\":\"compaction\"%' and data like '%compactBoundary%'",
+        ).get(oldFork).c;
+        db.close();
+        return { msgs, bounds };
+      } catch { return { msgs: -1, bounds: -1 }; }
+    };
+    const provBefore = providerCount();
+    const statsBefore = forkStats();
+    for (let round = 1; round <= 8 && !rotated; round += 1) {
+      await sendRound(`轮换第 ${round} 轮：继续补充实现细节`);
+      for (let i = 0; i < 22 && !rotated; i += 1) {
+        await sleep(3000);
+        try {
+          const raw = JSON.parse(readFileSync(redirectFile, "utf8"));
+          const forkNow = raw.redirects?.[entry.original]?.forkSessionId;
+          if (forkNow && forkNow !== oldFork) rotated = forkNow;
+        } catch { /* 表项暂未轮换 */ }
+      }
+    }
+    if (rotated) {
+      await sleep(3000);
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const oldForkDeleted = db.prepare("select count(*) c from session where id = ?").get(oldFork).c === 0;
+      const origRow = db.prepare("select count(*) c from session where id = ?").get(entry.original).c;
+      db.close();
+      const storm2 = c ? c.consoleLines().filter((l) =>
+        l.includes("fault.subscription.notOwned") || l.includes("resyncGenerationMismatch"),
+      ).length : 0;
+      rotationOk = oldForkDeleted && origRow === 1 && storm2 < 3;
+      console.log(`7. rotation: ${oldFork.slice(5, 13)} → ${rotated.slice(5, 13)}; oldForkDeleted=${oldForkDeleted}; origRow=${origRow}; stormSignals(累计)=${storm2}; rotationOk=${rotationOk}`);
+    } else {
+      const statsAfter = forkStats();
+      console.log(`7. rotation: 未在窗口内发生二次 compaction 轮换`,
+        `provider 请求增量=${providerCount() - provBefore}`,
+        `fork msgs ${statsBefore.msgs}→${statsAfter.msgs}`,
+        `fork 压缩边界 ${statsBefore.bounds}→${statsAfter.bounds}`);
+    }
+  }
+
+  pass = compactionSeen && redirectSeen && forkTrimmed && originalIntact && postRedirectLive && stormFree && forkRowLeakFree && rotationOk;
 } catch (error) {
   console.error("E2E 失败:", error.message);
   try {

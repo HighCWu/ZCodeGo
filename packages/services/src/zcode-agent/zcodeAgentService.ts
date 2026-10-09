@@ -5933,6 +5933,9 @@ export function createZCodeAgentService(
           options.silentForkArmSignal?.(params);
         } catch { /* main 侧处理 */ }
       },
+      log: (message, meta) => {
+        logger.info(message, meta);
+      },
     });
     startZcodeGoSilentForkPeriodicCheck();
   }

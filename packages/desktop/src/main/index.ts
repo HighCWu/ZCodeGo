@@ -1995,6 +1995,15 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
             const benign = (error?: string) =>
               error === "no active compaction boundary" || error === "no fresh compaction boundary";
             const result = attempt();
+            // 良性拒绝（无新鲜边界/无边界）今天完全静默——轮换链排障时不可见，
+            // 低频（每次 arm 至多一条）留痕。
+            if (!result.ok && benign(result.error)) {
+              logger.info("[zcode-go-silent-fork] arm 未执行（良性拒绝）", {
+                sessionId: event.sessionId,
+                error: result.error,
+                createdBy,
+              });
+            }
             if (!result.ok && result.error === "another silent fork transaction is in flight") {
               // 双会话同窗 arm：事务互斥撞车。host 侧 armed 已清，不重试就丢失
               // 到下次 compaction——等当前事务结束后补跑一次。

@@ -32,6 +32,8 @@ export interface ZcodeGoSilentForkArmDelegate {
     workspacePath: string;
     workspaceIdentity?: string;
   }): void;
+  /** 诊断日志（轮换链静默性问题定位：arm/良性拒绝今天完全不可见）。 */
+  log?(message: string, meta?: Record<string, unknown>): void;
   /** quiescence 检查（existing-only readSession；由 zcodeAgentService 注入）。 */
   checkQuiescence(params: {
     sessionId: string;
@@ -104,6 +106,9 @@ export function observeZcodeGoSilentForkFrame(
       ...(workspace.workspaceIdentity ? { workspaceIdentity: workspace.workspaceIdentity } : {}),
       armedAt: Date.now(),
     });
+    delegate.log?.("[zcode-go-silent-fork] compaction 成功标记已 arm（等待静默点）", {
+      sessionId,
+    });
   }
   // 事件驱动加速：armed 会话有任何后续帧（turn 收尾/part 完成）都尝试一次
   // 近期检查（2s 滞后 + 5s armed debounce + quiescence 复核三重防抖）。
@@ -160,13 +165,18 @@ export async function checkArmedSessionsAndTrigger(): Promise<void> {
     // 派发门闩：fork 事务期间短暂 hold 该会话的新发送（send 咽喉点轮询等
     // redirect 表项出现即放行；超时兜底防 main 卡死拖住用户输入）。
     armZcodeGoSilentForkLatch(sessionId);
+    delegate.log?.("[zcode-go-silent-fork] 静默点达成，通知 main 执行 fork/轮换", { sessionId });
     delegate.notifyArm({
       sessionId,
       workspacePath: info.workspacePath,
       ...(info.workspaceIdentity ? { workspaceIdentity: info.workspaceIdentity } : {}),
     });
-    // 触发后清出 armed（main fork 成功 → map 有条目 → 后续 compaction 重新 arm）
+    // 触发后清出 armed + notified（main fork 成功 → map 有条目 → 后续 compaction
+    // 重新 arm → 轮换）。notifiedSessions 不清会让首次 fork 后的该会话被
+    // has() 去重永久跳过——轮换链从未真正触发（E2E 实测：fork 连续压缩 8 次
+    // 零轮换）。并发双发的兜底由 main 事务互斥 + 边界校验承担。
     armedSessions.delete(sessionId);
+    notifiedSessions.delete(sessionId);
   }
 }
 
