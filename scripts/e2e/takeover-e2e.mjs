@@ -13,16 +13,18 @@
  *
  * 判据（全绿）：
  *   1. hook 生效：提交后官方无模型回合（provider 零请求）+ 空会话被清理
- *   2. official.json 落盘且指向真实官方安装（bin/runtimeBundle 均存在）
+ *   2. official.json 落盘且指向沙箱镜像官方（bin/runtimeBundle 均存在；
+ *      bin 必须是 $ws/official-mirror/ 内的副本——杀官方链按 exe 精确匹配，
+ *      指向真实安装会误杀本机正在运行的官方实例，2026-10-09 两次真实事故）
  *   3. zcode-go 桌面拉起：~/.zcode-go/desktop.pid 落盘且进程存活
  *
  * 运行：node scripts/e2e/takeover-e2e.mjs（需 Xvfb :103；ZCODE_OFFICIAL_BIN
  * 可注入官方 bin，缺省 /opt/ZCode/zcode——CI 由工作流传入锚点构建产物）。
  */
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -141,6 +143,30 @@ try {
   }
   try { killAppInstance(); await sleep(1500); } catch { /* 尽力而为 */ }
 
+  // ── 0.5 官方 bin 沙箱镜像（安全隔离，本地必配）──
+  // fork 桌面 takeover 语义 = 杀掉 exe 精确等于 official.json.bin 的进程。
+  // 若直接用真实安装路径（本地 /opt/ZCode），会误杀本机正在运行的官方实例
+  // （2026-10-09 两次事故：用户官方 app 被 SIGTERM 优雅退出）。镜像后整条链
+  // （hook 祖先探测 / official.json / launcher / 杀官方）都只认沙箱副本路径。
+  const OFFICIAL_DIR = dirname(OFFICIAL_BIN);
+  const MIRROR_DIR = join(ws, "official-mirror");
+  mkdirSync(MIRROR_DIR, { recursive: true });
+  const mirrorBin = join(MIRROR_DIR, basename(OFFICIAL_BIN));
+  {
+    const binName = basename(OFFICIAL_BIN);
+    for (const entry of readdirSync(OFFICIAL_DIR)) {
+      if (entry === binName) continue;
+      try { symlinkSync(join(OFFICIAL_DIR, entry), join(MIRROR_DIR, entry)); } catch { /* 已存在 */ }
+    }
+    // 必须独立 inode（reflink 复制）：硬链接下 /proc/<pid>/exe 实测解析回原路径
+    // （2026-10-09 第三次事故），祖先探测会写回真实安装路径 → 杀官方链越界。
+    spawnSync("cp", ["--reflink=auto", OFFICIAL_BIN, mirrorBin], { stdio: "ignore" });
+    if (!existsSync(mirrorBin)) copyFileSync(OFFICIAL_BIN, mirrorBin);
+    try { spawnSync("chmod", ["+x", mirrorBin], { stdio: "ignore" }); } catch { /* 尽力而为 */ }
+  }
+  const APP_BIN = mirrorBin;
+  console.log("0.5 official bin mirrored (kill-chain scoped):", APP_BIN);
+
   // ── 0. HOME 沙箱 + 假 Provider（官方 onboarding 的 API key 路径同款） ──
   mkdirSync(join(sandboxHome, ".zcode", "v2"), { recursive: true });
   mkdirSync(sandboxWorkspace, { recursive: true });
@@ -148,6 +174,19 @@ try {
   const realProviderRuntime = join(homedir(), ".zcode", "v2", "runtime", "provider");
   if (process.env.ZCODE_GO_E2E_SKIP_ACTIVE_SEED !== "1" && existsSync(realProviderRuntime)) {
     cpSync(realProviderRuntime, join(sandboxHome, ".zcode", "v2", "runtime", "provider"), { recursive: true });
+  } else {
+    // CI（无真实 ~/.zcode 可种子）：官方包自带 bundled provider 配置，落到官方
+    // app 首启物化位置——缺它在 anchor preview 包上冷启动报 unsupported_runtime
+    // （Storage preparation failed: unsupported_runtime，实测 CI linux）。
+    try {
+      const bundled = join(dirname(OFFICIAL_BIN), "resources", "config", "provider", "zcode-builtin.json");
+      if (existsSync(bundled)) {
+        const dstDir = join(sandboxHome, ".zcode", "v2", "runtime", "provider", "bundled");
+        mkdirSync(dstDir, { recursive: true });
+        copyFileSync(bundled, join(dstDir, "zcode-builtin.json"));
+        console.log("0. runtime provider seeded from official package bundle");
+      }
+    } catch { /* 尽力而为 */ }
   }
   writeRoutes([{ match: "(?i).", content: "ok" }]);
   providerProc = spawn(process.execPath, [
@@ -221,7 +260,11 @@ try {
     HOME: sandboxHome,
     // hook（官方进程树内）→ launch-zcode-go.sh → ensure-official-electron.mjs
     // 的官方 bin 解析链全部继承本 env——CI 上锚点产物路径由此传入。
-    ZCODE_OFFICIAL_BIN: OFFICIAL_BIN,
+    ZCODE_OFFICIAL_BIN: APP_BIN,
+    // 插件官方发现的显式覆盖变量（plugin/src/zcode-go.ts discoverOfficial）：
+    // 优先于祖先链 ps-walk——不设它时硬链接/exe 解析歧义会把真实安装路径写进
+    // official.json，杀官方链即越界（实测）。镜像路径在此钦定。
+    ZCODE_GO_OFFICIAL_BIN: APP_BIN,
     ...(process.platform === "linux"
       ? {
           DISPLAY: E2E_DISPLAY,
@@ -253,12 +296,12 @@ try {
         }
       : {}),
   };
-  const appProc = spawn(OFFICIAL_BIN, appArgs, { env: appEnv, stdio: ["ignore", "pipe", "pipe"] });
+  const appProc = spawn(APP_BIN, appArgs, { env: appEnv, stdio: ["ignore", "pipe", "pipe"] });
   appProcPid = appProc.pid;
   appProc.on("exit", (code, signal) => { appExitInfo = { code, signal }; });
   appProc.stdout.on("data", (c) => appendFileSync(appLog, c));
   appProc.stderr.on("data", (c) => appendFileSync(appLog, c));
-  console.log("2. official app launched:", OFFICIAL_BIN);
+  console.log("2. official app launched:", APP_BIN);
 
   let c = null;
   for (let i = 0; i < 40 && !c; i += 1) {
@@ -346,7 +389,8 @@ try {
     try {
       officialJson = JSON.parse(readFileSync(officialJsonPath, "utf8"));
       officialJsonOk = Boolean(
-        officialJson.bin && officialJson.runtimeBundle && existsSync(officialJson.bin) && existsSync(officialJson.runtimeBundle),
+        officialJson.bin && officialJson.runtimeBundle && existsSync(officialJson.bin) && existsSync(officialJson.runtimeBundle) &&
+          officialJson.bin === APP_BIN,
       );
     } catch { /* 等待 hook 写入 */ }
   }
