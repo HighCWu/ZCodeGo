@@ -453,6 +453,13 @@ function hookFeed(prompt) {
     // 再等，二次仍未拦截才判失败（拉长 deadline 对此类失败无效）。
     let eventsRaw = "";
     let settled = false;
+    // 判据三态：拦截文案（"正在切换"）、hook 显式 blocked、或插件 hook 行进入
+    // 终态 completed（windows 实测：hook 正常拦截并完成拉起，但 stopReason 文案
+    // 未在订阅帧里出现——state 先于 displayName 的行形状兜底）。
+    const hookInterceptSettled = (raw) =>
+      raw.includes("正在切换") ||
+      raw.includes("HookRunBlocked") ||
+      /"state":"completed",("[^"]+":[^,}]+,)*"displayName":"zcode-go/.test(raw);
     for (let attempt = 0; attempt < 2 && !settled; attempt += 1) {
       if (attempt > 0 && sessionId) {
         const resent = await request("v4/command", {
@@ -470,7 +477,7 @@ function hookFeed(prompt) {
         await new Promise((r) => setTimeout(r, 1000));
         drainFrames();
         eventsRaw = v4frames.map((f) => JSON.stringify(f)).join("");
-        settled = eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked");
+        settled = hookInterceptSettled(eventsRaw);
       }
     }
     if (!settled) {
@@ -480,8 +487,8 @@ function hookFeed(prompt) {
     // session/send 的 "/zcode-go [status]" 一律按裸 /zcode-go（接管）处理；
     // status 子命令仅在桌面原始输入路径下可达
     check(
-      "session: 真实会话 hook 拦截（正在切换 / HookRunBlocked）",
-      eventsRaw.includes("正在切换") || eventsRaw.includes("HookRunBlocked"),
+      "session: 真实会话 hook 拦截（正在切换 / HookRunBlocked / hook 终态）",
+      hookInterceptSettled(eventsRaw),
       eventsRaw.slice(-260),
     );
 
