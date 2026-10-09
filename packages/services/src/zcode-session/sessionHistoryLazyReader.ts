@@ -66,7 +66,7 @@ export interface SessionHistoryLazyReader {
   readTailWindow(sessionId: string, maxMessages: number): LazyHistoryWindow;
   /**
    * 向更早历史回填一页：取 message 序 < beforeMessageSequence 的最近
-   * maxMessages 条消息的 part，仍按历史顺序升序返回。
+   * maxMessages 条消息的全部 part，仍按历史顺序升序返回。
    */
   readPageBefore(
     sessionId: string,
@@ -75,6 +75,16 @@ export interface SessionHistoryLazyReader {
   ): LazyHistoryWindow;
   /** 会话消息总数（巨会话判定/滚动条估计）；库/会话缺失返回 0。 */
   countMessages(sessionId: string): number;
+  /**
+   * 会话的模型选择（合成快照 config 投影用）：优先 runtime/model_selection
+   * entry（runtime 恢复器同款，包装/裸两种形状都认），回退末条 assistant 消息
+   * 的 modelId/provider 字段。无法判定返回 null。
+   */
+  readModelSelection(sessionId: string): {
+    providerId: string;
+    modelId: string;
+    options?: { reasoningLevel?: string };
+  } | null;
   close(): void;
 }
 
@@ -224,6 +234,71 @@ export function openSessionHistoryLazyReader(dbPath: string): SessionHistoryLazy
       } catch {
         return 0;
       }
+    },
+    readModelSelection(sessionId: string): {
+      providerId: string;
+      modelId: string;
+      options?: { reasoningLevel?: string };
+    } | null {
+      const pickOptions = (raw: unknown): { reasoningLevel?: string } | undefined => {
+        const level = (raw as { options?: { reasoningLevel?: unknown } })?.options?.reasoningLevel;
+        return typeof level === "string" && level.trim() ? { reasoningLevel: level } : undefined;
+      };
+      try {
+        const entry = db
+          .prepare(
+            "select data from session_entry where session_id = ? and type = 'runtime/model_selection' " +
+              "order by time_updated desc limit 1",
+          )
+          .get(sessionId) as { data: string } | undefined;
+        if (entry) {
+          const parsed = JSON.parse(entry.data) as {
+            providerId?: unknown;
+            modelId?: unknown;
+            modelSelection?: { providerId?: unknown; modelId?: unknown };
+          };
+          const isBare =
+            typeof parsed.providerId === "string" && typeof parsed.modelId === "string";
+          const wrapped = parsed.modelSelection;
+          const isWrapped =
+            typeof wrapped?.providerId === "string" && typeof wrapped?.modelId === "string";
+          if (isBare || isWrapped) {
+            const out = isBare
+              ? { providerId: parsed.providerId as string, modelId: parsed.modelId as string }
+              : {
+                  providerId: (wrapped as { providerId: string }).providerId,
+                  modelId: (wrapped as { modelId: string }).modelId,
+                };
+            if (out.providerId.trim() && out.modelId.trim()) {
+              const options = pickOptions(isBare ? parsed : wrapped);
+              return options ? { ...out, options } : out;
+            }
+          }
+        }
+      } catch {
+        /* entry 路径失败回落消息推导 */
+      }
+      try {
+        const last = db
+          .prepare(
+            "select data from message where session_id = ? and data like '%\"role\":\"assistant\"%' " +
+              "and data like '%\"modelId\"%' order by time_created desc limit 1",
+          )
+          .get(sessionId) as { data: string } | undefined;
+        if (last) {
+          const parsed = JSON.parse(last.data) as {
+            modelId?: unknown;
+            provider?: unknown;
+            providerId?: unknown;
+          };
+          const modelId = typeof parsed.modelId === "string" ? parsed.modelId.trim() : "";
+          const providerId = String(parsed.providerId ?? parsed.provider ?? "").trim();
+          if (modelId && providerId) return { providerId, modelId };
+        }
+      } catch {
+        /* 无法判定返回 null */
+      }
+      return null;
     },
     close(): void {
       db.close();

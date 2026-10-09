@@ -188,6 +188,11 @@ export function synthesizeConversationSnapshot(
   sessionId: string,
   window: LazyHistoryWindow,
   title: string,
+  modelSelection: {
+    providerId: string;
+    modelId: string;
+    options?: { reasoningLevel?: string };
+  } | null = null,
 ): ConversationSnapshot {
   const rows = projectHistoryRows(window);
   const candidate = {
@@ -218,7 +223,15 @@ export function synthesizeConversationSnapshot(
     },
     inputRouting: { mode: "startNow" },
     meta: { title, titleSource: "default" as const },
-    config: { provider: "", model: "", thought: "default", followupMode: "queue" as const },
+    // config 的 provider/model 是 composer 的 effective 投影：留空会让发送键
+    // 因 submissionReady=false 禁用（「选择模型」）——合成期也必须可用。
+    config: {
+      provider: modelSelection?.providerId ?? "",
+      model: modelSelection ? `${modelSelection.providerId}/${modelSelection.modelId}` : "",
+      thought: "default",
+      followupMode: "queue" as const,
+      ...(modelSelection ? { modelSelection } : {}),
+    },
     modelTransition: null,
     usage: {
       contextWindow: null,

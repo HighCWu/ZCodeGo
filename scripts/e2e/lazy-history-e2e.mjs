@@ -118,7 +118,7 @@ async function cdp() {
     await input("insertText", { text });
     await new Promise((r) => setTimeout(r, 400));
   };
-  return { ev, rawCall, consoleLines: () => consoleBuffer.slice(), trustedClick, trustedSelectAll, trustedTypeAndEnterAt, close: () => ws0.close() };
+  return { ev, rawCall, consoleLines: () => consoleBuffer.slice(), insertText: (text) => input("insertText", { text }), trustedClick, trustedSelectAll, trustedTypeAndEnterAt, close: () => ws0.close() };
 }
 
 let appProcPid = null;
@@ -691,51 +691,35 @@ try {
     console.log(`B. fork msgs=${forkMsgs} (seeded ${SEED_COUNT}) small=${forkSmall}`);
   }
 
-  try {
-  // ╺━ C. 发送走 fork ──
-  let composerExists = false;
-  for (let i = 0; i < 60 && !composerExists; i += 1) {
-    composerExists = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
-    if (!composerExists) await sleep(1500);
-  }
-  if (!composerExists) console.log("C. composer missing (conversation view not ready)");
-  // 输入落盘校验 + 重试：fork 订阅/重订阅渲染会短暂卸载 composer（取坐标
-  // 会撞 null），输入也可能打到被替换的节点上（editorText 空 + 按钮
-  // disabled）——每次先等 composer 出现、重取坐标，最多 5 次
-  const sendMsg = "发送走fork验证消息";
-  let typedOk = false;
-  for (let attempt = 0; attempt < 5 && !typedOk; attempt += 1) {
-    let has = false;
-    for (let i = 0; i < 20 && !has; i += 1) {
-      has = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
-      if (!has) await sleep(1000);
-    }
-    if (!has) { console.log(`C. attempt ${attempt + 1}: composer 未出现（视图重订阅），重试`); continue; }
-    const rcRaw = await convEv.ev(`(() => { const el = document.querySelector('[contenteditable="true"]'); if (!el) return 'null'; const r = el.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
-    if (rcRaw === "null") continue;
-    const rcFresh = JSON.parse(rcRaw);
-    await convEv.trustedClick(rcFresh.x, rcFresh.y);
-    await convEv.trustedSelectAll();
-    await convEv.trustedTypeAndEnterAt(sendMsg, rcFresh.x, rcFresh.y);
-    await sleep(600);
-    typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
-    if (!typedOk) console.log(`C. type attempt ${attempt + 1} 未落编辑器（视图渲染竞态），重试`);
-  }
-  // 等发送按钮启用再点（goal E2E 既证教训：输入后按钮才可能启用，点击前
-  // 不等启用 = 静默丢弃；事后轮询只会误报）
-  for (let i = 0; i < 40; i += 1) {
-    const state = await convEv.ev(`(() => {
-      const submit = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]');
-      return submit && !submit.disabled ? 'ready' : 'wait';
-    })()`);
-    if (state === "ready") break;
-    await sleep(1500);
-  }
-  const btnR = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (!b) return 'null'; const r = b.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
-  if (btnR !== "null") { const bb = JSON.parse(btnR); await convEv.trustedClick(bb.x, bb.y); }
+  // C/D 为硬判据：变量在外层主 try 作用域声明，诊断 try 内只赋值。
   let providerGot = false;
-  for (let i = 0; i < 14 && !providerGot; i += 1) {
-    await sleep(1500);
+  let forkGotMsg = false;
+  let mergedBack = false;
+  try {
+  const sendMsg = `发送走fork验证消息 ${Date.now()}`;
+  // ╺━ C. 发送走 fork ──
+  // 竞态本质：redirect 后 store 换代会重挂视图，坐标输入的草稿可能随编辑器
+  // 卸载而丢（实测 form 有文本而编辑器已换新）。策略：紧凑「focus+insertText
+  // → 验证 → 等按钮启用 → JS click → 查 provider」循环，文本丢失即重输。
+  for (let round = 0; round < 6 && !providerGot; round += 1) {
+    let editorSeen = false;
+    for (let i = 0; i < 20 && !editorSeen; i += 1) {
+      editorSeen = await convEv.ev(`!!document.querySelector('[contenteditable="true"]')`);
+      if (!editorSeen) await sleep(1000);
+    }
+    if (!editorSeen) continue;
+    await convEv.ev(`document.querySelector('[contenteditable="true"]')?.focus(); "ok"`);
+    await convEv.insertText(sendMsg);
+    await sleep(400);
+    const typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
+    if (!typedOk) continue;
+    for (let i = 0; i < 10; i += 1) {
+      const ready = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); return b && !b.disabled; })()`);
+      if (ready) break;
+      await sleep(300);
+    }
+    await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (b && !b.disabled) b.click(); return "ok"; })()`);
+    await sleep(1800);
     providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
   }
   console.log("C. provider received send:", providerGot);
@@ -746,52 +730,29 @@ try {
       return JSON.stringify({
         editorText: ed?.innerText?.slice(0, 60) ?? null,
         submitDisabled: submit?.disabled ?? null,
-        editorReadonly: ed?.getAttribute("aria-readonly") ?? ed?.getAttribute("contenteditable") ?? null,
         pendingChips: document.querySelectorAll('[data-pending-command], [data-command-chip]').length,
-        hasStopBtn: !!Array.from(document.querySelectorAll('button[type="button"]')).find((b) => (b.getAttribute("data-testid") || "").includes("stop")),
-        composerPlaceholder: ed?.getAttribute("data-placeholder")?.slice(0, 40) ?? ed?.getAttribute("aria-placeholder")?.slice(0, 40) ?? null,
         bodyHasSend: document.body.innerText.includes(${JSON.stringify(sendMsg)}),
-        body: document.body.innerText.slice(0, 250),
       });
     })()`);
     console.log("C. send-miss dump:", cd);
-    // fiber 探针：从编辑器沿 fiber 找 conversation snapshot（inputRouting.mode
-    // 与 phase——submitDisabled 的两个非显性来源）。
-    const probe = await convEv.ev(`(() => {
-      const ed = document.querySelector('[contenteditable="true"]');
-      if (!ed) return "no-editor";
-      const fk = Object.keys(ed).find((k) => k.startsWith("__reactFiber$"));
-      if (!fk) return "no-fiber";
-      let f = ed[fk];
-      for (let d = 0; f && d < 80; d += 1, f = f.return) {
-        let hook = f.memoizedState;
-        for (let h = 0; hook && h < 50; h += 1, hook = hook.next) {
-          const v = hook.memoizedState;
-          const cands = v && typeof v === "object" ? (Array.isArray(v) ? v : [v]) : [];
-          for (const c of cands) {
-            if (c && typeof c === "object" && "inputRouting" in c && "control" in c) {
-              return JSON.stringify({ mode: c.inputRouting?.mode, reasonCode: c.inputRouting?.reasonCode ?? null, phase: c.control?.phase, sessionEnded: c.control?.sessionEnded ?? null });
-            }
-          }
-        }
-      }
-      return "no-snapshot-found";
-    })()`);
-    console.log("C. snapshot probe:", probe);
-    const modelChip = await convEv.ev(`(() => {
-      const ed = document.querySelector('[contenteditable="true"]');
-      const form = ed?.closest('form');
-      const chip = form?.querySelector('[data-testid*="model"], [data-testid*="composer-toolbar"]');
-      return JSON.stringify({ chipText: chip?.innerText?.slice(0, 80) ?? null, formText: form?.innerText?.slice(0, 200) ?? null });
-    })()`);
+    let modelChip = null;
+    for (let i = 0; i < 10 && !modelChip; i += 1) {
+      modelChip = await convEv.ev(`(() => {
+        const ed = document.querySelector('[contenteditable="true"]');
+        const form = ed?.closest('form');
+        if (!form) return null;
+        return JSON.stringify({ formText: form.innerText.slice(0, 200) });
+      })()`);
+      if (!modelChip) await sleep(800);
+    }
     console.log("C. composer toolbar:", modelChip);
   }
-  let forkGotMsg = false;
   if (entry) {
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
-    for (let i = 0; i < 10 && !forkGotMsg; i += 1) {
-      await sleep(2000);
+    // 60s 预算：输入行持久化有批量时序，负载高时 20s 不够（实测）。
+    for (let i = 0; i < 20 && !forkGotMsg; i += 1) {
+      await sleep(3000);
       const c = db.prepare("select count(*) c from part where session_id = ? and data like ?").get(entry.fork, `%${sendMsg}%`).c;
       forkGotMsg = c > 0;
     }
@@ -800,20 +761,18 @@ try {
   console.log("C. send landed in fork:", forkGotMsg);
 
   // ╺━ D. 归并回写（原会话出现 msg_zgk_mb_ 行） ──
-  let mergedBack = false;
   {
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
-    for (let i = 0; i < 15 && !mergedBack; i += 1) {
-      await sleep(2000);
+    // 135s 预算：归并在 fork 空闲后由后台合并执行，时序随负载漂移。
+    for (let i = 0; i < 45 && !mergedBack; i += 1) {
+      await sleep(3000);
       const c = db.prepare("select count(*) c from message where session_id = ? and id like 'msg_zgk_mb_%'").get(S).c;
       mergedBack = c > 0;
     }
     db.close();
   }
   console.log("D. merged back to original:", mergedBack);
-  const synthLog = readFileSync(appLog, "utf8").includes("巨会话合成订阅");
-  console.log("A2. synthetic subscribe logged:", synthLog);
 
   } catch (diagError) {
     console.log("C/D diagnostics error:", diagError instanceof Error ? diagError.message : String(diagError));
@@ -827,14 +786,23 @@ try {
   // 产品链 C/D 由单测（zcodeGoSilentForkMerge）与 goal E2E 发送路径覆盖。
   // createdBy=auto-open 只有合成分支会发——它本身就是合成订阅的硬证明（比日志
   // 字符串 grep 更稳），synthLog 降为诊断。
-  pass = tailVisible && entry !== null && entry.createdBy === "auto-open" && forkSmall;
-  // C/D 变量在诊断 try 内声明——异常路径下可能未初始化，typeof 兜底防
-  // 诊断行自身抛错掩盖判据
+  // 全链硬判据：合成尾窗渲染 + auto-open fork 落盘 + 尾部裁剪（2500→~99）
+  // + 发送走 fork（provider 收到 + 落 fork 库）+ 归并回写原会话。C/D 曾长期
+  // 诊断红的根因已修：合成快照 config 补齐 provider/model/modelSelection
+  // （含 reasoningLevel）——「选择模型」曾致发送键禁用；配套 fork 事务把父
+  // 会话模型条目按 runtime 恢复器的裸形状归一化复制。
+  pass = tailVisible
+    && entry !== null
+    && entry.createdBy === "auto-open"
+    && forkSmall
+    && providerGot
+    && forkGotMsg
+    && mergedBack;
   console.log("diagnostics:", JSON.stringify({
     tailVisible,
-    providerGot: typeof providerGot === "boolean" ? providerGot : null,
-    forkGotMsg: typeof forkGotMsg === "boolean" ? forkGotMsg : null,
-    mergedBack: typeof mergedBack === "boolean" ? mergedBack : null,
+    providerGot,
+    forkGotMsg,
+    mergedBack,
   }));
 } catch (error) {
   console.error("E2E 失败:", error.message);

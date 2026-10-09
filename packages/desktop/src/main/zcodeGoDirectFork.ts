@@ -370,20 +370,46 @@ export function forkCompactSessionDirect(input: {
         "insert into session_entry (id, session_id, type, time_created, time_updated, data) " +
           "values (?, ?, ?, ?, ?, ?)",
       );
+      // runtime 侧恢复器（Session model selection restore）按 type 取末条、
+      // strict 裸形状解析：{providerId, modelId, options?}——包装形状（多一层
+      // modelSelection 键）两条解析路径都失败，fork 会丢失模型选择（composer
+      // 显示「选择模型」、发送键禁用）。这里统一归一化为裸形状。
+      const normalizeModelSelectionData = (raw: string): string | null => {
+        try {
+          const parsed = JSON.parse(raw) as {
+            providerId?: unknown;
+            modelId?: unknown;
+            modelSelection?: { providerId?: unknown; modelId?: unknown };
+          };
+          const bare =
+            typeof parsed.providerId === "string" && typeof parsed.modelId === "string"
+              ? parsed
+              : typeof parsed.modelSelection?.providerId === "string" &&
+                  typeof parsed.modelSelection?.modelId === "string"
+                ? parsed.modelSelection
+                : null;
+          return bare ? JSON.stringify(bare) : null;
+        } catch {
+          return null;
+        }
+      };
       const parentModelSelection = sessionDb
         .prepare(
           "select data from session_entry where session_id = ? and type = 'runtime/model_selection' " +
             "order by time_updated desc limit 1",
         )
         .get(parentSessionId) as { data: string } | undefined;
-      if (parentModelSelection) {
+      const normalizedParentSelection = parentModelSelection
+        ? normalizeModelSelectionData(parentModelSelection.data)
+        : null;
+      if (normalizedParentSelection) {
         copyEntry.run(
           `entry_zgk_${randomUUID()}`,
           childSessionId,
           "runtime/model_selection",
           now,
           now,
-          parentModelSelection.data,
+          normalizedParentSelection,
         );
       } else {
         // 父会话没有显式模型选择 entry（v4 会话创建时的选择只留内存，不落盘）——
@@ -413,14 +439,14 @@ export function forkCompactSessionDirect(input: {
           }
         }
         if (derived) {
-          // 条目形状与 runtime 持久化一致：{"modelSelection":{providerId,modelId}}。
+          // 裸形状（strict schema：顶层 providerId/modelId）。
           copyEntry.run(
             `${childSessionId}:runtime-model-selection`,
             childSessionId,
             "runtime/model_selection",
             now,
             now,
-            JSON.stringify({ modelSelection: derived }),
+            JSON.stringify(derived),
           );
         }
       }

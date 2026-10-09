@@ -109,7 +109,8 @@ export function beginSyntheticHistorySubscription(
   try {
     if (reader.countMessages(sessionId) < readMinMessages()) return null;
     const window = reader.readTailWindow(sessionId, SYNTHETIC_TAIL_MESSAGES);
-    const snapshot = synthesizeConversationSnapshot(sessionId, window, "");
+    const modelSelection = reader.readModelSelection(sessionId);
+    const snapshot = synthesizeConversationSnapshot(sessionId, window, "", modelSelection);
     const syntheticId = `${SYNTHETIC_PREFIX}${randomUUID()}`;
     const topic = `conversation/${sessionId}`;
     const subscriptionId = syntheticId;

@@ -147,13 +147,22 @@ node scripts/ensure-official-electron.mjs   # 按 mtime 同步产物
 wrangler.log）；`ZCODE_GO_E2E_KEEP_SANDBOX=1` 通过判据也保留。A 段失败时
 自动截图（a-fail.png）+ renderer console 捕获输出。
 
-## 已知问题：lazy-history 发送链（C/D）
+## lazy-history 发送链（C/D，已全链修复为硬判据）
 
-A/B（合成尾窗渲染 + auto-open fork 落盘与裁剪）为硬判据全绿（CI 三平台 +
-本地真实库拷贝/CI 扩增双种子路径均验证）。C（发送走 fork）/D（归并回写）
-为诊断输出，产品链由单测（`zcodeGoSilentForkMerge`）与 goal E2E 发送路径
-覆盖；剩余缺口是 CDP 输入交互时序（文本偶发未稳定落入 composer，脚本已带
-5 次重试 + 熔断保护）。
+A（合成尾窗渲染）+ B（auto-open fork 落盘与裁剪）+ C（发送走 fork：provider
+收到 + 落 fork 库）+ D（归并回写原会话 `msg_zgk_mb_*` 行）现为**全链硬判据**
+（连续多次全绿，CI 三平台）。
+
+C/D 曾长期诊断红的根因（2026-10 修复）：合成快照的 `config` 留空
+（provider/model 空串）→ composer 显示「选择模型」→ `submissionReady=false`
+→ 发送键禁用。修复三层：
+1. 合成快照 config 补齐 provider/model/modelSelection（含 reasoningLevel，
+   从父会话模型条目/末条 assistant 消息推导，reader 新增 `readModelSelection`）；
+2. fork 事务把父会话 `runtime/model_selection` 条目按 runtime 恢复器的**裸
+   形状**（顶层 providerId/modelId/options，strict schema）归一化复制——
+   包装形状（多一层 modelSelection 键）两条解析路径都失败；
+3. E2E 输入改 JS focus+insertText 紧凑循环（redirect 后视图重挂会连草稿
+   一起卸载，坐标输入的文本随编辑器丢失）。
 
 > 排查教训（2026-10）：本地一度复现"会话区 `fault.subscription.recoveryFailed`
 > 错误卡"，深挖后确认是 `~/.zcode-go/electron` 里**陈旧构建产物**——本地
