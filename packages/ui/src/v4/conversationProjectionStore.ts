@@ -330,6 +330,8 @@ export class ConversationProjectionStore {
       > & { directoryRevision: number })
     | null = null;
   private closed = false;
+  /** notOwned 自愈退避计数（成功 live 后复位）。 */
+  private notOwnedRecoveryAttempts = 0;
 
   constructor(
     readonly topic: string,
@@ -446,6 +448,7 @@ export class ConversationProjectionStore {
       // 会原子替换整个投影，旧恢复流已无意义；否则其迟到失败会把 live 的新订阅打成 error。
       this.discardRecovery();
       this.runtimeRecycleRetryAttempt = 0;
+      this.notOwnedRecoveryAttempts = 0;
       this.initialSubscribeAckAt = monotonicNow();
       this.setState({
         status: "live",
@@ -889,6 +892,22 @@ export class ConversationProjectionStore {
           // 而非瞬态故障；停在 error 等手动重连会让会话永久卡死。本地 snapshot 仍是一致
           // 投影，携当前水位 fresh subscribe 由服务端裁决 resume/snapshot（04-sync 规则 3），
           // 完成自愈。仅对 notOwned 特判，避免瞬态错误引发重连风暴。
+          // 防御退避：真实事故（2026-10-09 redirect 路由 topic 不匹配）中自愈
+          // connect 后 resync 仍 notOwned，30ms/轮形成 100+ 代订阅风暴（界面
+          // 闪烁碎行）。host 侧已修路由登记键，这里再兜底任何未知来源：连败
+          // 6 次后指数退避（封顶 30s），成功 live 即复位。
+          const attempt = ++this.notOwnedRecoveryAttempts;
+          if (attempt > 6) {
+            const backoffMs = Math.min(30_000, 1000 * 2 ** Math.min(attempt - 7, 5));
+            this.setState({
+              status: "error",
+              lastError: `fault.subscription.notOwned（自愈重试 ${attempt} 次未收敛，${Math.round(backoffMs / 1000)}s 后再试）`,
+            });
+            setTimeout(() => {
+              if (!this.closed) void this.connect();
+            }, backoffMs);
+            return;
+          }
           void this.connect();
           return;
         }

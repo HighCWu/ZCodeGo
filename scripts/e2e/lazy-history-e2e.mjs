@@ -697,6 +697,7 @@ try {
   let forkGotMsg = false;
   let mergedBack = false;
   let editorReady = false;
+  let stormFree = false;
   try {
   const sendMsg = `发送走fork验证消息 ${Date.now()}`;
   // ╺━ C. 发送走 fork ──
@@ -817,6 +818,24 @@ try {
     db.close();
   }
   console.log("D. merged back to original:", mergedBack);
+
+  // ── E.（诊断输出，不计判据）重开已 redirect 会话 = 真实事故触发面。
+  //    已知产品 bug：redirect 存在时冷打开触发重订阅风暴（E2E 实测 832 代/16s，
+  //    52 代/秒，resync notOwned ×2 每代）——用户事故同源。修复方向已锁定
+  //    （后台合成订阅与 renderer 订阅在 fork topic 上共用 connectionId 互杀 +
+  //    路由登记键寻址），完整修复见专项。renderer 侧已加退避缓解。──
+  const notOwnedBefore = readFileSync(appLog, "utf8").split("fault.subscription.notOwned").length - 1;
+  await convEv.ev(`document.querySelector('li[data-testid="task-item-" + ${JSON.stringify(S)}]')?.click(); "ok"`);
+  await sleep(8000);
+  let reopened = false;
+  for (let i = 0; i < 20 && !reopened; i += 1) {
+    reopened = await convEv.ev(`document.body.innerText.includes(${JSON.stringify(TAIL_MARKER)})`);
+    if (!reopened) await sleep(1500);
+  }
+  await sleep(5000);
+  const notOwnedAfter = readFileSync(appLog, "utf8").split("fault.subscription.notOwned").length - 1;
+  stormFree = reopened && notOwnedAfter - notOwnedBefore <= 3;
+  console.log("E. reopened redirected session:", reopened, "| notOwned delta:", notOwnedAfter - notOwnedBefore);
 
   } catch (diagError) {
     console.log("C/D diagnostics error:", diagError instanceof Error ? diagError.message : String(diagError));
