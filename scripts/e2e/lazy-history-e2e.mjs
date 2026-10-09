@@ -708,19 +708,29 @@ try {
       if (!editorSeen) await sleep(1000);
     }
     if (!editorSeen) continue;
-    await convEv.ev(`document.querySelector('[contenteditable="true"]')?.focus(); "ok"`);
+    // 全选后 insertText 替换选区：重试轮不会把文本追加成双份（mac 实测踩中）。
+    await convEv.ev(`(() => { const ed = document.querySelector('[contenteditable="true"]'); ed?.focus(); document.execCommand("selectAll"); return "ok"; })()`);
     await convEv.insertText(sendMsg);
     await sleep(400);
     const typedOk = await convEv.ev(`(document.querySelector('[contenteditable="true"]')?.innerText || "").includes(${JSON.stringify(sendMsg)})`);
     if (!typedOk) continue;
-    for (let i = 0; i < 10; i += 1) {
-      const ready = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); return b && !b.disabled; })()`);
-      if (ready) break;
-      await sleep(300);
+    // mac 忙渲染（合成视图 2500 行）下按钮启用可超 3s——预算放到 15s。
+    let ready = false;
+    for (let i = 0; i < 30 && !ready; i += 1) {
+      ready = await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); return b && !b.disabled; })()`);
+      if (!ready) await sleep(500);
     }
-    await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (b && !b.disabled) b.click(); return "ok"; })()`);
-    await sleep(1800);
-    providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
+    if (ready) {
+      await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); b?.click(); return "ok"; })()`);
+      await sleep(1800);
+      providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
+      if (!providerGot) {
+        // 首点可能落在启用前一瞬：文本仍在则补点一次。
+        await convEv.ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (b && !b.disabled) b.click(); return "ok"; })()`);
+        await sleep(2500);
+        providerGot = providerEntries().some((e) => (e.text || "").includes(sendMsg));
+      }
+    }
   }
   console.log("C. provider received send:", providerGot);
   if (!providerGot) {
