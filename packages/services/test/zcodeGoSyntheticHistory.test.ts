@@ -254,3 +254,61 @@ test("订阅接管全链：放行门槛 + 后台订阅号重写 + 回填 + 退�
   rmSync(dir, { recursive: true, force: true });
   void dbPath;
 });
+
+test("真实订阅回收闭环：无 entry 即回收；end 传 null 也用 attach 登记的回调回收", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "zg-synth-recycle-"));
+  process.env.ZCODE_GO_STATE_DIR_OVERRIDE = dir;
+  process.env.ZCODE_DATA_BASE_DIR = dir;
+  resetSyntheticHistoryForTest();
+  try {
+    // 造一个能放行的巨会话（与 createDb 同 schema；minMessages 用 100）
+    mkdirSync(join(dir, ".zcode", "cli", "db"), { recursive: true });
+    const dbPath = join(dir, ".zcode", "cli", "db", "db.sqlite");
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      create table session (id text primary key);
+      create table message (
+        id text primary key, session_id text not null, time_created integer not null,
+        time_updated integer not null, data text, sequence integer);
+      create table part (
+        id text primary key, message_id text not null, session_id text not null,
+        time_created integer, time_updated integer, data text, sequence integer);
+      create index message_session_time_idx on message(session_id, time_created, id);
+      create index part_message_idx on part(message_id, id);
+    `);
+    db.exec("insert into session (id) values ('sess_recycle')");
+    const ins = db.prepare("insert into message values (?, 'sess_recycle', 0, 0, null, ?)");
+    for (let i = 1; i <= 150; i += 1) ins.run(`m${i}`, i);
+    db.close();
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ lazyHistory: { minMessages: 100 } }), "utf8");
+
+    // 1) 合成订阅已 end 后 attach 才完成 → 当场回收真实订阅（防 runtime 僵尸）
+    const begun = beginSyntheticHistorySubscription({ sessionId: "sess_recycle", workspacePath: "/w" });
+    assert.ok(begun, "放行");
+    endSyntheticSubscription(begun.subscriptionId, null);
+    let recycledLate: string | null = null;
+    attachRealSubscription(begun.subscriptionId, "real-late", async (id) => {
+      recycledLate = id;
+      return {};
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(recycledLate, "real-late", "无 entry 的 attach 必须当场退真实订阅");
+
+    // 2) attach 后 end(null)（begin 替换旧合成路径）→ 用登记的回调回收
+    const second = beginSyntheticHistorySubscription({ sessionId: "sess_recycle", workspacePath: "/w" });
+    assert.ok(second, "再次放行");
+    let recycledEnd: string | null = null;
+    attachRealSubscription(second.subscriptionId, "real-2", async (id) => {
+      recycledEnd = id;
+      return {};
+    });
+    endSyntheticSubscription(second.subscriptionId, null);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(recycledEnd, "real-2", "end(null) 必须用 attach 登记的回调回收");
+  } finally {
+    delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
+    delete process.env.ZCODE_DATA_BASE_DIR;
+    resetSyntheticHistoryForTest();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -124,15 +124,6 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return true;
 }
 
-function frameMatchesEnvelope(
-  frame: unknown,
-  wire: { topic: string; subscriptionId: string },
-): boolean {
-  if (typeof frame !== "object" || frame === null) return false;
-  const value = frame as { topic?: unknown; subscriptionId?: unknown };
-  return value.topic === wire.topic && value.subscriptionId === wire.subscriptionId;
-}
-
 function hardBound(value: number | undefined, maximum: number, name: string): number {
   const resolved = value ?? maximum;
   if (!Number.isFinite(resolved) || resolved <= 0) {
@@ -145,6 +136,13 @@ export class TopicWireFrameAssembler<F> {
   private readonly assemblies = new Map<string, FragmentAssembly>();
   /** 每 route 的单调 ordinal tombstone；不会像 bounded id LRU 一样淘汰后复活旧帧。 */
   private readonly settledByRoute = new Map<string, SettledLogicalFrame>();
+  /**
+   * 信封 topic 别名（内层 runtime topic → 外层订阅方 topic）。zcode-go 静默
+   * fork：host 下行把外层信封从 conversation/<fork> 回写为 conversation/<原会话>，
+   * 逻辑帧内层 topic 保持 runtime 真值——一致性校验按别名放行。subscriptionId
+   * 仍严格匹配，别名不放宽任何代际防护。
+   */
+  private readonly envelopeTopicAliasByInner = new Map<string, string>();
   private stagedDecodedBytes = 0;
   private readonly maxAssemblyBytes: number;
   private readonly maxFragments: number;
@@ -187,6 +185,32 @@ export class TopicWireFrameAssembler<F> {
       PROTOCOL_V4_LIMITS.maxFrameBytes,
       "maxPhysicalFrameBytes",
     );
+  }
+
+  /** 登记别名（同 outer 唯一：轮换时新 fork 别名替换旧 fork 别名）。 */
+  setEnvelopeTopicAlias(innerTopic: string, outerTopic: string): void {
+    for (const [inner, outer] of this.envelopeTopicAliasByInner) {
+      if (outer === outerTopic && inner !== innerTopic) this.envelopeTopicAliasByInner.delete(inner);
+    }
+    this.envelopeTopicAliasByInner.set(innerTopic, outerTopic);
+  }
+
+  /** 清除登记到某 outer topic 的别名（退订/订阅消亡）。 */
+  clearEnvelopeTopicAlias(outerTopic: string): void {
+    for (const [inner, outer] of this.envelopeTopicAliasByInner) {
+      if (outer === outerTopic) this.envelopeTopicAliasByInner.delete(inner);
+    }
+  }
+
+  private envelopeMatches(
+    frame: unknown,
+    wire: { topic: string; subscriptionId: string },
+  ): boolean {
+    if (typeof frame !== "object" || frame === null) return false;
+    const value = frame as { topic?: unknown; subscriptionId?: unknown };
+    if (value.subscriptionId !== wire.subscriptionId) return false;
+    if (value.topic === wire.topic) return true;
+    return typeof value.topic === "string" && this.envelopeTopicAliasByInner.get(value.topic) === wire.topic;
   }
 
   accept(wire: TopicWireFrameCandidate, now = Date.now()): TopicWireAssemblyEvent<F>[] {
@@ -282,7 +306,7 @@ export class TopicWireFrameAssembler<F> {
         events.push(this.fault(wire, "proto.frameAssemblyTooLarge"));
         return events;
       }
-      if (!frameMatchesEnvelope(wire.frame, wire)) {
+      if (!this.envelopeMatches(wire.frame, wire)) {
         this.settle(key, wire);
         events.push(this.fault(wire, "proto.frameAssemblyMetadataMismatch"));
         return events;
@@ -453,7 +477,7 @@ export class TopicWireFrameAssembler<F> {
       events.push(this.fault(assembly, "proto.frameAssemblyInvalidJson"));
       return events;
     }
-    if (!frameMatchesEnvelope(value, assembly)) {
+    if (!this.envelopeMatches(value, assembly)) {
       this.settle(key, assembly);
       events.push(this.fault(assembly, "proto.frameAssemblyMetadataMismatch"));
       return events;

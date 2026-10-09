@@ -44,6 +44,8 @@ interface SyntheticSubscription {
   topic: string;
   workspace: SyntheticWorkspace;
   realSubId: string | null;
+  /** attach 时登记的回收回调：end 时调用方可能传 null（替换路径），仍要能回收真实订阅。 */
+  unsubscribeReal: ((realSubId: string) => Promise<unknown>) | null;
   cancelled: boolean;
 }
 
@@ -142,6 +144,7 @@ export function beginSyntheticHistorySubscription(
         ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
       },
       realSubId: null,
+      unsubscribeReal: null,
       cancelled: false,
     });
     syntheticBySession.set(sessionId, syntheticId);
@@ -158,12 +161,18 @@ export function attachRealSubscription(
   unsubscribeReal: (realSubId: string) => Promise<unknown>,
 ): void {
   const entry = syntheticSubscriptions.get(syntheticId);
-  if (!entry) return;
+  if (!entry) {
+    // 合成订阅已被 end（如 renderer 在后台订阅在途时重订）：真实订阅没人认领，
+    // 必须当场回收——留着会在 runtime 侧成为僵尸订阅（帧持续下发但无人改写）。
+    void unsubscribeReal(realSubId).catch(() => {});
+    return;
+  }
   if (entry.cancelled) {
     void unsubscribeReal(realSubId).catch(() => {});
     return;
   }
   entry.realSubId = realSubId;
+  entry.unsubscribeReal = unsubscribeReal;
   let byReal = topicRewrites.get(entry.topic);
   if (!byReal) {
     byReal = new Map();
@@ -247,6 +256,8 @@ export function syntheticRowsRange(params: {
 /**
  * 合成订阅退订（renderer 侧）：标记取消 + 清理重写；真实订阅由调用方回收
  * （已挂接则退真实号，未挂接则由 attachRealSubscription 兜底回收）。
+ * unsubscribeReal 参数为 null 时（begin 替换旧合成路径）使用 attach 时登记的
+ * 回调——否则旧真实订阅泄漏成 runtime 僵尸。
  */
 export function endSyntheticSubscription(
   subscriptionId: string,
@@ -262,7 +273,8 @@ export function endSyntheticSubscription(
   const byReal = topicRewrites.get(entry.topic);
   if (entry.realSubId) {
     byReal?.delete(entry.realSubId);
-    if (unsubscribeReal) void unsubscribeReal(entry.realSubId).catch(() => {});
+    const recycle = unsubscribeReal ?? entry.unsubscribeReal;
+    if (recycle) void recycle(entry.realSubId).catch(() => {});
   }
   if (byReal && byReal.size === 0) topicRewrites.delete(entry.topic);
 }

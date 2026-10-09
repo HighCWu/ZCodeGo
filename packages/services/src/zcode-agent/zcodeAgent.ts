@@ -354,6 +354,14 @@ export interface ZCodeAgentConversationSubscribeParams extends ZCodeAgentSession
   /** 水位不变量：仅当客户端真持有该时刻一致状态才允许带。 */
   base?: { logEpoch: string; seq: number };
   visibility?: "foreground" | "background";
+  /**
+   * 订阅者作用域后缀：CLI 侧重订阅替换按 (connectionId, topic) 判定，host 进程内
+   * 多个独立消费者（懒历史后台真实订阅 / queue drain / goal 复核 / 子任务恢复）与
+   * renderer 订阅同一 conversation topic 时必须用不同 connectionId，否则互相替换
+   * 对方的订阅代际。仅对 host 内部直调生效（RPC facade 会清掉该字段）；缺省共享
+   * host 连接 id。
+   */
+  subscriberScope?: string;
 }
 
 export interface ZCodeAgentConversationUnsubscribeParams extends ZCodeAgentWorkspaceTarget {

@@ -297,6 +297,7 @@ import {
 import {
   readTrustedZCodeAgentV4Connection,
   readTrustedZCodeAgentV4UnsubscribeRoute,
+  withoutTrustedV4Connection,
   type ZCodeAgentV4ConnectionContext,
 } from "./zcodeAgentConnectionScope.js";
 import { createBackgroundSessionEventCoalescer } from "#src/zcode-agent/zcodeSessionEventCoalescer.js";
@@ -325,6 +326,7 @@ import type { PipSessionEvent } from "@zcode/zcode-cua/pip-session";
 import {
   lookupZcodeGoOriginalSession,
   resolveZcodeGoSessionId,
+  translateConversationTopicForRouteLookup,
 } from "./zcodeGoSessionRedirect.js";
 import {
   observeZcodeGoSilentForkFrame,
@@ -1724,13 +1726,27 @@ export function createZCodeAgentService(
     const trusted = readTrustedZCodeAgentV4UnsubscribeRoute(params);
     if (trusted) {
       if (!trusted.topic.startsWith(topicPrefix)) return null;
-      const route: V4SubscriptionRoute = {
-        workspaceKey: expectedWorkspaceKey,
-        topic: trusted.topic,
-        subscriptionId: params.subscriptionId,
-        connectionId: trusted.connectionId,
-      };
-      return v4SubscriptionRoutes.get(v4SubscriptionRouteKey(route)) ?? null;
+      // zcode-go 静默 fork：facade 的 trusted topic 是 renderer 视角（原会话）；
+      // 本服务订阅时已按 redirect 解析到 fork topic 并按 fork 登记。只按原会话
+      // topic 严格查找在 redirect 后恒 miss → notOwned → renderer 自愈重订又
+      // 被代际替换，形成订阅风暴（2026-10-09 真实事故，实测 832 代/16s）。
+      // 这里做与订阅入口对称的翻译后再查；两代路由（redirect 前建立的旧订阅）
+      // 共存时 subId/connectionId 仍严格匹配，翻译不放宽任何键。
+      const candidateTopics =
+        topicPrefix === "conversation/"
+          ? [translateConversationTopicForRouteLookup(trusted.topic), trusted.topic]
+          : [trusted.topic];
+      for (const topic of candidateTopics) {
+        const route: V4SubscriptionRoute = {
+          workspaceKey: expectedWorkspaceKey,
+          topic,
+          subscriptionId: params.subscriptionId,
+          connectionId: trusted.connectionId,
+        };
+        const found = v4SubscriptionRoutes.get(v4SubscriptionRouteKey(route));
+        if (found) return found;
+      }
+      return null;
     }
     // base service 的内部直连消费者没有 facade carrier；只在 method topic 域内唯一
     // 命中时兼容，碰撞则拒绝猜测，更不能多 publisher 广播删除。
@@ -3755,8 +3771,13 @@ export function createZCodeAgentService(
 
     async readSession(params: ZCodeAgentReadSessionParams) {
       // zcode-go 静默 fork：读取寻址到活跃隐形子会话（陈旧的原会话档案会误导
-      // goal 复核/看门狗等按 ID 读取的消费者）。
-      params = { ...params, sessionId: resolveZcodeGoSessionId(params.sessionId) };
+      // goal 复核/看门狗等按 ID 读取的消费者）。返回快照的身份回写为请求方视角的
+      // 原会话——task adapter 的 snapshotToMeta 等下游按快照 sessionId 建任务行/
+      // 注册目标，拿到 fork 身份会把隐形 fork 泄漏成侧栏行（与帧下行 topic 回写
+      // 同原则：内容取活跃端，身份归原会话）。
+      const requestedSessionId = params.sessionId;
+      const resolvedSessionId = resolveZcodeGoSessionId(requestedSessionId);
+      params = { ...params, sessionId: resolvedSessionId };
       const client = await getReadOnlyClient(params, params.runtimePolicy);
       // task-index 为补正文索引调用 readSession 时，默认策略会在 runtime
       // 已被回收后重新拉起 Agent；这条观察路径不应改变 session 生命周期。只有显式
@@ -3768,7 +3789,7 @@ export function createZCodeAgentService(
           workspace: params,
         });
       }
-      const snapshot = await client.request(
+      let snapshot = await client.request(
         zcodeProtocolMethods.sessionRead,
         {
           sessionId: params.sessionId,
@@ -3778,6 +3799,15 @@ export function createZCodeAgentService(
         },
         zcodeSessionStateSnapshotSchema,
       );
+      if (
+        resolvedSessionId !== requestedSessionId &&
+        snapshot.session.sessionId === resolvedSessionId
+      ) {
+        snapshot = {
+          ...snapshot,
+          session: { ...snapshot.session, sessionId: requestedSessionId },
+        };
+      }
       rememberSessionTrace(params, snapshot);
       return snapshot;
     },
@@ -5052,15 +5082,25 @@ export function createZCodeAgentService(
           void (async () => {
             try {
               await new Promise((r) => setTimeout(r, 500));
-              const real = await serviceRef!.subscribeConversationV4({
-                ...params,
-                __skipSyntheticHistory: true,
-              } as ZCodeAgentConversationSubscribeParams);
-              attachRealSubscription(subscriptionId, real.ack.subscriptionId, (realId) =>
-                serviceRef!.unsubscribeConversationV4({
+              // 必须剥离 renderer 的 trusted carrier 并用独立 scope：后台真实订阅
+              // 若沿用 renderer connectionId，redirect 解析后与 renderer 重订订阅
+              // 落到同一 (connectionId, topic)，runtime 单订阅替换语义互杀代际
+              // （2026-10-09 事故的碰撞源之一）。
+              const real = await serviceRef!.subscribeConversationV4(
+                withoutTrustedV4Connection({
                   ...params,
-                  subscriptionId: realId,
-                } as ZCodeAgentConversationUnsubscribeParams),
+                  subscriberScope: "zcode-go-lazy-real",
+                  __skipSyntheticHistory: true,
+                } as ZCodeAgentConversationSubscribeParams),
+              );
+              attachRealSubscription(subscriptionId, real.ack.subscriptionId, (realId) =>
+                serviceRef!.unsubscribeConversationV4(
+                  withoutTrustedV4Connection({
+                    ...params,
+                    subscriberScope: "zcode-go-lazy-real",
+                    subscriptionId: realId,
+                  } as ZCodeAgentConversationUnsubscribeParams),
+                ),
               );
             } catch (error) {
               logger.warn(undefined, "[zcode-go 懒历史] 后台真实订阅失败（合成视图继续，live 帧缺席）", {
@@ -5097,7 +5137,11 @@ export function createZCodeAgentService(
         0,
         Math.round(performance.now() - providerRegistryStartedAt),
       );
-      const connection = resolveV4Connection(params);
+      // 与 sessions-index/workspace-config 通道同款：内部直连消费者（懒历史后台
+      // 真实订阅、queue drain、goal 复核、子任务恢复）必须用独立 scope 后缀的
+      // connectionId，否则 runtime 按 (connectionId, topic) 单订阅替换语义互杀
+      // 代际；renderer 侧（trusted carrier）不受 fallback 影响。
+      const connection = resolveV4Connection(params, v4ConnectionIdFor(params.subscriberScope));
       // zcode-go 静默 fork：订阅寻址到活跃隐形子会话；任务元数据（thoughtLevel）
       // 仍按原会话 id 读任务行——任务行身份永远是原会话。
       const topic = conversationTopic(resolveZcodeGoSessionId(params.sessionId));
@@ -5161,11 +5205,16 @@ export function createZCodeAgentService(
         result.ack.subscriptionId,
         connection.connectionId,
       );
+      // zcode-go 静默 fork：订阅方视角 topic 是原会话，runtime 实际寻址是隐形
+      // fork——ack 携带 runtimeTopic 让订阅方（renderer 组装器）建立信封别名，
+      // 否则下行帧内层 topic（fork）与外层回写（原会话）一致性校验必败。
+      const requestedTopic = conversationTopic(params.sessionId);
       return {
         ...result,
         ack: {
           ...result.ack,
           openTiming,
+          ...(topic !== requestedTopic ? { runtimeTopic: topic } : {}),
         },
       };
     },

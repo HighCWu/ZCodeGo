@@ -140,8 +140,13 @@ export function createAgentConversationTransport(
     Parameters<ConversationTransport["onRuntimeRestart"]>[0]
   >();
   const runtimeLifecycleListeners = new Set<(state: "available" | "unavailable") => void>();
+  // zcode-go 静默 fork：runtime 实际 topic（隐形 fork）→ 订阅方 topic（原会话）。
+  // 外层信封已被 host 回写为原会话，逻辑帧内层仍是 fork——组装器按别名放行
+  // 一致性校验，交付边界把内层 topic 归一化回订阅方视角。
+  const assembler = new TopicWireFrameAssembler(conversationTopicFrameSchema);
+  const aliasByInnerTopic = new Map<string, string>();
   const decoder = createTopicWireDecoder(
-    new TopicWireFrameAssembler(conversationTopicFrameSchema),
+    assembler,
     (frame: ConversationTopicFrame, deliveryKind) => {
       try {
         if (!target.workspaceIdentity?.trim()) {
@@ -153,10 +158,13 @@ export function createAgentConversationTransport(
       } catch (error) {
         logger.debug("[local-ttft] observation failed", { error });
       }
-      for (const listener of listeners) listener(frame, { deliveryKind });
+      const outerTopic = aliasByInnerTopic.get(frame.topic);
+      const normalized = outerTopic ? { ...frame, topic: outerTopic } : frame;
+      for (const listener of listeners) listener(normalized, { deliveryKind });
     },
     (fault) => {
-      for (const listener of faultListeners) listener(fault);
+      const outerTopic = aliasByInnerTopic.get(fault.topic);
+      for (const listener of faultListeners) listener(outerTopic ? { ...fault, topic: outerTopic } : fault);
     },
   );
   const barrier = createAckActivationBarrier<ConversationTopicWireCandidate>((wire) => {
@@ -242,6 +250,15 @@ export function createAgentConversationTransport(
           throw error;
         }
         topicBySubscriptionId.set(result.ack.subscriptionId, params.topic);
+        if (result.ack.runtimeTopic && result.ack.runtimeTopic !== params.topic) {
+          assembler.setEnvelopeTopicAlias(result.ack.runtimeTopic, params.topic);
+          aliasByInnerTopic.set(result.ack.runtimeTopic, params.topic);
+        } else {
+          assembler.clearEnvelopeTopicAlias(params.topic);
+          for (const [inner, outer] of aliasByInnerTopic) {
+            if (outer === params.topic) aliasByInnerTopic.delete(inner);
+          }
+        }
         logger.lifecycle.info("v4 conversation subscription acknowledged", {
           ...lifecycleContext,
           durationMs: Date.now() - startedAt,
@@ -306,7 +323,13 @@ export function createAgentConversationTransport(
       barrier.forget(subscriptionId);
       const subscriptionTopic = topicBySubscriptionId.get(subscriptionId);
       topicBySubscriptionId.delete(subscriptionId);
-      if (subscriptionTopic) decoder.discard(subscriptionTopic, subscriptionId);
+      if (subscriptionTopic) {
+        decoder.discard(subscriptionTopic, subscriptionId);
+        assembler.clearEnvelopeTopicAlias(subscriptionTopic);
+        for (const [inner, outer] of aliasByInnerTopic) {
+          if (outer === subscriptionTopic) aliasByInnerTopic.delete(inner);
+        }
+      }
       logger.lifecycle.info("v4 conversation unsubscription started", {
         ...lifecycleContext,
         event: "v4.conversation.unsubscribe.started",

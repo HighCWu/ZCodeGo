@@ -120,6 +120,20 @@ function withTrustedUnsubscribeRoute<T extends object>(
   return forwarded as T;
 }
 
+/**
+ * 剥离 trusted connection carrier：host 内部二次派发（如懒历史后台真实订阅）
+ * 复用调用方 params 时必须去掉 renderer 的可信连接身份，让 base 层落到
+ * subscriberScope 后缀的独立 connectionId——否则后台订阅与 renderer 订阅在
+ * runtime 侧互相替换代际。
+ */
+export function withoutTrustedV4Connection<T extends object>(value: T): T {
+  const forwarded = {
+    ...(value as unknown as Record<string, unknown>),
+  };
+  delete forwarded[TRUSTED_CONNECTION_FIELD];
+  return forwarded as T;
+}
+
 function workspaceKey(target: ZCodeAgentWorkspaceTarget): string {
   return target.workspaceIdentity?.trim() || target.workspacePath;
 }

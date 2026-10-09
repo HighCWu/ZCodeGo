@@ -55,10 +55,22 @@ async function cdp() {
   await new Promise((res, rej) => { ws0.onopen = res; ws0.onerror = rej; });
   let id = 0;
   const pending = new Map();
+  // renderer console 缓冲：redirect 后恢复链的风暴信号（[v4-store] resync 失败 /
+  // notOwned 自愈）只走 renderer logger，遥测与 host 日志都不覆盖——风暴回归断言靠这里。
+  const consoleBuffer = [];
   ws0.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
+    if (m.method === "Runtime.consoleAPICalled") {
+      const text = (m.params.args ?? []).map((a) => a.value ?? a.description ?? "").join(" ");
+      consoleBuffer.push(`${m.params.type}: ${text}`.slice(0, 300));
+    }
   };
+  await new Promise((resolve) => {
+    const mid = ++id;
+    pending.set(mid, () => resolve());
+    ws0.send(JSON.stringify({ id: mid, method: "Runtime.enable" }));
+  });
   const ev = (expr) => new Promise((resolve, reject) => {
     const mid = ++id;
     pending.set(mid, (m) => {
@@ -90,7 +102,7 @@ async function cdp() {
     await input("insertText", { text });
     await new Promise((r) => setTimeout(r, 400));
   };
-  return { ev, trustedClick, trustedTypeAndEnterAt, close: () => ws0.close() };
+  return { ev, trustedClick, trustedTypeAndEnterAt, consoleLines: () => consoleBuffer.slice(), close: () => ws0.close() };
 }
 
 let appProcPid = null;
@@ -435,7 +447,67 @@ try {
     console.log(`4. fork msgs=${forkMsgs} orig msgs=${origMsgs} trimmed=${forkTrimmed} originalIntact=${originalIntact}`);
   }
 
-  pass = compactionSeen && redirectSeen && forkTrimmed && originalIntact;
+  // ── 5. redirect 后会话仍可用 + 无订阅风暴（2026-10-09 事故回归）──
+  //    修复前：renderer 重订订阅后任何 resync 都被路由表 fork/原会话 topic 错位
+  //    拒绝（notOwned）→ 自愈 connect 再被替换 → 30ms/轮风暴（实测 832 代/16s）。
+  //    修复后：路由查找按 redirect 对称翻译 + 后台订阅独立 scope，恢复链应零
+  //    notOwned。容忍 <3 次瞬态（偶发单次 notOwned 自愈一次即收敛，非风暴）。
+  let postRedirectLive = false;
+  let stormFree = true;
+  if (entry) {
+    const providerLogText = () => { try { return readFileSync(providerLog, "utf8"); } catch { return ""; } };
+    const beforeLen = providerLogText().length;
+    // forceSnapshot 重订会让视图短暂回到加载态（composer 卸载重挂）——先等它回来
+    let composerBack = false;
+    for (let i = 0; i < 30 && !composerBack; i += 1) {
+      composerBack = await ev(`!!document.querySelector('[contenteditable="true"]')`);
+      if (!composerBack) await sleep(1000);
+    }
+    if (!composerBack) {
+      const dump = await ev(`document.body.innerText.slice(0, 500)`);
+      console.log("5z. composer 未回归 dump:", JSON.stringify(dump));
+      // renderer 恢复链诊断：[v4-store] 只进 renderer console
+      const storeLines = c.consoleLines().filter((l) => l.includes("v4-store") || l.includes("fault."));
+      console.log("5z. v4-store console 尾部:\n" + storeLines.slice(-25).join("\n"));
+      throw new Error("转接后 composer 未回归（视图卡加载/错误态）");
+    }
+    const sent = await sendRound("转接后续轮：验证原会话内继续对话");
+    for (let i = 0; i < 40; i += 1) {
+      await sleep(1500);
+      if (providerLogText().length > beforeLen) { postRedirectLive = true; break; }
+    }
+    // 观察窗 12s：统计恢复链风暴信号
+    const lines = c ? c.consoleLines() : [];
+    const stormSignals = lines.filter((l) =>
+      l.includes("fault.subscription.notOwned") || l.includes("resyncGenerationMismatch"),
+    ).length;
+    stormFree = stormSignals < 3;
+    console.log(`5. post-redirect live: ${postRedirectLive}; storm signals: ${stormSignals} (stormFree=${stormFree})`);
+  }
+
+  // ── 6. 隐形 fork 不泄漏进任务索引（侧栏唯一数据源）──
+  //    修复前：静默点 checkQuiescence 的 readSession 返回快照带着 fork sessionId，
+  //    task adapter snapshotToMeta 以 fork 身份建任务行 → 侧栏出现 "Fork of ..."。
+  //    修复后：readSession 返回快照身份回写为请求方（原会话）。
+  let forkRowLeakFree = true;
+  if (entry) {
+    await sleep(2000);
+    try {
+      const { DatabaseSync } = require("node:sqlite");
+      const tasksDb = new DatabaseSync(join(sandboxHome, ".zcode", "v2", "tasks-index.sqlite"), { readOnly: true });
+      const leak = tasksDb
+        .prepare("select count(*) c from tasks where task_id = ?")
+        .get(entry.fork).c;
+      tasksDb.close();
+      forkRowLeakFree = leak === 0;
+      console.log(`6. fork task-row leak free: ${forkRowLeakFree} (fork rows: ${leak})`);
+    } catch (error) {
+      forkRowLeakFree = false;
+      console.log("6. tasks-index 读取失败:", error.message);
+    }
+  }
+
+  pass = compactionSeen && redirectSeen && forkTrimmed && originalIntact && postRedirectLive && stormFree && forkRowLeakFree;
 } catch (error) {
   console.error("E2E 失败:", error.message);
   try {

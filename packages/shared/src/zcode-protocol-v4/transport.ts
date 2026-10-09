@@ -152,6 +152,13 @@ export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema
 
 const conversationSubscribeAckSchema = subscribeAckSchema.extend({
   openTiming: conversationOpenTimingSchema.optional(),
+  /**
+   * zcode-go 静默 fork：本次订阅在 runtime 侧实际寻址的 topic（redirect 解析后
+   * 的隐形 fork）。host 下行已把外层信封 topic 回写为订阅方视角的原会话；
+   * 逻辑帧内层 topic 仍是 runtime 真值——订阅方（renderer 组装器）用它建立
+   * 信封别名，内层/外层一致性校验按别名放行。缺省 = 无重定向，行为不变。
+   */
+  runtimeTopic: z.string().optional(),
 });
 export type ConversationSubscribeAck = z.infer<typeof conversationSubscribeAckSchema>;
 

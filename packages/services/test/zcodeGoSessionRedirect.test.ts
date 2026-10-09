@@ -10,6 +10,7 @@ import {
   lookupZcodeGoOriginalSession,
   resolveZcodeGoSessionId,
   setZcodeGoSessionRedirect,
+  translateConversationTopicForRouteLookup,
   resetZcodeGoSessionRedirectCacheForTest,
 } from "../src/zcode-agent/zcodeGoSessionRedirect.js";
 
@@ -73,6 +74,45 @@ test("文件缺失/损坏 → 空表，不阻塞调用方", () => {
       createdBy: "manual",
     });
     assert.equal(resolveZcodeGoSessionId("sess_a"), "sess_b");
+  } finally {
+    delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
+    resetZcodeGoSessionRedirectCacheForTest();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("路由查找翻译：renderer 视角 topic → runtime fork topic；无 redirect 恒等", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zg-redirect-translate-"));
+  process.env.ZCODE_GO_STATE_DIR_OVERRIDE = dir;
+  resetZcodeGoSessionRedirectCacheForTest();
+  try {
+    const S = "sess_route0000000001";
+    const F = "sess_forkR0000000001";
+    const F2 = "sess_forkR0000000002";
+
+    // 无 redirect：恒等（冷打开等场景零行为变化）
+    assert.equal(translateConversationTopicForRouteLookup(`conversation/${S}`), `conversation/${S}`);
+    // 非 conversation topic 原样
+    assert.equal(
+      translateConversationTopicForRouteLookup("sessions-index/ws"),
+      "sessions-index/ws",
+    );
+    // 非 sess_ 前缀原样
+    assert.equal(translateConversationTopicForRouteLookup("conversation/other"), "conversation/other");
+
+    // redirect 建立后翻译到 fork
+    setZcodeGoSessionRedirect(S, { forkSessionId: F, createdAt: 1, createdBy: "auto-compaction" });
+    assert.equal(translateConversationTopicForRouteLookup(`conversation/${S}`), `conversation/${F}`);
+    // fork 自身不受影响
+    assert.equal(translateConversationTopicForRouteLookup(`conversation/${F}`), `conversation/${F}`);
+
+    // 轮换：翻译跟随最新 fork（链长恒 1）
+    setZcodeGoSessionRedirect(S, { forkSessionId: F2, createdAt: 2, createdBy: "auto-compaction" });
+    assert.equal(translateConversationTopicForRouteLookup(`conversation/${S}`), `conversation/${F2}`);
+
+    // 清除后回退恒等
+    clearZcodeGoSessionRedirect(S);
+    assert.equal(translateConversationTopicForRouteLookup(`conversation/${S}`), `conversation/${S}`);
   } finally {
     delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
     resetZcodeGoSessionRedirectCacheForTest();

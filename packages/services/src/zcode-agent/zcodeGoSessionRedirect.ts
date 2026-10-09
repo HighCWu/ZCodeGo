@@ -93,6 +93,19 @@ export function resolveZcodeGoSessionId(sessionId: string): string {
   return readRedirectFile().redirects[sessionId]?.forkSessionId ?? sessionId;
 }
 
+/**
+ * conversation topic 的路由查找翻译：renderer 视角（原会话）→ runtime 视角
+ * （订阅建立时已按 resolveZcodeGoSessionId 解析并按 fork topic 登记）。非
+ * conversation topic 原样返回；无重定向时恒等（冷打开等场景零行为变化）。
+ */
+export function translateConversationTopicForRouteLookup(topic: string): string {
+  if (!topic.startsWith("conversation/")) return topic;
+  const sessionId = topic.slice("conversation/".length);
+  if (!sessionId.startsWith("sess_")) return topic;
+  const resolved = resolveZcodeGoSessionId(sessionId);
+  return resolved === sessionId ? topic : `conversation/${resolved}`;
+}
+
 /** 反查：给定会话是否是某个原会话的活跃隐形 fork；是则返回原会话 id。 */
 export function lookupZcodeGoOriginalSession(forkSessionId: string): string | null {
   const file = readRedirectFile();

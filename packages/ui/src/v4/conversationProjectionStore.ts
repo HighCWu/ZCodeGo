@@ -779,6 +779,15 @@ export class ConversationProjectionStore {
     reasonCode?: string,
   ): void {
     if (this.closed || subscriptionId !== this.state.subscriptionId) return;
+    logger.lifecycle.warn("v4 conversation store assembly fault", {
+      deliveryKind: deliveryKind ?? null,
+      event: "v4.conversation.store.assembly_fault",
+      module: "ui.v4.conversation_projection_store",
+      reasonCode: reasonCode ?? null,
+      status: "failed",
+      subscriptionId,
+      topic: this.topic,
+    });
     if (
       this.awaitingInitial?.subscriptionId === subscriptionId &&
       (deliveryKind === "initial" || deliveryKind === "recovery" || deliveryKind === undefined)
@@ -854,6 +863,14 @@ export class ConversationProjectionStore {
     this.clearRecoveryDeadline(recovery);
     const snapshot = this.state.snapshot;
     const effectiveForceSnapshot = forceSnapshot || !this.subscriptionHasAppliedBase;
+    logger.lifecycle.warn("v4 conversation store recovery issued", {
+      event: "v4.conversation.store.recovery.issued",
+      forceSnapshot: effectiveForceSnapshot,
+      module: "ui.v4.conversation_projection_store",
+      status: "started",
+      subscriptionId: recovery.subscriptionId,
+      topic: this.topic,
+    });
     recovery.requestInFlight = true;
     recovery.ackReceived = false;
     recovery.ackMode = null;
@@ -886,6 +903,14 @@ export class ConversationProjectionStore {
         this.recovery = null;
         const message = error instanceof Error ? error.message : String(error);
         logger.warn(`[v4-store] resync ${this.topic} 失败: ${message}`);
+        logger.lifecycle.warn("v4 conversation store resync failed", {
+          errorMessage: message,
+          event: "v4.conversation.store.recovery.resync_failed",
+          module: "ui.v4.conversation_projection_store",
+          status: "failed",
+          subscriptionId: recovery.subscriptionId,
+          topic: this.topic,
+        });
         if (message.includes("fault.subscription.notOwned")) {
           // 线上事件：notOwned 表示某一层已不认这份 subscription
           // ownership（scope 换代静默驱逐、错位 unsubscribe 等状态分歧），是确定性失效
@@ -894,7 +919,8 @@ export class ConversationProjectionStore {
           // 完成自愈。仅对 notOwned 特判，避免瞬态错误引发重连风暴。
           // 防御退避：真实事故（2026-10-09 redirect 路由 topic 不匹配）中自愈
           // connect 后 resync 仍 notOwned，30ms/轮形成 100+ 代订阅风暴（界面
-          // 闪烁碎行）。host 侧已修路由登记键，这里再兜底任何未知来源：连败
+          // 闪烁碎行）。host 侧已修：路由查找按 redirect 对称翻译 topic + 懒历史
+          // 后台订阅独立 subscriberScope；这里再兜底任何未知来源：连败
           // 6 次后指数退避（封顶 30s），成功 live 即复位。
           const attempt = ++this.notOwnedRecoveryAttempts;
           if (attempt > 6) {
@@ -977,6 +1003,14 @@ export class ConversationProjectionStore {
     const code = contentFault ? SUBSCRIPTION_CONTENT_REJECTED : reasonCode;
     this.discardRecovery();
     logger.warn(`[v4-store] ${this.topic} recovery fail-closed: ${code}`);
+    logger.lifecycle.warn("v4 conversation store recovery fail-closed", {
+      code,
+      event: "v4.conversation.store.recovery.failed",
+      module: "ui.v4.conversation_projection_store",
+      status: "failed",
+      subscriptionId: this.state.subscriptionId ?? undefined,
+      topic: this.topic,
+    });
     this.setState({ status: "error", lastError: code });
   }
 
