@@ -22,7 +22,11 @@ const armedSessions = new Map<
   { workspacePath: string; workspaceIdentity?: string; armedAt: number }
 >();
 
-/** 已通知 main 的会话（防止重复发消息；main fork 成功/失败后由 map 变化隐式去重） */
+/**
+ * arm 通知在途互斥：进入静默判定前占位、notify/拒绝后即清——事件与周期巡检
+ * 并发时防同一会话双发。历史语义（「已通知永久去重」）是轮换链泄漏根因，
+ * cb6051c 已改为此瞬时锁语义。
+ */
 const notifiedSessions = new Set<string>();
 
 export interface ZcodeGoSilentForkArmDelegate {

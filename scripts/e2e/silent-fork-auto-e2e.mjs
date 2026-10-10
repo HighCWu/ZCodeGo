@@ -540,6 +540,17 @@ try {
     };
     const provBefore = providerCount();
     const statsBefore = forkStats();
+    // 归并回写基线：轮换（终末归并）或周期 worker 应把 fork 增量并入原会话——
+    // 此前产品链「归并回写」只有单测覆盖，这里补真实闭环断言。
+    const origMsgsBefore = (() => {
+      try {
+        const { DatabaseSync } = require("node:sqlite");
+        const db = new DatabaseSync(dbPath, { readOnly: true });
+        const c = db.prepare("select count(*) c from message where session_id = ?").get(entry.original).c;
+        db.close();
+        return c;
+      } catch { return -1; }
+    })();
     for (let round = 1; round <= 8 && !rotated; round += 1) {
       await sendRound(`轮换第 ${round} 轮：继续补充实现细节`);
       for (let i = 0; i < 22 && !rotated; i += 1) {
@@ -557,12 +568,14 @@ try {
       const db = new DatabaseSync(dbPath, { readOnly: true });
       const oldForkDeleted = db.prepare("select count(*) c from session where id = ?").get(oldFork).c === 0;
       const origRow = db.prepare("select count(*) c from session where id = ?").get(entry.original).c;
+      const origMsgsAfter = db.prepare("select count(*) c from message where session_id = ?").get(entry.original).c;
       db.close();
+      const mergedBack = origMsgsAfter > origMsgsBefore;
       const storm2 = c ? c.consoleLines().filter((l) =>
         l.includes("fault.subscription.notOwned") || l.includes("resyncGenerationMismatch"),
       ).length : 0;
-      rotationOk = oldForkDeleted && origRow === 1 && storm2 < 3;
-      console.log(`7. rotation: ${oldFork.slice(5, 13)} → ${rotated.slice(5, 13)}; oldForkDeleted=${oldForkDeleted}; origRow=${origRow}; stormSignals(累计)=${storm2}; rotationOk=${rotationOk}`);
+      rotationOk = oldForkDeleted && origRow === 1 && mergedBack && storm2 < 3;
+      console.log(`7. rotation: ${oldFork.slice(5, 13)} → ${rotated.slice(5, 13)}; oldForkDeleted=${oldForkDeleted}; origRow=${origRow}; mergedBack=${mergedBack} (orig msgs ${origMsgsBefore}→${origMsgsAfter}); stormSignals(累计)=${storm2}; rotationOk=${rotationOk}`);
     } else {
       const statsAfter = forkStats();
       console.log(`7. rotation: 未在窗口内发生二次 compaction 轮换`,

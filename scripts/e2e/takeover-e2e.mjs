@@ -17,6 +17,8 @@
  *      bin 必须是 $ws/official-mirror/ 内的副本——杀官方链按 exe 精确匹配，
  *      指向真实安装会误杀本机正在运行的官方实例，2026-10-09 两次真实事故）
  *   3. zcode-go 桌面拉起：~/.zcode-go/desktop.pid 落盘且进程存活
+ *   4. 接管语义闭环：fork 就绪后官方（镜像）实例退出（killOfficialProcesses
+ *      生效——此前该链只被本地事故间接证明）
  *
  * 运行：node scripts/e2e/takeover-e2e.mjs（需 Xvfb :103；ZCODE_OFFICIAL_BIN
  * 可注入官方 bin，缺省 /opt/ZCode/zcode——CI 由工作流传入锚点构建产物）。
@@ -436,7 +438,22 @@ try {
   }
   console.log("6. zcode-go desktop launched & alive:", goDesktopAlive, goDesktopPid ? `(pid=${goDesktopPid})` : "");
 
-  pass = officialJsonOk && providerQuiet && goDesktopAlive;
+  // ── 6.5 断言三：接管语义核心一步——官方（镜像）实例被退出 ──
+  //    fork 就绪 → SHOW → enterZcodeGo → killOfficialProcesses（镜像路径精确
+  //    匹配后 SIGTERM/SIGKILL；win taskkill /IM；mac osascript）。此前从未
+  //    断言过这一步（只被本地事故间接证明会杀）——沙箱镜像让它可安全断言。
+  let officialExited = false;
+  if (goDesktopAlive && appProcPid) {
+    for (let i = 0; i < 30 && !officialExited; i += 1) {
+      await sleep(2000);
+      try { process.kill(appProcPid, 0); } catch { officialExited = true; }
+    }
+    console.log(`6.5 official (mirror) exited after takeover: ${officialExited} (launcher pid=${appProcPid})`);
+  } else {
+    console.log("6.5 skipped (fork desktop 未就绪或 launcher pid 缺失)");
+  }
+
+  pass = officialJsonOk && providerQuiet && goDesktopAlive && officialExited;
   if (!pass) {
     try {
       const pluginLog = readFileSync(join(sandboxHome, ".zcode-go", "plugin.log"), "utf8").trim().split("\n").slice(-10).join("\n");
