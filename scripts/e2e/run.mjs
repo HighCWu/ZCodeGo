@@ -549,12 +549,22 @@ if (!skipLaunch) {
 
   const pidFile = join(stateDir, "desktop.pid");
   let pid = 0;
-  for (let i = 0; i < 60; i += 1) {
+  // 420s：launcher 首启可能内联 tsup+vite（repo 产物比 app 内新 >5s 时，实测
+  // 数分钟）——120s 会在构建中误判 pid 超时。
+  for (let i = 0; i < 210; i += 1) {
     if (existsSync(pidFile)) {
       pid = Number(readFileSync(pidFile, "utf8").trim());
       if (Number.isFinite(pid) && pid > 0) break;
     }
     await new Promise((r) => setTimeout(r, 2000));
+  }
+  if (pid <= 0 && process.env.ZCODE_GO_E2E_ALLOW_NO_DESKTOP !== "1") {
+    // linux 失败诊断：desktop-launch.log 尾部（main 启动失败的真因都在这里，
+    // 此前仅 mac 豁免分支有 diag、linux 盲区）
+    try {
+      const text = readFileSync(join(stateDir, "desktop-launch.log"), "utf8");
+      console.error(`[e2e][launch] desktop-launch.log 尾部:\n${text.slice(-2000)}`);
+    } catch { /* 无日志 */ }
   }
   if (pid <= 0 && process.env.ZCODE_GO_E2E_ALLOW_NO_DESKTOP === "1") {
     // CI VM 无法承载真实 GUI 桌面（对照步骤已归因），标注跳过桌面/GUI 组
