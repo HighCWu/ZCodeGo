@@ -252,6 +252,15 @@ export function createAgentConversationTransport(
         topicBySubscriptionId.set(result.ack.subscriptionId, params.topic);
         if (result.ack.runtimeTopic && result.ack.runtimeTopic !== params.topic) {
           assembler.setEnvelopeTopicAlias(result.ack.runtimeTopic, params.topic);
+          // 轮换时同 outer 的旧别名（assembler 内已由 setEnvelopeTopicAlias 收敛）
+          // 在本表也要同步清掉，否则每次轮换泄漏一条（陈旧项只会把死订阅的
+          // fault topic 改写到原会话，被 store 的 subId 检查过滤，无行为危害，
+          // 但不应无界累积）。
+          for (const [inner, outer] of aliasByInnerTopic) {
+            if (outer === params.topic && inner !== result.ack.runtimeTopic) {
+              aliasByInnerTopic.delete(inner);
+            }
+          }
           aliasByInnerTopic.set(result.ack.runtimeTopic, params.topic);
         } else {
           assembler.clearEnvelopeTopicAlias(params.topic);
