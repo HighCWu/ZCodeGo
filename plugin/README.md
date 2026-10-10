@@ -1,16 +1,27 @@
 # zcode-go 插件
 
-官方 ZCode 的桌面接管入口。安装后：
+官方 ZCode 的桌面接管入口。输入 `/zcode-go` 切换到 ZCode Go 桌面；退出 ZCode Go、重开官方 ZCode 即切回。
 
-1. **重启官方 ZCode**（使插件 hook 生效）
-2. 在官方**任意会话**输入：
+## 安装
 
-   ```
-   /zcode-go
-   ```
+**方式一（推荐）：官方插件市场粘贴 GitHub 仓库**
 
-3. 官方窗口自任务栏消失（官方进程与在跑会话全部存活），ZCode Go 桌面接管
-4. 要回到官方版：退出 ZCode Go，再正常打开官方 ZCode（官方进程一直在后台存活，重新打开会唤回其窗口）
+1. 官方 ZCode → 侧边栏「插件市场」→「添加」→「添加插件市场」
+2. 粘贴 `HighCWu/ZCodeGo`（或完整 GitHub URL）
+3. 在 zcode-go 卡片点「安装」
+4. **重启官方 ZCode**（插件 hook 需重启后才注册——未重启时 `/zcode-go` 不会生效）
+
+**方式二（本地开发）：plugins.dirs 直挂**
+
+在 `~/.zcode/cli/config.json` 的 `plugins.dirs` 加入本仓库 `plugin/` 目录，重启官方即发现（改动即时生效，无需重装）。
+
+## 使用
+
+在官方**任意会话**输入 `/zcode-go`：
+
+- ZCode Go 桌面拉起（底层原生运行时与官方打包态完全同构）
+- 官方 ZCode 自动退出（接管即独占；磁盘上的会话与官方安装完全共享）
+- 要回到官方版：退出 ZCode Go，再正常打开官方 ZCode
 
 其他命令：`/zcode-go status`（探测与开关状态）、`/zcode-go off|on`（停用/启用）。
 
@@ -24,16 +35,6 @@ ZCode Go 桌面 spawn 底层原生运行时的方式与官方打包态完全相�
 |---|---|
 | `official.json` | 探测到的官方安装（bin / resourcesDir / runtimeBundle），插件自动写入 |
 | `config.json` | 可选覆盖：`zcodeGoLauncher`（ZCode Go 启动器路径）、`officialBin` |
-| `takeover-state.json` | 接管状态（官方 PID 等），ZCode Go 桌面维护 |
+| `takeover-state.json` | 接管状态，ZCode Go 桌面维护 |
 | `DISABLE` | 存在即停用接管 |
-| `plugin.log` / `takeover.log` | 排障日志 |
-
-## 安装（本地开发市场）
-
-```bash
-# 在 zcode-go 仓库内
-node scripts/sync-plugin.mjs
-```
-
-然后在官方 ZCode：**插件市场 → 添加 → 粘贴** `<workspace>/plugins` 目录 →
-**个人 → dev-<…> → zcode-go → 安装** → 重启官方 ZCode。
+| `plugin.log` | 排障日志 |

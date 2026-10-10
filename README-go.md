@@ -4,10 +4,18 @@ ZCode 官方 fork 的伴生桌面：接管官方 ZCode 的桌面 UI，底层原�
 
 ## 桌面接管（基础形态）
 
-1. 在官方 ZCode 中安装本插件（`plugin/` 目录，本地市场）
-2. 重启官方 ZCode
-3. 在官方任意会话输入 `/zcode-go` → 官方窗口隐藏（任务栏消失、进程与会话全部存活），zcode-go 桌面接管
-4. 要回到官方版：退出 zcode-go，再正常打开官方 ZCode（官方进程一直在后台存活，重新打开会唤回其窗口）
+安装插件（二选一）：
+
+- **插件市场**：官方 ZCode → 插件市场 → 添加插件市场 → 粘贴 `HighCWu/ZCodeGo` → 安装 zcode-go
+- **本地开发**：`~/.zcode/cli/config.json` 的 `plugins.dirs` 直挂本仓库 `plugin/` 目录
+
+然后：
+
+1. 重启官方 ZCode（安装后首次需重启使插件 hook 生效）
+2. 官方任意会话输入 `/zcode-go` → ZCode Go 桌面接管，官方 ZCode 自动退出（接管即独占；磁盘会话与官方安装完全共享）
+3. 回到官方版：退出 ZCode Go，再正常打开官方 ZCode
+
+巨会话懒读取与静默 fork：巨会话冷打开即时渲染尾窗（后台无感拉起全量）；上下文压缩完成后在静默时机（无活跃 turn 且后台终端/subagents 全部结算）自动静默 fork 到裁剪后的隐形子会话——原会话身份、任务行、分享、搜索全程不变，归并回写保证零丢失。
 
 路径与开关（`~/.zcode-go/`）：
 - `official.json` — 插件探测到的官方安装位置（bin / resourcesDir / runtimeBundle），跨平台自动发现

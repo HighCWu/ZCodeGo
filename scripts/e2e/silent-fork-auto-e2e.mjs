@@ -83,7 +83,9 @@ async function cdp() {
   });
   const ev = (expr) => new Promise((resolve, reject) => {
     const mid = ++id;
+    const timer = setTimeout(() => { pending.delete(mid); resolve(null); }, 15000);
     pending.set(mid, (m) => {
+      clearTimeout(timer);
       if (m.result?.exceptionDetails) reject(new Error(JSON.stringify(m.result.exceptionDetails).slice(0, 200)));
       else resolve(m.result?.result?.value);
     });
