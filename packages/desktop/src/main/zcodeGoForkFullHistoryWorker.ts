@@ -359,9 +359,21 @@ export function runContinuousForkFullHistoryBackfill(
           }
           const ordered = [...rows].reverse();
           const count = ordered.length;
-          const startSeq = t.nextLowerSeq - count + 1;
           db.exec("begin immediate");
+          let startSeq = 1;
           try {
+            // 事务内重查 child 实态 min：并发推进器（rowsRange 同步推进）下
+            // 快照分配会重叠——实态分层才是并发安全。
+            const childMinRow = db
+              .prepare("select min(sequence) as s from message where session_id = ?")
+              .get(t.childSessionId) as unknown as { s: number | null };
+            const childMin = childMinRow?.s;
+            if (childMin !== null && childMin !== undefined && childMin <= count) {
+              db.prepare("update message set sequence = sequence + ? where session_id = ?").run(
+                count,
+                t.childSessionId,
+              );
+            }
             const insertMessage = db.prepare(
               "insert into message (id, session_id, time_created, time_updated, data, sequence) " +
                 "values (?, ?, ?, ?, ?, ?)",

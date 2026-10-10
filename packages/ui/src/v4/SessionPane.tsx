@@ -3051,10 +3051,14 @@ export function SessionPane({
     [clearQueueEditOperation],
   );
 
+  const hoverForkInFlightRef = useRef(false);
   const handleFork = useCallback(
     (_target: ConversationRowTarget) => {
       const current = snapshotRef.current;
       if (!sessionId || current === null) return;
+      // 双击防抖：main 事务互斥只保证串行，防不住连续两次各建一对会话
+      if (hoverForkInFlightRef.current) return;
+      hoverForkInFlightRef.current = true;
       // zcode-go hover fork（silent fork direct 流程）：direct fork 活跃端点 →
       // 轮换转接（redirect S→N，视图/runtime 无缝续接精简上下文）→ 边界前历史
       // 由后台倒序补齐进 N（rowsRange/历史查询放行前同步推完，杜绝假到顶）。
@@ -3077,8 +3081,10 @@ export function SessionPane({
           logger.warn(
             `[v4-pane] hover fork 异常: ${error instanceof Error ? error.message : String(error)}`,
           );
+        } finally {
+          hoverForkInFlightRef.current = false;
         }
-      })
+      })()
     },
     [logger, sessionId],
   );

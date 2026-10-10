@@ -175,9 +175,23 @@ export function advanceForkFullHistorySegment(task: ForkFullHistoryTask, db: Enr
   }
   const ordered = [...rows].reverse(); // rowid 倒序取段 → 正序插入
   const count = ordered.length;
-  const startSeq = task.nextLowerSeq - count + 1;
+  // sequence 分配按事务内实态：child 当前 min <= count 时整体平移让位，注入段
+  // 恒占 1..count。并发推进器（host rowsRange / main worker）下快照 nextLowerSeq
+  // 会重叠——事务内重查实态才是并发安全的分层。
   db.exec("begin immediate");
+  let startSeq = 1;
   try {
+    const childMinRow = db
+      .prepare("select min(sequence) as s from message where session_id = ?")
+      .get(task.childSessionId) as unknown as { s: number | null };
+    const childMin = childMinRow?.s;
+    if (childMin !== null && childMin !== undefined && childMin <= count) {
+      db.prepare("update message set sequence = sequence + ? where session_id = ?").run(
+        count,
+        task.childSessionId,
+      );
+    }
+    startSeq = 1;
     const insertMessage = db.prepare(
       "insert into message (id, session_id, time_created, time_updated, data, sequence) " +
         "values (?, ?, ?, ?, ?, ?)",
