@@ -729,7 +729,11 @@ try {
   // ── 4. web 发 → 双端回复再 +1（web→desktop 同步） ──
   let r4 = { web: false, desk: false };
   try {
-    const composer = page.frameLocator('iframe[src="/app/"]').locator('[contenteditable="true"]').first();
+    // frameLocator 严格匹配：桌面页 /app/ iframe 偶发瞬时双挂载（remount 竞态，
+    // 38011842076 实测 strict mode violation）。与就绪判定环（fs[fs.length-1]）
+    // 同口径取最后一个 iframe。
+    const composer = page.locator('iframe[src="/app/"]').last().contentFrame()
+      .locator('[contenteditable="true"]').first();
     await composer.click({ timeout: 15000 });
     await composer.type("web 端发起同步验证");
     await page.waitForTimeout(300);
