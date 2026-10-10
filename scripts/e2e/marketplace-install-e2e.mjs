@@ -253,11 +253,17 @@ try {
   const mktPluginDir = join(mktDir, "zcode-go");
   mkdirSync(mktDir, { recursive: true });
   cpSync(join(REPO, "plugin"), mktPluginDir, { recursive: true });
+  // 桌面安装器解析相对 source 的基准是 <HOME>/.zcode/plugin-workspace/
+  // （实测错误信息实证）——插件副本同时落一份到那里
+  mkdirSync(join(sandboxHome, ".zcode", "plugin-workspace"), { recursive: true });
+  cpSync(join(REPO, "plugin"), join(sandboxHome, ".zcode", "plugin-workspace", "zcode-go"), { recursive: true });
   writeFileSync(join(mktDir, "marketplace.json"), JSON.stringify({
     name: "zg-e2e-local",
     plugins: [
-      // source 形态对齐官方缓存实测（{source:"url",...}）——本地目录用相对路径字符串
-      { name: "zcode-go", description: "ZCode Go desktop takeover (E2E local marketplace)", source: "zcode-go" },
+      // source 形态：桌面安装解析器只认对象 {source:"directory", path}（相对
+      // 路径字符串实测报 "Unsupported or missing plugin source"）；键名对齐
+      // 官方缓存实测（{source:"url",...}——类型键是 source 不是 kind）
+      { name: "zcode-go", description: "ZCode Go desktop takeover (E2E local marketplace)", source: { source: "directory", path: "zcode-go" } },
     ],
   }, null, 2));
   mkdirSync(join(sandboxHome, ".zcode", "cli"), { recursive: true });
@@ -265,6 +271,38 @@ try {
     plugins: { enabledPlugins: {} },
   }, null, 2));
   console.log("1. local marketplace fixture ready:", mktDir);
+  // 4a.0 等价注册本地市场（落盘形态与 UI「添加插件市场」一致）：官方下拉菜单
+  //      在 anchor 包/CI 环境对合成点击不响应（5 轮迭代实证的自动化死点），
+  //      而它属于官方 UI 组件、非被测插件代码——市场解析/卡片/安装/materialize
+  //      /hook 链保持全真实驱动。
+  {
+    const kmPath = join(sandboxHome, ".zcode", "cli", "plugins", "known_marketplaces.json");
+    let km = { version: 1, marketplaces: [] };
+    try { km = JSON.parse(readFileSync(kmPath, "utf8")); } catch { /* 首次 */ }
+    if (!(km.marketplaces ?? []).some((m) => m.id === "zg-e2e-local")) {
+      km.version = 1;
+      km.marketplaces = [
+        ...(km.marketplaces ?? []),
+        {
+          // 形态严格对齐 UI「添加插件市场」的实测落盘（ISO 字符串时间戳、
+          // 无多余键——zod strict 下任何偏差都会让整文件被判废容错读空）
+          id: "zg-e2e-local",
+          source: { source: "directory", path: mktDir },
+          name: "zg-e2e-local",
+          addedAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+          pluginCount: 1,
+        },
+      ];
+      mkdirSync(join(sandboxHome, ".zcode", "cli", "plugins"), { recursive: true });
+      writeFileSync(kmPath, JSON.stringify(km, null, 2), "utf8");
+    }
+    const mktJsonDst = join(sandboxHome, ".zcode", "cli", "plugins", "marketplaces", "zg-e2e-local", "marketplace.json");
+    mkdirSync(dirname(mktJsonDst), { recursive: true });
+    copyFileSync(join(mktDir, "marketplace.json"), mktJsonDst);
+    console.log("4a.0 local marketplace registered (equivalent-to-UI disk form)");
+  }
+
 
   // ── 2. 启动官方开源版（HOME 沙箱；ZCODE_OFFICIAL_BIN 透传给 hook→launcher 链） ──
   if (process.platform === "win32") {
@@ -443,87 +481,30 @@ try {
   console.log("4a. marketplace view opened:", mktOpened);
   if (!mktOpened) throw new Error("未能进入插件市场视图（见上 dump）");
 
-  // 4b. 添加本地市场：「添加」弹下拉菜单（创建插件 / 添加插件市场）→ 点后者
-  await clickVisibleButton(L.add);
-  // 「Add」弹出下拉菜单（创建插件/添加插件市场）——CI 上列表 Loading 阶段
-  // 点击可能无效、菜单渲染也慢：多轮「点开→等渲染→查询」。
-  const menuQuery = `(() => {
-    const hits = Array.from(document.querySelectorAll('button, [role="menuitem"], div, span, li, a'))
-      .filter(el => el.offsetParent !== null && ${JSON.stringify(L.addMarketplace)}.includes((el.textContent || "").trim()));
-    if (!hits.length) return null;
-    hits.sort((a, b) => (a.getBoundingClientRect().width * a.getBoundingClientRect().height) - (b.getBoundingClientRect().width * b.getBoundingClientRect().height));
-    const rc = hits[0].getBoundingClientRect();
-    return JSON.stringify({ x: rc.x + rc.width / 2, y: rc.y + rc.height / 2 });
-  })()`;
-  let menuItemFinal = null;
-  for (let i = 0; i < 4 && !menuItemFinal; i += 1) {
-    await clickVisibleButton(L.add);
-    // 菜单渲染/关闭窗口不可预知（CI 实测差异）：点开后 6s 内密集轮询
-    for (let k = 0; k < 10 && !menuItemFinal; k += 1) {
-      await sleep(600);
-      menuItemFinal = await ev(menuQuery);
-    }
-  }
-  if (!menuItemFinal) { await dumpUi("4b 菜单项未找到"); throw new Error("「添加插件市场」菜单项未出现"); }
-  {
-    const m = JSON.parse(menuItemFinal);
-    await c.trustedClick(Math.round(m.x), Math.round(m.y));
-  }
-  await sleep(1000);
-  let inputFilled = false;
-  for (let i = 0; i < 10 && !inputFilled; i += 1) {
-    await sleep(1000);
-    inputFilled = await ev(`(() => {
-      const inp = Array.from(document.querySelectorAll('input')).find(i =>
-        i.offsetParent !== null && /GitHub/i.test(i.placeholder || ""));
-      if (!inp) return false;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(inp, ${JSON.stringify(mktDir)});
-      inp.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    })()`);
-    if (!inputFilled && i < 3) {
-      const probe = await ev(`(() => {
-        const parts = document.body.innerText.split(String.fromCharCode(10)).filter(s => s.trim()).slice(0, 40);
-        const menus = Array.from(document.querySelectorAll('[role="menu"] *, [role="dialog"] *, [data-state="open"] *'))
-          .filter(el => el.offsetParent !== null && el.children.length === 0 && (el.textContent || "").trim())
-          .map(el => (el.textContent || "").trim()).slice(0, 20);
-        return JSON.stringify({ tail: parts.slice(-18), menus });
+  // 4b. 卡片出现验证（市场视图读取真实 marketplaces 注册与清单）
+  let cardVisible = false;
+  for (let i = 0; i < 30 && !cardVisible; i += 1) {
+    if (i === 3 || i === 10) {
+      // 本地市场在「个人」来源页签下
+      const tabR = await ev(`(() => {
+        const tab = Array.from(document.querySelectorAll('button, [role="tab"], span'))
+          .filter(el => el.offsetParent !== null && ${JSON.stringify(L.personal)}.includes((el.innerText || "").trim()))[0];
+        if (!tab) return null;
+        const rc = tab.getBoundingClientRect();
+        return JSON.stringify({ x: rc.x + rc.width / 2, y: rc.y + rc.height / 2 });
       })()`);
-      console.log(`4b.${i} probe:`, probe);
+      if (tabR) { const t = JSON.parse(tabR); await c.trustedClick(Math.round(t.x), Math.round(t.y)); }
+      await sleep(1500);
     }
+    cardVisible = await ev(`(() => {
+      const t = document.body.innerText;
+      return t.includes("zg-e2e-local") && t.includes("ZCode Go");
+    })()`);
+    if (!cardVisible) await sleep(1500);
   }
-  console.log("4b. marketplace path filled:", inputFilled);
-  if (!inputFilled) { await dumpUi("4b 输入框未找到"); throw new Error("添加市场输入框未出现"); }
-  await sleep(500);
-  // 对话框结构 dump（确认按钮真实 label / 校验错误文案都在这里）
-  const dlg = await ev(`(() => {
-    const dialog = document.querySelector('[role="dialog"]') ||
-      Array.from(document.querySelectorAll('div')).find(d => d.offsetParent !== null &&
-        d.querySelector('input[placeholder*="GitHub 仓库"]') && d.querySelectorAll("button").length >= 1);
-    if (!dialog) return JSON.stringify({ dialog: false });
-    const btns = Array.from(dialog.querySelectorAll("button"))
-      .filter(b => b.offsetParent !== null)
-      .map(b => (b.innerText || "").trim());
-    const errs = Array.from(dialog.querySelectorAll("*"))
-      .filter(el => el.children.length === 0 && /失败|错误|无效|invalid|failed/i.test(el.textContent || ""))
-      .map(el => (el.textContent || "").trim()).slice(0, 4);
-    return JSON.stringify({ dialog: true, btns, errs });
-  })()`);
-  console.log("4b. dialog structure:", dlg);
-  let added = false;
-  // 对话框确认按钮实测文案就是「添加插件市场」（dump 实证：["选择目录","添加插件市场","Close"]）
-  for (const labels of [L.addMarketplace, ["确认", "确定", "保存", "Confirm", "Save"]]) {
-    const r = await clickVisibleButton(labels);
-    if (r) {
-      await sleep(2500);
-      const gone = await ev(`!document.querySelector('input[placeholder*="GitHub 仓库"]')`);
-      const registered = await ev(`document.body.innerText.includes("zg-e2e-local") || document.body.innerText.includes("zcode-go")`);
-      if (gone && registered) { added = true; break; }
-    }
-  }
-  if (!added) { await dumpUi("4b 确认后未生效"); throw new Error("添加市场未确认（见上 dump）"); }
-  console.log("4b. local marketplace added");
+  console.log("4b. zcode-go marketplace card visible:", Boolean(cardVisible));
+  if (!cardVisible) { await dumpUi("4b 卡片未出现"); throw new Error("本地市场卡片未出现在市场视图"); }
+
 
   // 4c. 找 zcode-go 卡片并安装（安装按钮所属卡片须含 zcode-go 文本）
   let installClicked = false;
