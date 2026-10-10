@@ -342,6 +342,13 @@ import {
   rewriteSyntheticFrame,
   syntheticRowsRange,
 } from "../zcode-session/zcodeGoSyntheticHistory.js";
+import {
+  collectForkFullHistoryParams,
+  getForkFullHistoryTask,
+  openForkEnrichDatabase,
+  registerForkFullHistoryTask,
+  waitForForkFullHistoryDone,
+} from "../zcode-session/zcodeGoForkFullHistory.js";
 import { registerMemoryDiagnosticsProvider } from "#src/memoryDiagnostics.js";
 
 const logger = createServiceLogger("zcode-agent-service");
@@ -5286,6 +5293,7 @@ export function createZCodeAgentService(
     // zcode-go 静默 fork：命令信封按重定向寻址到活跃隐形子会话（resolve 对无
     // 表项 id 原样返回，createSession 等新会话路径不受影响）。派发门闩同样
     // 覆盖 v4 命令面（prompt/queue 等所有 mutation）。
+    const requestedSessionId = envelope.sessionId;
     if (envelope.sessionId) {
       await waitForZcodeGoSilentForkGate(envelope.sessionId);
       envelope = { ...envelope, sessionId: resolveZcodeGoSessionId(envelope.sessionId) };
@@ -5334,6 +5342,49 @@ export function createZCodeAgentService(
         status: ack.status,
         reasonCode: "reasonCode" in ack ? String(ack.reasonCode ?? "") : "",
       });
+      // zcode-go hover fork 流式全量语义（用户定稿）：redirect 存在时
+      // forkAssistant 寻址活跃隐形子会话 F（边界后内容，官方全量复制，快）——
+      // child 此刻已可打开可发消息；边界前的更早历史由后台倒序分段补齐
+      // （任务登记于 ~/.zcode-go/，main worker / rowsRange 触发推进，见
+      // zcodeGoForkFullHistory）。duplicate 不重登记（幂等）。失败不阻塞
+      // 命令返回（child 保持第一阶段形态照常可用）。
+      if (
+        envelope.type === "forkAssistant" &&
+        ack.status === "accepted" &&
+        requestedSessionId &&
+        requestedSessionId !== envelope.sessionId
+      ) {
+        const result = (ack as { result?: { type?: string; sessionId?: string } }).result;
+        const childSessionId = result?.type === "forkAssistant" ? result.sessionId : undefined;
+        if (childSessionId) {
+          try {
+            const collected = collectForkFullHistoryParams(requestedSessionId, childSessionId);
+            if (collected.ok && collected.params) {
+              const task = registerForkFullHistoryTask({
+                childSessionId,
+                originalSessionId: requestedSessionId,
+                ...collected.params,
+              });
+              logger.info(undefined, "[zcode-go] hover fork 全量补齐任务登记", {
+                childSessionId,
+                originalSessionId: requestedSessionId,
+                boundaryTotal: task.boundaryTotal,
+              });
+            } else if (collected.error !== "no compaction boundary in original session") {
+              logger.warn(undefined, "[zcode-go] hover fork 全量补齐任务登记失败", {
+                childSessionId,
+                error: collected.error,
+              });
+            }
+            // 无边界：child（F 全量复制）内容已全，无需任务
+          } catch (error) {
+            logger.warn(undefined, "[zcode-go] hover fork 全量补齐任务登记异常", {
+              childSessionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
       // Prompt command 在 committed TurnStarted 或 committed WorkspaceHookReviewRequested
       // 任一 authority 到达后即返回；人工审核不能占用 Host RPC，因此继续使用统一默认
       // timeout/watchdog。放宽到审核领域 deadline 只会掩盖串行协议队列死锁。
@@ -5510,6 +5561,31 @@ export function createZCodeAgentService(
 
     // 行分页：只读 query 透传（超时重发安全，无订阅状态）。
     async conversationRowsRangeV4(params: ZCodeAgentConversationRowsRangeParams) {
+      // zcode-go hover fork 流式全量：目标会话存在未完成的全量补齐任务时，
+      // 历史查询必须同步推进剩余全部再放行（杜绝"假到顶"——用户向上拖/模型
+      // 工具查历史都走本入口；UI 立即发消息不走此路径不受影响）。
+      const forkTask = getForkFullHistoryTask(params.sessionId);
+      if (forkTask && forkTask.status === "pending") {
+        // node:sqlite 禁止静态值 import（main/host 的模块解析器不认——实测
+        // ERR_MODULE_NOT_FOUND: 'sqlite'），一律 getBuiltinModule 运行时取
+        try {
+          const db = openForkEnrichDatabase();
+          try {
+            const r = await waitForForkFullHistoryDone(params.sessionId, db, { timeoutMs: 180_000 });
+            logger.info(undefined, "[zcode-go] rowsRange 等待全量补齐", {
+              sessionId: params.sessionId,
+              outcome: r,
+            });
+          } finally {
+            db.close();
+          }
+        } catch (error) {
+          logger.warn(undefined, "[zcode-go] rowsRange 全量补齐推进异常（放行查询）", {
+            sessionId: params.sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       // zcode-go 懒历史：合成订阅活跃时由 DB 直答回填页（runtime 未恢复也能翻历史）
       const syntheticPage = syntheticRowsRange({
         sessionId: params.sessionId,

@@ -160,6 +160,7 @@ import {
   initZCodeGoTakeover,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
+import { startZcodeGoForkFullHistoryWorker } from "./zcodeGoForkFullHistoryWorker.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import {
   resetZcodeGoSilentForkEntryState,
@@ -2247,6 +2248,11 @@ app.whenReady().then(async () => {
   // 60s 周期，unref 不拖退出；redirect map 为空时 pass 零成本）。
   startZcodeGoSilentForkMergeWorker((message, meta) =>
     logger.info(`[zcode-go-silent-fork-merge] ${message}`, meta),
+  );
+  // zcode-go hover fork 流式全量：后台倒序补齐 worker（边界前历史分段注入
+  // child；rowsRange 触发时 host 侧同步推进剩余，事务互斥/游标按实态推导）。
+  startZcodeGoForkFullHistoryWorker((message, meta) =>
+    logger.info(`[zcode-go-fork-fullhistory] ${message}`, meta),
   );
   installLocalMediaPreviewProtocol(session.defaultSession.protocol, {
     isPathAuthorized: localMediaPreviewPathRegistry.isAuthorized,

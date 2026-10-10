@@ -272,6 +272,8 @@ try {
     // win/mac CI 的 GPU 栈不稳（官方对照步骤同款规避）
     ...(process.platform === "linux" ? ["--no-sandbox"] : ["--disable-gpu"]),
   ];
+  // profile 目录预创建：Electron 偶发在 DevToolsActivePort 写入时目录尚未建好（竞态实测）
+  mkdirSync(join(ws, PROFILE_TAG), { recursive: true });
   // 受控 env（不整包继承：宿主 shell 可能携带 ZCODE_* 等会击穿沙箱语义的变量）；
   // win 显式补系统必需（Electron 依赖 SYSTEMROOT/TEMP 等）
   const appEnv = {

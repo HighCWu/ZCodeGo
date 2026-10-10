@@ -276,6 +276,8 @@ try {
     `--remote-debugging-port=${CDP_PORT}`,
     ...(process.platform === "linux" ? ["--no-sandbox"] : ["--disable-gpu"]),
   ];
+  // profile 目录预创建：Electron 偶发在 DevToolsActivePort 写入时目录尚未建好（竞态实测）
+  mkdirSync(join(ws, PROFILE_TAG), { recursive: true });
   const appEnv = {
     PATH: process.env.PATH,
     LANG: process.env.LANG ?? "zh_CN.UTF-8",

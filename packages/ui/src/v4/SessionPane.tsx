@@ -3078,37 +3078,10 @@ export function SessionPane({
           }
           if (ack.result?.type === "forkAssistant") {
             const childSessionId = ack.result.sessionId;
-            // zcode-go fork-then-trim：官方 fork 全量复制子会话（模型前缀在压缩边界
-            // 截断，缓存不受影响）；切换前由桌面主进程把边界前的惰性历史从子会话存
-            // 储剔除（唯一写入方是 CLI，协议面无删消息入口，只能存储层直裁）。裁剪
-            // 失败不阻塞——子会话保持官方全量形态照常可用。
-            try {
-              const bridge = (
-                window as {
-                  zcode?: {
-                    zcodeGoTrimForkedSessionHistory?: (payload: {
-                      childSessionId: string;
-                      parentSessionId: string;
-                    }) => Promise<{ ok: boolean; removedMessages: number; error?: string }>;
-                  };
-                }
-              ).zcode;
-              const result = await bridge?.zcodeGoTrimForkedSessionHistory?.({
-                childSessionId,
-                parentSessionId: sessionId,
-              });
-              if (result?.ok) {
-                logger.info(`[v4-pane] fork 子会话已裁剪压缩前历史: -${result.removedMessages}`);
-              } else if (result && !result.ok) {
-                logger.warn(`[v4-pane] fork 子会话裁剪未执行: ${result.error ?? "unknown"}`);
-              }
-            } catch (trimError) {
-              logger.warn(
-                `[v4-pane] fork 子会话裁剪异常（保持官方全量形态）: ${
-                  trimError instanceof Error ? trimError.message : String(trimError)
-                }`,
-              );
-            }
+            // zcode-go：hover fork = 全量普通 fork（原版功能语义）。redirect 存在时
+            // 服务层已在 ack 返回前把原会话被裁剪的边界前历史补进 child
+            // （zcodeGoForkFullHistory），无需旧 fork-then-trim（已废除——静默
+            // fork 体系承担"轻量工作线"，手动 fork 定位为全量副本）。
             // 分叉任务行由 CLI 侧 syncer 实时写入任务索引库，但侧栏不订阅该库的
             // 变化——应用内标准的整表重查入口是 bumpTaskListVersion（Claude 导入、
             // Bot 广播同款），经 useGlobalTaskList 的 taskListVersion 签名触发

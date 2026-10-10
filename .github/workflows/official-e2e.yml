@@ -53,7 +53,8 @@ jobs:
             packages/services/test/zcodeGoSilentForkTrigger.test.ts \
             packages/services/test/zcodeGoGoalVerify.test.ts \
             packages/services/test/sessionHistoryLazyReader.test.ts \
-            packages/services/test/zcodeGoSyntheticHistory.test.ts
+            packages/services/test/zcodeGoSyntheticHistory.test.ts \
+            packages/services/test/zcodeGoForkFullHistory.test.ts
       - name: desktop 静默 fork 归并单测（node:test + tsx）
         run: |
           npx tsx --test \
