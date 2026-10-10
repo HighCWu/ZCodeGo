@@ -2522,8 +2522,15 @@ app.whenReady().then(async () => {
     listSSHConfigAliases,
   });
 
-  // 等待 ARMS 完成 init（含渲染进程注入监听），避免首窗 dom-ready 早于 SDK 注册导致无上报
-  await armsInitPromise;
+  // 等待 ARMS 完成 init（含渲染进程注入监听），避免首窗 dom-ready 早于 SDK 注册导致无上报。
+  // ARMS init 含网络请求：端点挂起/失败时曾无限阻塞 whenReady 链——主窗不建、
+  // takeover init 不跑（desktop.pid 缺失、整桌面不可用，CI/本地实测）。遥测
+  // 永不阻塞启动：15s 竞速 + init 失败吞掉（SDK 内部已 logger.error），代价
+  // 降级为该轮无上报。
+  await Promise.race([
+    armsInitPromise.catch(() => {}),
+    new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
+  ]);
 
   // ARMS init 完成后首次写入 user.name（落 device_mid）
   void armsUserIdentitySync.refresh();
