@@ -422,7 +422,10 @@ try {
   // ── 6. 断言二：zcode-go 桌面拉起（pid 落盘 + 进程存活） ──
   let goDesktopAlive = false;
   let goDesktopPid = null;
-  for (let i = 0; i < 60 && !goDesktopAlive; i += 1) {
+  // windows 实测 launcher 全链 ~110s（ensure + 无符号链接权限时 node_modules 复制
+  // 回退 + electron 冷启动），120s 预算压线丢判定（38010601002：plugin.log 就绪
+  // 但循环已到期）——预算翻倍到 240s。
+  for (let i = 0; i < 120 && !goDesktopAlive; i += 1) {
     await sleep(2000);
     try {
       goDesktopPid = Number(readFileSync(pidPath, "utf8").trim());
