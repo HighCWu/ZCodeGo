@@ -445,24 +445,26 @@ try {
 
   // 4b. 添加本地市场：「添加」弹下拉菜单（创建插件 / 添加插件市场）→ 点后者
   await clickVisibleButton(L.add);
-  const menuItemR = await ev(`(() => {
+  // 「Add」弹出下拉菜单（创建插件/添加插件市场）——CI 上列表 Loading 阶段
+  // 点击可能无效、菜单渲染也慢：多轮「点开→等渲染→查询」。
+  const menuQuery = `(() => {
     const hits = Array.from(document.querySelectorAll('button, [role="menuitem"], div, span, li, a'))
       .filter(el => el.offsetParent !== null && ${JSON.stringify(L.addMarketplace)}.includes((el.textContent || "").trim()));
     if (!hits.length) return null;
     hits.sort((a, b) => (a.getBoundingClientRect().width * a.getBoundingClientRect().height) - (b.getBoundingClientRect().width * b.getBoundingClientRect().height));
     const rc = hits[0].getBoundingClientRect();
-    return JSON.stringify({ x: rc.x + rc.width / 2, y: rc.y + rc.height / 2, area: rc.width * rc.height });
-  })()`);
-  let menuItemFinal = menuItemR;
-  for (let i = 0; i < 3 && !menuItemFinal; i += 1) {
-    // 菜单可能已随焦点丢失关闭：重开再找
+    return JSON.stringify({ x: rc.x + rc.width / 2, y: rc.y + rc.height / 2 });
+  })()`;
+  let menuItemFinal = null;
+  for (let i = 0; i < 6 && !menuItemFinal; i += 1) {
     await clickVisibleButton(L.add);
-    await sleep(800);
-    break;
+    await sleep(1200);
+    menuItemFinal = await ev(menuQuery);
+    if (!menuItemFinal) await sleep(1500);
   }
   if (!menuItemFinal) { await dumpUi("4b 菜单项未找到"); throw new Error("「添加插件市场」菜单项未出现"); }
   {
-    const m = JSON.parse(menuItemR);
+    const m = JSON.parse(menuItemFinal);
     await c.trustedClick(Math.round(m.x), Math.round(m.y));
   }
   await sleep(1000);
