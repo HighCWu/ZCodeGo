@@ -729,10 +729,18 @@ try {
   // ── 4. web 发 → 双端回复再 +1（web→desktop 同步） ──
   let r4 = { web: false, desk: false };
   try {
-    // frameLocator 严格匹配：桌面页 /app/ iframe 偶发瞬时双挂载（remount 竞态，
-    // 38011842076 实测 strict mode violation）。与就绪判定环（fs[fs.length-1]）
-    // 同口径取最后一个 iframe。
-    const composer = page.locator('iframe[src="/app/"]').last().contentFrame()
+    // 桌面页 /app/ iframe 偶发双挂载（remount 竞态）且只有一个是活的——
+    // composer 在哪个帧不定（38012940590 实测 iframes:2 composers:1，活的
+    // 不一定是最后一个）。按「帧内有 composer」动态选帧。
+    const frameIdx = await page.evaluate(() => {
+      const fs = document.querySelectorAll('iframe[src="/app/"]');
+      for (let i = fs.length - 1; i >= 0; i -= 1) {
+        if (fs[i].contentDocument?.querySelector('[contenteditable="true"]')) return i;
+      }
+      return -1;
+    });
+    if (frameIdx < 0) throw new Error("无可输入 composer 的 /app/ iframe（双帧均空）");
+    const composer = page.locator('iframe[src="/app/"]').nth(frameIdx).contentFrame()
       .locator('[contenteditable="true"]').first();
     await composer.click({ timeout: 15000 });
     await composer.type("web 端发起同步验证");
