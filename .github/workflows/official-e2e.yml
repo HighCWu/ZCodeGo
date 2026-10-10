@@ -400,24 +400,11 @@ jobs:
               exit $rc
             '
           else
-            # windows 暂缺 takeover：官方 app 内 UserPromptSubmit hook 未拦截
-            # （prompt 被展开为插件自定义命令直达模型，plugin 加载正常——
-            # 37958090555 实证），windows hook 执行链待专项排查后恢复。
-            if [ "$RUNNER_OS" = "Windows" ]; then
-              echo "== E2E: takeover（windows 已知缺口，跳过——见 workflow 注释）=="
-            fi
             rc=0
-            if [ "$RUNNER_OS" != "Windows" ]; then
-              for e in goal-verify silent-fork-auto lazy-history takeover fresh-model; do
-                echo "== E2E: $e =="
-                node "scripts/e2e/$e-e2e.mjs" || rc=1
-              done
-            else
-              for e in goal-verify silent-fork-auto lazy-history fresh-model; do
-                echo "== E2E: $e =="
-                node "scripts/e2e/$e-e2e.mjs" || rc=1
-              done
-            fi
+            for e in goal-verify silent-fork-auto lazy-history takeover fresh-model; do
+              echo "== E2E: $e =="
+              node "scripts/e2e/$e-e2e.mjs" || rc=1
+            done
             exit $rc
           fi
 

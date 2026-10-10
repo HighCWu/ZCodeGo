@@ -20,10 +20,16 @@ for ($depth = 0; $depth -lt 64 -and $pid_ -gt 0; $depth++) {
   $seen[$pid_] = $true
   $info = Get-ProcInfo $pid_
   if ($null -eq $info) { break }
-  $name = Split-Path -Leaf "$($info.exe)"
-  if ($name -match "(?i)zcode" -and $name -notmatch "(?i)zcode[-_]go") {
-    $exe = $info.exe
-    break
+  # 祖先可能无可执行路径（系统/包装进程，Win32_Process.ExecutablePath 为空）：
+  # Split-Path 空串是终止错误，EAP=Stop 下会杀掉整个脚本 → hook 零输出 →
+  # fail-open 放行 prompt（windows takeover 未拦截的根因）。跳过该层继续上溯。
+  $exePath = [string]$info.exe
+  if (-not [string]::IsNullOrWhiteSpace($exePath)) {
+    $name = Split-Path -Leaf $exePath
+    if ($name -match "(?i)zcode" -and $name -notmatch "(?i)zcode[-_]go") {
+      $exe = $exePath
+      break
+    }
   }
   $pid_ = $info.ppid
 }

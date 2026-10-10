@@ -5,12 +5,19 @@
 set -u
 
 trace="${HOME:-.}/.zcode-go/bootstrap-trace.log"
+# 状态目录可能不存在（首次运行）：>> 无法自建父目录，trace 写入会报错刷屏
+mkdir -p "$(dirname "$trace")" 2>/dev/null
 
 HOOK_CJS="$(dirname "$0")/zcode-go.cjs"
 
 exe=""
-# env 捷径：e2e / 已知官方路径的场景直接采用（CI 必经；真实用户桌面路径走下方祖先链）
+# env 捷径：e2e / 已知官方路径的场景直接采用（CI 必经；真实用户桌面路径走下方祖先链）。
+# Windows 值是反斜杠绝对路径（C:\...），*/* 匹配不到——先归一为正斜杠，
+# Git bash 的 [ -x ] / exec 对 C:/ 形式均可用（实测 exit 3 误判即此因）。
 exe="${ZCODE_GO_OFFICIAL_BIN:-}"
+case "$exe" in
+  *\\*) exe=$(printf '%s\n' "$exe" | tr '\\' '/') ;;
+esac
 case "$exe" in
   */*) [ -x "$exe" ] || exe="" ;;
   *) exe="" ;;
