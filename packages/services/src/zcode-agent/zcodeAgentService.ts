@@ -326,6 +326,8 @@ import type { PipSessionEvent } from "@zcode/zcode-cua/pip-session";
 import {
   lookupZcodeGoOriginalSession,
   resolveZcodeGoSessionId,
+  resolveZcodeGoSessionIdForRead,
+  resolveZcodeGoSessionIdForSend,
   translateConversationTopicForRouteLookup,
 } from "./zcodeGoSessionRedirect.js";
 import {
@@ -5151,7 +5153,8 @@ export function createZCodeAgentService(
       const connection = resolveV4Connection(params, v4ConnectionIdFor(params.subscriberScope));
       // zcode-go 静默 fork：订阅寻址到活跃隐形子会话；任务元数据（thoughtLevel）
       // 仍按原会话 id 读任务行——任务行身份永远是原会话。
-      const topic = conversationTopic(resolveZcodeGoSessionId(params.sessionId));
+      // read/subscribe 域：hover 表项保持原会话本体（全量渐进档案）
+      const topic = conversationTopic(resolveZcodeGoSessionIdForRead(params.sessionId));
       const taskMetaStartedAt = performance.now();
       const resumeThoughtLevel = await automationTaskIndexRepo
         .getTaskMeta({
@@ -5296,7 +5299,7 @@ export function createZCodeAgentService(
     const requestedSessionId = envelope.sessionId;
     if (envelope.sessionId) {
       await waitForZcodeGoSilentForkGate(envelope.sessionId);
-      envelope = { ...envelope, sessionId: resolveZcodeGoSessionId(envelope.sessionId) };
+      envelope = { ...envelope, sessionId: resolveZcodeGoSessionIdForSend(envelope.sessionId) };
       // zcode-go：UI 暂停按钮的 pauseGoal 在续跑回合内会被 runtime 推迟执行并
       // 静默 no-op（icon 卡暂停态）。借道命令路径登记暂停意图——goal-keeper 在
       // 完成边沿消费：跳过复核/重触发/看门狗 resume，goal 停止续跑循环。

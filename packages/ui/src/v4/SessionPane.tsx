@@ -3052,59 +3052,35 @@ export function SessionPane({
   );
 
   const handleFork = useCallback(
-    (target: ConversationRowTarget) => {
+    (_target: ConversationRowTarget) => {
       const current = snapshotRef.current;
       if (!sessionId || current === null) return;
-      // 官方 forkAssistant 是全量 transcript 落库事务，大历史会话（数万行）可能
-      // 耗时数十秒——立即给进度反馈，避免被误读为"没有反应"。
-      const totalCount = current.rows.totalCount ?? 0;
-      if (totalCount >= 5000) {
-        toast(
-          intl.formatMessage({ id: "zcodeGo.fork.inProgress" }, { count: totalCount.toLocaleString() }),
-        );
-      }
-      // forkAssistant 是 CAS 命令：baseRevision 取当前投影 revision。
-      void dispatchCommand(
-        "forkAssistant",
-        { target },
-        sessionId,
-        current.revision,
-        current.logEpoch,
-      )
-        .then(async (ack) => {
-          if (ack.status !== "accepted" && ack.status !== "duplicate") {
-            logger.warn(`[v4-pane] fork 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
-            return;
-          }
-          if (ack.result?.type === "forkAssistant") {
-            const childSessionId = ack.result.sessionId;
-            // zcode-go：hover fork = 全量普通 fork（原版功能语义）。redirect 存在时
-            // 服务层已在 ack 返回前把原会话被裁剪的边界前历史补进 child
-            // （zcodeGoForkFullHistory），无需旧 fork-then-trim（已废除——静默
-            // fork 体系承担"轻量工作线"，手动 fork 定位为全量副本）。
-            // 分叉任务行由 CLI 侧 syncer 实时写入任务索引库，但侧栏不订阅该库的
-            // 变化——应用内标准的整表重查入口是 bumpTaskListVersion（Claude 导入、
-            // Bot 广播同款），经 useGlobalTaskList 的 taskListVersion 签名触发
-            // reload；1s 后补一次（防 syncer 写行与重查的竞态）。query-cache 层
-            // 同步失效兜底 header 等消费方。
-            if (workspacePath) {
-              useZCodeSessionStore
-                .getState()
-                .bumpTaskListVersion(workspacePath, workspaceIdentity);
-              invalidateTaskQueryCacheByScopes([{ workspacePath }]);
-              setTimeout(() => {
-                useZCodeSessionStore
-                  .getState()
-                  .bumpTaskListVersion(workspacePath, workspaceIdentity);
-                invalidateTaskQueryCacheByScopes([{ workspacePath }]);
-              }, 1_000);
+      // zcode-go hover fork（silent fork direct 流程）：direct fork 活跃端点 →
+      // 轮换转接（redirect S→N，视图/runtime 无缝续接精简上下文）→ 边界前历史
+      // 由后台倒序补齐进 N（rowsRange/历史查询放行前同步推完，杜绝假到顶）。
+      // 全量语义由补齐完成时达成；原 forkAssistant 命令通道保留给非桌面调用方。
+      void (async () => {
+        try {
+          const result = await (
+            window as {
+              zcode?: {
+                zcodeGoSilentFork?: (payload: {
+                  sessionId: string;
+                }) => Promise<{ ok: boolean; forkSessionId?: string; error?: string }>;
+              };
             }
-            // 原地切到 child session（与新建会话同一选择路径）。
-            onSessionCreated?.(childSessionId);
+          ).zcode?.zcodeGoSilentFork?.({ sessionId });
+          if (!result?.ok) {
+            logger.warn(`[v4-pane] hover fork 未执行: ${result?.error ?? "unknown"}`);
           }
-        });
+        } catch (error) {
+          logger.warn(
+            `[v4-pane] hover fork 异常: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      })
     },
-    [dispatchCommand, logger, onSessionCreated, sessionId],
+    [logger, sessionId],
   );
 
   const handleEdit = useCallback(

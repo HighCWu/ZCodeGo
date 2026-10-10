@@ -9,6 +9,8 @@ import {
   listZcodeGoSessionRedirects,
   lookupZcodeGoOriginalSession,
   resolveZcodeGoSessionId,
+  resolveZcodeGoSessionIdForRead,
+  resolveZcodeGoSessionIdForSend,
   setZcodeGoSessionRedirect,
   translateConversationTopicForRouteLookup,
   resetZcodeGoSessionRedirectCacheForTest,
@@ -113,6 +115,36 @@ test("路由查找翻译：renderer 视角 topic → runtime fork topic；无 re
     // 清除后回退恒等
     clearZcodeGoSessionRedirect(S);
     assert.equal(translateConversationTopicForRouteLookup(`conversation/${S}`), `conversation/${S}`);
+  } finally {
+    delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
+    resetZcodeGoSessionRedirectCacheForTest();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("hover 表项按域翻译：send 域→端点；read/subscribe 域→原会话本体", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zg-redirect-hover-"));
+  process.env.ZCODE_GO_STATE_DIR_OVERRIDE = dir;
+  resetZcodeGoSessionRedirectCacheForTest();
+  try {
+    const F = "sess_hoverfork0000001"; // fork 对外 ID（全量档案）
+    const EP = "sess_hoverendp0000001"; // 精简活跃端点
+    setZcodeGoSessionRedirect(F, {
+      forkSessionId: EP,
+      createdAt: 1,
+      createdBy: "manual",
+      hover: true,
+    });
+    // send 域：翻译到精简端点
+    assert.equal(resolveZcodeGoSessionId(F), EP);
+    // read/subscribe 域：保持 F 本体（全量档案渐进补齐）
+    assert.equal(resolveZcodeGoSessionIdForRead(F), F);
+    // 非 hover 表项：read 域照旧翻译（silent fork 语义不变）
+    const S = "sess_silentfk0000001";
+    const SF = "sess_silentfkF000001";
+    setZcodeGoSessionRedirect(S, { forkSessionId: SF, createdAt: 2, createdBy: "auto-compaction" });
+    assert.equal(resolveZcodeGoSessionIdForRead(S), SF);
+    assert.equal(resolveZcodeGoSessionIdForSend(S), SF);
   } finally {
     delete process.env.ZCODE_GO_STATE_DIR_OVERRIDE;
     resetZcodeGoSessionRedirectCacheForTest();

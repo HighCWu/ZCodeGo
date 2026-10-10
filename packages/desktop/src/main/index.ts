@@ -160,7 +160,11 @@ import {
   initZCodeGoTakeover,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
-import { startZcodeGoForkFullHistoryWorker } from "./zcodeGoForkFullHistoryWorker.js";
+import {
+  registerForkFullHistoryFromParent,
+  runContinuousForkFullHistoryBackfill,
+  startZcodeGoForkFullHistoryWorker,
+} from "./zcodeGoForkFullHistoryWorker.js";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import {
   resetZcodeGoSilentForkEntryState,
@@ -2622,6 +2626,92 @@ app.whenReady().then(async () => {
     getMainWindow: () =>
       getApplicationWindowsExcludingCuaIndicator().find((win) => win !== updateStatusWindow) ?? null,
     logger,
+  });
+
+  // zcode-go hover fork（流式全量，用户定稿的双会话模型）：对 S 产出
+  //   F（fork 对外 ID：可见任务行，初始=边界后精简内容，后台补齐至全量档案）
+  //   F'（精简活跃端点：silent fork direct 快速产出，发消息经 redirect F→F'
+  //      落到它，runtime 无卡顿）
+  // redirect 建在 F→F'（hover 标记：send 域翻译、read/subscribe 域保持 F 本
+  // 体——fork 视图=渐进全量档案）。S 的工作线完全不动。
+  ipcMain.handle(PlatformChannels.ZcodeGoSilentFork, (_event, payload: unknown) => {
+    const request = payload as { sessionId?: unknown };
+    if (typeof request?.sessionId !== "string" || !request.sessionId.startsWith("sess_")) {
+      return { ok: false, error: "invalid session id" };
+    }
+    const sessionId = request.sessionId;
+    if (zcodeGoSilentForkTransactionInFlight) {
+      return { ok: false, error: "another silent fork transaction is in flight" };
+    }
+    zcodeGoSilentForkTransactionInFlight = true;
+    try {
+      // ① F'：silent fork direct 快速产出精简端点（不建任务行、不建 redirect）
+      const endpoint = forkCompactSessionDirect({
+        parentSessionId: sessionId,
+        silent: true,
+        log: (message, meta) => logger.info(`[zcode-go-hover-fork] ${message}`, meta),
+      });
+      if (!endpoint.ok) {
+        logger.warn("[zcode-go] hover fork 端点 fork 失败", { sessionId, error: endpoint.error });
+        return { ok: false, error: endpoint.error };
+      }
+      const endpointId = endpoint.childSessionId!;
+      // ② F：可见任务行副本（fork 对外 ID，初始=边界后内容）
+      const visible = forkCompactSessionDirect({
+        parentSessionId: sessionId,
+        silent: false,
+        log: (message, meta) => logger.info(`[zcode-go-hover-fork] ${message}`, meta),
+      });
+      if (!visible.ok) {
+        // F' 回收（孤儿精简副本无用）
+        deleteZcodeGoSilentForkSession({ forkSessionId: endpointId });
+        logger.warn("[zcode-go] hover fork 可见副本失败（已回收端点）", {
+          sessionId,
+          error: visible.error,
+        });
+        return { ok: false, error: visible.error };
+      }
+      const forkId = visible.childSessionId!;
+      // ③ redirect F → F'（hover 标记：send 域翻译/read 域保持 F 本体）
+      setZcodeGoSessionRedirect(forkId, {
+        forkSessionId: endpointId,
+        createdAt: Date.now(),
+        createdBy: "manual",
+        hover: true,
+      });
+      // ④ 全量补齐任务：S 的边界前历史倒序注入 F + 立即连续推进
+      let boundaryTotal: number | undefined;
+      try {
+        const task = registerForkFullHistoryFromParent(sessionId, forkId);
+        if (task) {
+          boundaryTotal = task.boundaryTotal;
+          runContinuousForkFullHistoryBackfill(forkId, (message, meta) =>
+            logger.info(`[zcode-go-fork-fullhistory] ${message}`, meta),
+          );
+        }
+      } catch (error) {
+        logger.warn("[zcode-go] hover fork 全量补齐登记失败（F 保持精简形态）", {
+          sessionId,
+          forkId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      logger.info("[zcode-go] hover fork 完成", {
+        sessionId,
+        forkId,
+        endpointId,
+        boundaryTotal: boundaryTotal ?? 0,
+      });
+      return { ok: true, forkSessionId: forkId };
+    } catch (error) {
+      logger.warn("[zcode-go] hover fork 异常", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      zcodeGoSilentForkTransactionInFlight = false;
+    }
   });
 
   // zcode-go 分叉裁剪：fork ack 后对子会话存储剔除压缩前惰性历史（不依赖接管模式）。

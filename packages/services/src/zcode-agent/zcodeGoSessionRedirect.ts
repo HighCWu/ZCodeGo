@@ -29,6 +29,13 @@ export interface ZcodeGoSessionRedirectEntry {
   forkSessionId: string;
   createdAt: number;
   createdBy: "manual" | "auto-compaction";
+  /**
+   * hover fork 产物（流式全量 fork）：id 域分离——send 域（发消息）翻译到
+   * forkSessionId（精简端点，runtime 无卡顿）；read/subscribe 域保持原会话
+   * 本体（全量档案渐进补齐，lazy load/历史查询等补完）。非 hover（silent
+   * fork）表项维持全域翻译。
+   */
+  hover?: true;
   /** fork 快照时原会话 message max(rowid)——迟到写入注入的判定边界（batch 3）。 */
   parentMaxMessageRowid?: number;
   /** fork 完成时子会话 message max(rowid)——增量归并回原会话的水位线（batch 3）。 */
@@ -91,6 +98,26 @@ function writeRedirectFile(file: RedirectFile): void {
 export function resolveZcodeGoSessionId(sessionId: string): string {
   if (!sessionId.startsWith("sess_")) return sessionId;
   return readRedirectFile().redirects[sessionId]?.forkSessionId ?? sessionId;
+}
+
+/**
+ * send 域寻址：发消息必须落到精简端点（runtime 无卡顿）。hover 表项与非
+ * hover 表项行为一致（都翻译到活跃端点）。
+ */
+export function resolveZcodeGoSessionIdForSend(sessionId: string): string {
+  return resolveZcodeGoSessionId(sessionId);
+}
+
+/**
+ * read/subscribe 域寻址：hover 表项保持原会话本体（全量档案渐进补齐——
+ * 用户在 fork 会话视图里看到的是渐进全量而非精简端点）；非 hover 表项照旧
+ * 翻译（silent fork 的读取全域翻译语义不变）。
+ */
+export function resolveZcodeGoSessionIdForRead(sessionId: string): string {
+  if (!sessionId.startsWith("sess_")) return sessionId;
+  const entry = readRedirectFile().redirects[sessionId];
+  if (!entry) return sessionId;
+  return entry.hover === true ? sessionId : entry.forkSessionId;
 }
 
 /**

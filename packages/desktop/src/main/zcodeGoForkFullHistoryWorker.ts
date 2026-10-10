@@ -218,3 +218,228 @@ export function startZcodeGoForkFullHistoryWorker(
   workerTimer = setInterval(() => tick(log), WORKER_INTERVAL_MS);
   workerTimer.unref?.();
 }
+
+// ── hover fork（direct 流程）登记 + 立即连续补齐 ────────────────────────────
+
+/**
+ * 从 parent（原会话）采集边界信息并登记 child 的全量补齐任务。
+ * 边界判定与 forkCompactSessionDirect/forkTrim 同款（最后一个活跃压缩边界）。
+ * 返回 null = parent 无压缩边界（child 内容已全，无需任务）。
+ */
+export function registerForkFullHistoryFromParent(
+  parentSessionId: string,
+  childSessionId: string,
+): ForkFullHistoryTask | null {
+  const { DatabaseSync } = loadSqlite();
+  const db = new DatabaseSync(
+    `${process.env.ZCODE_DATA_BASE_DIR?.trim() || process.env.HOME || ""}/.zcode/cli/db/db.sqlite`,
+    { timeout: 10_000 },
+  );
+  try {
+    const compactionParts = db
+      .prepare(
+        "select m.rowid as mrow, p.data as data, m.sequence as seq " +
+          "from part p join message m on m.id = p.message_id and m.session_id = p.session_id " +
+          "where p.session_id = ? and p.data like '{\"type\":\"compaction\"%' " +
+          "order by m.sequence desc",
+      )
+      .all(parentSessionId) as unknown as Array<{
+      mrow: number;
+      data: string;
+      seq: number;
+    }>;
+    let boundaryRowid = 0;
+    let preservedHead: string | undefined;
+    let preservedTail: string | undefined;
+    let hasBoundary = false;
+    for (const part of compactionParts) {
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(part.data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (payload.compactBoundary !== undefined || payload.timelineStatus === undefined) {
+        hasBoundary = true;
+        boundaryRowid = part.mrow;
+        const boundary = payload.compactBoundary as
+          | { preservedSegment?: { headMessageId?: string; tailMessageId?: string } }
+          | undefined;
+        preservedHead = boundary?.preservedSegment?.headMessageId;
+        preservedTail = boundary?.preservedSegment?.tailMessageId;
+        break;
+      }
+    }
+    if (!hasBoundary) return null;
+    const headRow = preservedHead
+      ? (db
+          .prepare("select rowid as r from message where session_id = ? and id = ?")
+          .get(parentSessionId, preservedHead) as unknown as { r: number } | undefined)
+      : undefined;
+    const tailRow = preservedTail
+      ? (db
+          .prepare("select rowid as r from message where session_id = ? and id = ?")
+          .get(parentSessionId, preservedTail) as unknown as { r: number } | undefined)
+      : undefined;
+    const preservedHeadRowid = headRow?.r ?? 0;
+    const preservedTailRowid = tailRow?.r ?? 0;
+    const boundaryTotal = db
+      .prepare(
+        "select count(*) as c from message where session_id = ? and rowid < ? " +
+          "and not (rowid >= ? and rowid <= ?)",
+      )
+      .get(parentSessionId, boundaryRowid, preservedHeadRowid, preservedTailRowid) as unknown as {
+      c: number;
+    };
+    const childMin = db
+      .prepare("select min(sequence) as s from message where session_id = ?")
+      .get(childSessionId) as unknown as { s: number | null };
+    return registerForkFullHistoryTask({
+      childSessionId,
+      originalSessionId: parentSessionId,
+      lastSRowid: boundaryRowid,
+      preservedHeadRowid,
+      preservedTailRowid,
+      boundaryRowid,
+      boundaryTotal: boundaryTotal.c,
+      nextLowerSeq: (childMin?.s ?? 1) - 1,
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * 立即连续补齐到完成（fork 落地后调用——"从 fork 开始就持续往前补"，段间
+ * setImmediate 让出事件循环；与周期 worker/rowsRange 推进靠单事务互斥）。
+ * 提前关闭：剩余段由重启后的周期 worker 续推。
+ */
+export function runContinuousForkFullHistoryBackfill(
+  childSessionId: string,
+  log: (message: string, meta?: unknown) => void,
+): void {
+  void (async () => {
+    const { DatabaseSync } = loadSqlite();
+    const db = new DatabaseSync(
+      `${process.env.ZCODE_DATA_BASE_DIR?.trim() || process.env.HOME || ""}/.zcode/cli/db/db.sqlite`,
+      { timeout: 10_000 },
+    );
+    try {
+      for (;;) {
+        const task = loadTasks().find((t) => t.childSessionId === childSessionId);
+        if (!task || task.status === "done") return;
+        // 同步段推进（单事务）；段间让出事件循环
+        const advance = (): number => {
+          const t = loadTasks().find((x) => x.childSessionId === childSessionId);
+          if (!t || t.status === "done") return 0;
+          const rows = db
+            .prepare(
+              "select id, time_created, time_updated, data, rowid as r from message " +
+                "where session_id = ? and rowid < ? " +
+                "and not (rowid >= ? and rowid <= ?) " +
+                "order by rowid desc limit ?",
+            )
+            .all(
+              t.originalSessionId,
+              t.lastSRowid,
+              t.preservedHeadRowid,
+              t.preservedTailRowid,
+              SEGMENT_MESSAGES,
+            ) as unknown as Array<{
+            id: string;
+            time_created: number;
+            time_updated: number;
+            data: string;
+            r: number;
+          }>;
+          if (rows.length === 0) {
+            t.status = "done";
+            saveTasks(loadTasks());
+            return 0;
+          }
+          const ordered = [...rows].reverse();
+          const count = ordered.length;
+          const startSeq = t.nextLowerSeq - count + 1;
+          db.exec("begin immediate");
+          try {
+            const insertMessage = db.prepare(
+              "insert into message (id, session_id, time_created, time_updated, data, sequence) " +
+                "values (?, ?, ?, ?, ?, ?)",
+            );
+            const insertPart = db.prepare(
+              "insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
+                "values (?, ?, ?, ?, ?, ?, ?)",
+            );
+            let seq = startSeq;
+            for (const row of ordered) {
+              const newId = `msg_zgk_${randomUUID()}`;
+              insertMessage.run(newId, t.childSessionId, row.time_created, row.time_updated, row.data, seq);
+              const parts = db
+                .prepare(
+                  "select id, time_created, time_updated, data, sequence from part " +
+                    "where session_id = ? and message_id = ? order by sequence",
+                )
+                .all(t.originalSessionId, row.id) as unknown as Array<{
+                id: string;
+                time_created: number;
+                time_updated: number;
+                data: string;
+                sequence: number;
+              }>;
+              for (const part of parts) {
+                insertPart.run(
+                  `part_zgk_${randomUUID()}`,
+                  t.childSessionId,
+                  newId,
+                  part.time_created,
+                  part.time_updated,
+                  part.data,
+                  part.sequence,
+                );
+              }
+              seq += 1;
+            }
+            db.exec("commit");
+          } catch (error) {
+            db.exec("rollback");
+            throw error;
+          }
+          t.lastSRowid = rows[rows.length - 1]!.r;
+          t.nextLowerSeq = startSeq;
+          t.injected += count;
+          const remaining = db
+            .prepare(
+              "select count(*) as c from message where session_id = ? and rowid < ? " +
+                "and not (rowid >= ? and rowid <= ?)",
+            )
+            .get(
+              t.originalSessionId,
+              t.lastSRowid,
+              t.preservedHeadRowid,
+              t.preservedTailRowid,
+            ) as unknown as { c: number };
+          if (remaining.c === 0) t.status = "done";
+          saveTasks(loadTasks());
+          return count;
+        };
+        const inserted = advance();
+        if (inserted > 0) {
+          log("hover fork 全量补齐推进", {
+            childSessionId,
+            inserted,
+            done: loadTasks().find((x) => x.childSessionId === childSessionId)?.status === "done",
+          });
+        }
+        if (inserted === 0) return;
+        await new Promise((r) => setImmediate(r));
+      }
+    } catch (error) {
+      log("hover fork 连续补齐异常（周期 worker/查询触发续推）", {
+        childSessionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      db.close();
+    }
+  })();
+}

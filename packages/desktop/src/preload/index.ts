@@ -261,6 +261,11 @@ contextBridge.exposeInMainWorld("zcode", {
     sessionId: string;
   }): Promise<{ ok: boolean; forkSessionId?: string; error?: string }> =>
     ipcRenderer.invoke(PlatformChannels.ZcodeGoSilentFork, payload),
+  /** zcode-go：hover fork（direct 流程：child 立即可用，边界前历史后台补齐）。 */
+  zcodeGoHoverFork: (payload: {
+    sessionId: string;
+  }): Promise<{ ok: boolean; childSessionId?: string; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoHoverFork, payload),
   /** zcode-go：会话被静默转接（原会话 → 隐形 fork）事件；返回退订函数。 */
   zcodeGoOnSessionRedirected: (
     callback: (payload: { from: string; to: string }) => void,

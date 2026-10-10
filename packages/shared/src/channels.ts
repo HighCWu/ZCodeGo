@@ -424,6 +424,7 @@ export const PlatformChannels = {
   /** Renderer → Main：在新窗口打开会话（同实例多窗口，共享配置/会话库/托盘） */
   ZcodeGoOpenSessionInNewWindow: "zcode:zcode-go-open-session-in-new-window",
   ZcodeGoSilentFork: "zcode:zcode-go-silent-fork",
+  ZcodeGoHoverFork: "zcode:zcode-go-hover-fork",
   ZcodeGoSessionRedirected: "zcode:zcode-go-session-redirected",
   /** Renderer → Main：新窗口启动时领取待打开的初始会话（一次性质询，避免事件时序竞态） */
   ZcodeGoTakeSessionInitial: "zcode:zcode-go-take-session-initial",
@@ -1194,6 +1195,11 @@ export interface PlatformChannelMap {
   [PlatformChannels.ZcodeGoSilentFork]: {
     request: { sessionId: string };
     response: { ok: boolean; forkSessionId?: string; error?: string };
+  };
+  [PlatformChannels.ZcodeGoHoverFork]: {
+    /** hover fork：direct 流程全量 fork（child 立即可用，边界前历史后台补齐）。 */
+    request: { sessionId: string };
+    response: { ok: boolean; childSessionId?: string; error?: string };
   };
   [PlatformChannels.ZcodeGoSessionRedirected]: {
     /** 事件（main → renderer）：{ from: 原会话, to: 隐形 fork }。 */
