@@ -15,7 +15,7 @@
  * 内按 DB 实际状态推导，天然串行安全。child 的注入段 sequence 由任务内
  * nextLowerSeq 递减分配（事务内独占推进时无冲突；跨推进器由事务串行化兜底）。
  */
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const SEGMENT_MESSAGES = 500;
@@ -148,39 +148,42 @@ export interface EnrichDb {
  */
 export function advanceForkFullHistorySegment(task: ForkFullHistoryTask, db: EnrichDb): number {
   if (task.status === "done") return 0;
-  const rows = db
-    .prepare(
-      "select id, time_created, time_updated, data, rowid as r from message " +
-        "where session_id = ? and rowid < ? " +
-        "and not (rowid >= ? and rowid <= ?) " +
-        "order by rowid desc limit ?",
-    )
-    .all(
-      task.originalSessionId,
-      task.lastSRowid,
-      task.preservedHeadRowid,
-      task.preservedTailRowid,
-      SEGMENT_MESSAGES,
-    ) as unknown as Array<{
-    id: string;
-    time_created: number;
-    time_updated: number;
-    data: string;
-    r: number;
-  }>;
-  if (rows.length === 0) {
-    task.status = "done";
-    updateTask(task);
-    return 0;
-  }
-  const ordered = [...rows].reverse(); // rowid 倒序取段 → 正序插入
-  const count = ordered.length;
-  // sequence 分配按事务内实态：child 当前 min <= count 时整体平移让位，注入段
-  // 恒占 1..count。并发推进器（host rowsRange / main worker）下快照 nextLowerSeq
-  // 会重叠——事务内重查实态才是并发安全的分层。
+  // 段选择必须在事务内：双推进器（host rowsRange 同步推进 / main worker tick）
+  // 并发时，事务外的选择会双取同段。配合确定性派生 id（msg_zgk_fb_<sha(源id)>）
+  // + INSERT OR IGNORE——即使双取也幂等（与 merge worker 的派生 id 技法一致）。
   db.exec("begin immediate");
-  let startSeq = 1;
+  let inserted = 0;
   try {
+    const rows = db
+      .prepare(
+        "select id, time_created, time_updated, data, rowid as r from message " +
+          "where session_id = ? and rowid < ? " +
+          "and not (rowid >= ? and rowid <= ?) " +
+          "order by rowid desc limit ?",
+      )
+      .all(
+        task.originalSessionId,
+        task.lastSRowid,
+        task.preservedHeadRowid,
+        task.preservedTailRowid,
+        SEGMENT_MESSAGES,
+      ) as unknown as Array<{
+      id: string;
+      time_created: number;
+      time_updated: number;
+      data: string;
+      r: number;
+    }>;
+    if (rows.length === 0) {
+      task.status = "done";
+      updateTask(task);
+      db.exec("commit");
+      return 0;
+    }
+    const ordered = [...rows].reverse(); // rowid 倒序取段 → 正序插入
+    const count = ordered.length;
+    // sequence 分配按事务内实态：child 当前 min <= count 时整体平移让位，注入段
+    // 恒占 1..count。并发推进器下事务串行 + 实态重查，分层安全。
     const childMinRow = db
       .prepare("select min(sequence) as s from message where session_id = ?")
       .get(task.childSessionId) as unknown as { s: number | null };
@@ -191,19 +194,26 @@ export function advanceForkFullHistorySegment(task: ForkFullHistoryTask, db: Enr
         task.childSessionId,
       );
     }
-    startSeq = 1;
     const insertMessage = db.prepare(
-      "insert into message (id, session_id, time_created, time_updated, data, sequence) " +
+      "insert or ignore into message (id, session_id, time_created, time_updated, data, sequence) " +
         "values (?, ?, ?, ?, ?, ?)",
     );
     const insertPart = db.prepare(
-      "insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
+      "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
         "values (?, ?, ?, ?, ?, ?, ?)",
     );
-    let seq = startSeq;
-    for (const row of ordered) {
-      const newId = `msg_zgk_${randomUUID()}`;
-      insertMessage.run(newId, task.childSessionId, row.time_created, row.time_updated, row.data, seq);
+    let seq = 1;
+    for (const row of ordered) {  // 升序插入；ordered[0] = 本段最老（游标取它）
+      const newId = `msg_zgk_fb_${sha24(row.id)}`;
+      const insertedRow = insertMessage.run(
+        newId,
+        task.childSessionId,
+        row.time_created,
+        row.time_updated,
+        row.data,
+        seq,
+      ) as unknown as { changes: number | bigint };
+      if (Number(insertedRow.changes) > 0) inserted += 1;
       const parts = db
         .prepare(
           "select id, time_created, time_updated, data, sequence from part " +
@@ -218,7 +228,7 @@ export function advanceForkFullHistorySegment(task: ForkFullHistoryTask, db: Enr
       }>;
       for (const part of parts) {
         insertPart.run(
-          `part_zgk_${randomUUID()}`,
+          `part_zgk_fb_${sha24(part.id)}`,
           task.childSessionId,
           newId,
           part.time_created,
@@ -229,29 +239,31 @@ export function advanceForkFullHistorySegment(task: ForkFullHistoryTask, db: Enr
       }
       seq += 1;
     }
+    task.lastSRowid = ordered[0]!.r; // 本段最老 rowid = 下轮继续往前 scan 的起点
+    task.injected += inserted;
+    const remaining = db
+      .prepare(
+        "select count(*) as c from message where session_id = ? and rowid < ? " +
+          "and not (rowid >= ? and rowid <= ?)",
+      )
+      .get(
+        task.originalSessionId,
+        task.lastSRowid,
+        task.preservedHeadRowid,
+        task.preservedTailRowid,
+      ) as unknown as { c: number };
+    if (remaining.c === 0) task.status = "done";
+    updateTask(task);
     db.exec("commit");
+    return inserted;
   } catch (error) {
     db.exec("rollback");
     throw error;
   }
-  // 游标 = 本段最小 rowid（rows 为倒序，末位即最老——继续往前 scan 的起点）
-  task.lastSRowid = rows[rows.length - 1]!.r;
-  task.nextLowerSeq = startSeq;
-  task.injected += count;
-  const remaining = db
-    .prepare(
-      "select count(*) as c from message where session_id = ? and rowid < ? " +
-        "and not (rowid >= ? and rowid <= ?)",
-    )
-    .get(
-      task.originalSessionId,
-      task.lastSRowid,
-      task.preservedHeadRowid,
-      task.preservedTailRowid,
-    ) as unknown as { c: number };
-  if (remaining.c === 0) task.status = "done";
-  updateTask(task);
-  return count;
+}
+
+function sha24(v: string): string {
+  return createHash("sha1").update(v).digest("hex").slice(0, 24);
 }
 
 /**

@@ -14,7 +14,7 @@
  * 与 services/zcodeGoForkFullHistory 的 advanceForkFullHistorySegment 保持
  * 逐字一致（状态文件是同一份，互为推进器）。
  */
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const WORKER_INTERVAL_MS = 2_500;
@@ -39,6 +39,10 @@ interface ForkFullHistoryTask {
 interface ForkFullHistoryState {
   version: number;
   tasks: ForkFullHistoryTask[];
+}
+
+function sha24(v: string): string {
+  return createHash("sha1").update(v).digest("hex").slice(0, 24);
 }
 
 function loadSqlite(): { DatabaseSync: new (path: string, options?: { timeout?: number }) => {
@@ -102,49 +106,63 @@ function tick(log: (message: string, meta?: unknown) => void): void {
   try {
     for (const task of loadTasks().filter((t) => t.status === "pending")) {
       try {
-        // —— 与 services advanceForkFullHistorySegment 逐字一致的段推进 ——
-        const rows = db
-          .prepare(
-            "select id, time_created, time_updated, data, rowid as r from message " +
-              "where session_id = ? and rowid < ? " +
-              "and not (rowid >= ? and rowid <= ?) " +
-              "order by rowid desc limit ?",
-          )
-          .all(
-            task.originalSessionId,
-            task.lastSRowid,
-            task.preservedHeadRowid,
-            task.preservedTailRowid,
-            SEGMENT_MESSAGES,
-          ) as unknown as Array<{
-          id: string;
-          time_created: number;
-          time_updated: number;
-          data: string;
-          r: number;
-        }>;
-        if (rows.length === 0) {
-          task.status = "done";
-          saveTasks(loadTasks());
-          continue;
-        }
-        const ordered = [...rows].reverse();
-        const count = ordered.length;
-        const startSeq = task.nextLowerSeq - count + 1;
+        // —— 与 services advanceForkFullHistorySegment 同款（事务内选择段 +
+        //    确定性派生 id + OR IGNORE：双推进器并发幂等）——
         db.exec("begin immediate");
+        let inserted = 0;
+        let lastSRowid = task.lastSRowid;
         try {
+          const rows = db
+            .prepare(
+              "select id, time_created, time_updated, data, rowid as r from message " +
+                "where session_id = ? and rowid < ? " +
+                "and not (rowid >= ? and rowid <= ?) " +
+                "order by rowid desc limit ?",
+            )
+            .all(
+              task.originalSessionId,
+              task.lastSRowid,
+              task.preservedHeadRowid,
+              task.preservedTailRowid,
+              SEGMENT_MESSAGES,
+            ) as unknown as Array<{
+            id: string;
+            time_created: number;
+            time_updated: number;
+            data: string;
+            r: number;
+          }>;
+          if (rows.length === 0) {
+            task.status = "done";
+            saveTasks(loadTasks());
+            db.exec("commit");
+            continue;
+          }
+          const ordered = [...rows].reverse();
+          const count = ordered.length;
+          const childMinRow = db
+            .prepare("select min(sequence) as s from message where session_id = ?")
+            .get(task.childSessionId) as unknown as { s: number | null };
+          const childMin = childMinRow?.s;
+          if (childMin !== null && childMin !== undefined && childMin <= count) {
+            db.prepare("update message set sequence = sequence + ? where session_id = ?").run(
+              count,
+              task.childSessionId,
+            );
+          }
           const insertMessage = db.prepare(
-            "insert into message (id, session_id, time_created, time_updated, data, sequence) " +
+            "insert or ignore into message (id, session_id, time_created, time_updated, data, sequence) " +
               "values (?, ?, ?, ?, ?, ?)",
           );
           const insertPart = db.prepare(
-            "insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
+            "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
               "values (?, ?, ?, ?, ?, ?, ?)",
           );
-          let seq = startSeq;
+          let seq = 1;
           for (const row of ordered) {
-            const newId = `msg_zgk_${randomUUID()}`;
-            insertMessage.run(newId, task.childSessionId, row.time_created, row.time_updated, row.data, seq);
+            const newId = `msg_zgk_fb_${sha24(row.id)}`;
+            const insertedRow = insertMessage.run(newId, task.childSessionId, row.time_created, row.time_updated, row.data, seq) as unknown as { changes: number | bigint };
+            if (Number(insertedRow.changes) > 0) inserted += 1;
             const parts = db
               .prepare(
                 "select id, time_created, time_updated, data, sequence from part " +
@@ -159,7 +177,7 @@ function tick(log: (message: string, meta?: unknown) => void): void {
             }>;
             for (const part of parts) {
               insertPart.run(
-                `part_zgk_${randomUUID()}`,
+                `part_zgk_fb_${sha24(part.id)}`,
                 task.childSessionId,
                 newId,
                 part.time_created,
@@ -168,8 +186,11 @@ function tick(log: (message: string, meta?: unknown) => void): void {
                 part.sequence,
               );
             }
+            lastSRowid = row.r;
             seq += 1;
           }
+          task.lastSRowid = lastSRowid;
+          task.injected += inserted;
           db.exec("commit");
         } catch (error) {
           db.exec("rollback");
@@ -332,38 +353,40 @@ export function runContinuousForkFullHistoryBackfill(
         const advance = (): number => {
           const t = loadTasks().find((x) => x.childSessionId === childSessionId);
           if (!t || t.status === "done") return 0;
-          const rows = db
-            .prepare(
-              "select id, time_created, time_updated, data, rowid as r from message " +
-                "where session_id = ? and rowid < ? " +
-                "and not (rowid >= ? and rowid <= ?) " +
-                "order by rowid desc limit ?",
-            )
-            .all(
-              t.originalSessionId,
-              t.lastSRowid,
-              t.preservedHeadRowid,
-              t.preservedTailRowid,
-              SEGMENT_MESSAGES,
-            ) as unknown as Array<{
-            id: string;
-            time_created: number;
-            time_updated: number;
-            data: string;
-            r: number;
-          }>;
-          if (rows.length === 0) {
-            t.status = "done";
-            saveTasks(loadTasks());
-            return 0;
-          }
-          const ordered = [...rows].reverse();
-          const count = ordered.length;
+          // 段选择必须在事务内 + 确定性派生 id + OR IGNORE（与 services
+          // advanceForkFullHistorySegment 同款——双推进器并发幂等）
           db.exec("begin immediate");
-          let startSeq = 1;
+          let inserted = 0;
+          let lastSRowid = t.lastSRowid;
           try {
-            // 事务内重查 child 实态 min：并发推进器（rowsRange 同步推进）下
-            // 快照分配会重叠——实态分层才是并发安全。
+            const rows = db
+              .prepare(
+                "select id, time_created, time_updated, data, rowid as r from message " +
+                  "where session_id = ? and rowid < ? " +
+                  "and not (rowid >= ? and rowid <= ?) " +
+                  "order by rowid desc limit ?",
+              )
+              .all(
+                t.originalSessionId,
+                t.lastSRowid,
+                t.preservedHeadRowid,
+                t.preservedTailRowid,
+                SEGMENT_MESSAGES,
+              ) as unknown as Array<{
+              id: string;
+              time_created: number;
+              time_updated: number;
+              data: string;
+              r: number;
+            }>;
+            if (rows.length === 0) {
+              t.status = "done";
+              saveTasks(loadTasks());
+              db.exec("commit");
+              return 0;
+            }
+            const ordered = [...rows].reverse();
+            const count = ordered.length;
             const childMinRow = db
               .prepare("select min(sequence) as s from message where session_id = ?")
               .get(t.childSessionId) as unknown as { s: number | null };
@@ -375,17 +398,18 @@ export function runContinuousForkFullHistoryBackfill(
               );
             }
             const insertMessage = db.prepare(
-              "insert into message (id, session_id, time_created, time_updated, data, sequence) " +
+              "insert or ignore into message (id, session_id, time_created, time_updated, data, sequence) " +
                 "values (?, ?, ?, ?, ?, ?)",
             );
             const insertPart = db.prepare(
-              "insert into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
+              "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
                 "values (?, ?, ?, ?, ?, ?, ?)",
             );
-            let seq = startSeq;
+            let seq = 1;
             for (const row of ordered) {
-              const newId = `msg_zgk_${randomUUID()}`;
-              insertMessage.run(newId, t.childSessionId, row.time_created, row.time_updated, row.data, seq);
+              const newId = `msg_zgk_fb_${sha24(row.id)}`;
+              const insertedRow = insertMessage.run(newId, t.childSessionId, row.time_created, row.time_updated, row.data, seq) as unknown as { changes: number | bigint };
+              if (Number(insertedRow.changes) > 0) inserted += 1;
               const parts = db
                 .prepare(
                   "select id, time_created, time_updated, data, sequence from part " +
@@ -400,7 +424,7 @@ export function runContinuousForkFullHistoryBackfill(
               }>;
               for (const part of parts) {
                 insertPart.run(
-                  `part_zgk_${randomUUID()}`,
+                  `part_zgk_fb_${sha24(part.id)}`,
                   t.childSessionId,
                   newId,
                   part.time_created,
@@ -409,16 +433,16 @@ export function runContinuousForkFullHistoryBackfill(
                   part.sequence,
                 );
               }
+              lastSRowid = row.r;
               seq += 1;
             }
+            t.lastSRowid = lastSRowid;
+            t.injected += inserted;
             db.exec("commit");
           } catch (error) {
             db.exec("rollback");
             throw error;
           }
-          t.lastSRowid = rows[rows.length - 1]!.r;
-          t.nextLowerSeq = startSeq;
-          t.injected += count;
           const remaining = db
             .prepare(
               "select count(*) as c from message where session_id = ? and rowid < ? " +
