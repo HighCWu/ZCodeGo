@@ -456,11 +456,13 @@ try {
     return JSON.stringify({ x: rc.x + rc.width / 2, y: rc.y + rc.height / 2 });
   })()`;
   let menuItemFinal = null;
-  for (let i = 0; i < 6 && !menuItemFinal; i += 1) {
+  for (let i = 0; i < 4 && !menuItemFinal; i += 1) {
     await clickVisibleButton(L.add);
-    await sleep(1200);
-    menuItemFinal = await ev(menuQuery);
-    if (!menuItemFinal) await sleep(1500);
+    // 菜单渲染/关闭窗口不可预知（CI 实测差异）：点开后 6s 内密集轮询
+    for (let k = 0; k < 10 && !menuItemFinal; k += 1) {
+      await sleep(600);
+      menuItemFinal = await ev(menuQuery);
+    }
   }
   if (!menuItemFinal) { await dumpUi("4b 菜单项未找到"); throw new Error("「添加插件市场」菜单项未出现"); }
   {
