@@ -20,6 +20,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const WORKER_INTERVAL_MS = 2_500;
 const SEGMENT_MESSAGES = 500;
 
+let workerTimer: ReturnType<typeof setInterval> | null = null;
+
 interface ForkFullHistoryTask {
   childSessionId: string;
   originalSessionId: string;
