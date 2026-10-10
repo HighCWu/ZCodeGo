@@ -377,6 +377,17 @@ try {
   }
 
   // ── 4. UI 市场安装：侧边栏「插件市场」→ 添加本地市场 → 安装 zcode-go ──
+  // CI runner 的 UI 语言可能是英文（--lang=zh-CN 部分平台未生效，38023610968
+  // 实测）——所有文案匹配一律双语。
+  const L = {
+    marketplace: ["插件市场", "Plugin Marketplace"],
+    viewReady: ["用插件为 ZCode 扩展", "Extend ZCode with skills, commands, and MCP servers"],
+    add: ["添加", "Add"],
+    addMarketplace: ["添加插件市场", "Add marketplace"],
+    personal: ["个人", "Personal"],
+    install: ["安装", "Install"],
+    installed: ["已安装", "Installed"],
+  };
   const dumpUi = async (tag) => {
     try {
       const d = await ev(`(() => {
@@ -405,9 +416,10 @@ try {
     await c.trustedClick(Math.round(x), Math.round(y));
     return "trusted:" + label;
   };
-  const waitVisibleText = async (text, timeoutMs) => {
+  const waitVisibleText = async (text, timeoutMs) => waitVisibleTextList([text], timeoutMs);
+  const waitVisibleTextList = async (words, timeoutMs) => {
     for (let i = 0; i < timeoutMs / 1000; i += 1) {
-      const ok = await ev(`document.body.innerText.includes(${JSON.stringify(text)})`);
+      const ok = await ev(`(() => { const t = document.body.innerText; return ${JSON.stringify(words)}.some((w) => t.includes(w)); })()`);
       if (ok) return true;
       await sleep(1000);
     }
@@ -419,12 +431,12 @@ try {
   for (let i = 0; i < 3 && !mktOpened; i += 1) {
     const clicked = await ev(`(() => {
       const hits = Array.from(document.querySelectorAll('button, a, [role="button"], li, span, div'))
-        .filter(el => el.offsetParent !== null && (el.innerText || "").trim() === "插件市场");
+        .filter(el => el.offsetParent !== null && ${JSON.stringify(L.marketplace)}.includes((el.innerText || "").trim()));
       if (!hits.length) return null;
       hits[0].click();
       return "sidebar-clicked";
     })()`);
-    if (clicked && await waitVisibleText("用插件为 ZCode 扩展", 20)) { mktOpened = true; break; }
+    if (clicked && await waitVisibleTextList(L.viewReady, 20)) { mktOpened = true; break; }
     await dumpUi(`4a.${i} 市场入口未达`);
     await sleep(2000);
   }
@@ -432,10 +444,10 @@ try {
   if (!mktOpened) throw new Error("未能进入插件市场视图（见上 dump）");
 
   // 4b. 添加本地市场：「添加」弹下拉菜单（创建插件 / 添加插件市场）→ 点后者
-  await clickVisibleButton(["添加"]);
+  await clickVisibleButton(L.add);
   const menuItemR = await ev(`(() => {
     const hits = Array.from(document.querySelectorAll('button, [role="menuitem"], div, span, li, a'))
-      .filter(el => el.offsetParent !== null && (el.textContent || "").trim() === "添加插件市场");
+      .filter(el => el.offsetParent !== null && ${JSON.stringify(L.addMarketplace)}.includes((el.textContent || "").trim()));
     if (!hits.length) return null;
     hits.sort((a, b) => (a.getBoundingClientRect().width * a.getBoundingClientRect().height) - (b.getBoundingClientRect().width * b.getBoundingClientRect().height));
     const rc = hits[0].getBoundingClientRect();
@@ -444,7 +456,7 @@ try {
   let menuItemFinal = menuItemR;
   for (let i = 0; i < 3 && !menuItemFinal; i += 1) {
     // 菜单可能已随焦点丢失关闭：重开再找
-    await clickVisibleButton(["添加"]);
+    await clickVisibleButton(L.add);
     await sleep(800);
     break;
   }
@@ -459,7 +471,7 @@ try {
     await sleep(1000);
     inputFilled = await ev(`(() => {
       const inp = Array.from(document.querySelectorAll('input')).find(i =>
-        i.offsetParent !== null && /GitHub 仓库|Git URL|文件或目录/.test(i.placeholder || ""));
+        i.offsetParent !== null && /GitHub/i.test(i.placeholder || ""));
       if (!inp) return false;
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
       setter.call(inp, ${JSON.stringify(mktDir)});
@@ -497,7 +509,7 @@ try {
   console.log("4b. dialog structure:", dlg);
   let added = false;
   // 对话框确认按钮实测文案就是「添加插件市场」（dump 实证：["选择目录","添加插件市场","Close"]）
-  for (const labels of [["添加插件市场"], ["确认", "确定", "保存", "Add"]]) {
+  for (const labels of [L.addMarketplace, ["确认", "确定", "保存", "Confirm", "Save"]]) {
     const r = await clickVisibleButton(labels);
     if (r) {
       await sleep(2500);
@@ -516,7 +528,7 @@ try {
       // 本地市场在「个人」来源页签下——兜底切换
       const tabR = await ev(`(() => {
         const tab = Array.from(document.querySelectorAll('button, [role="tab"], span'))
-          .filter(el => el.offsetParent !== null && (el.innerText || "").trim() === "个人")[0];
+          .filter(el => el.offsetParent !== null && ${JSON.stringify(L.personal)}.includes((el.innerText || "").trim()))[0];
         if (!tab) return null;
         const rc = tab.getBoundingClientRect();
         return JSON.stringify({ x: rc.x + rc.width / 2, y: rc.y + rc.height / 2 });
@@ -525,7 +537,7 @@ try {
       await sleep(1500);
     }
     const btnR = await ev(`(() => {
-      const btns = Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent !== null && (b.innerText || "").trim() === "安装");
+      const btns = Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent !== null && ${JSON.stringify(L.install)}.includes((b.innerText || "").trim()));
       const hit = btns.find(b => {
         let p = b; for (let k = 0; k < 8 && p; k += 1) {
           if ((p.innerText || "").toLowerCase().replace(/[^a-z]/g, "").includes("zcodego")) return true;
@@ -558,7 +570,7 @@ try {
       if (enabled.some((k) => k.startsWith("zcode-go@"))) installedConfigOk = true;
     } catch { /* 等待写入 */ }
   }
-  const cardInstalled = await waitVisibleText("已安装", 5);
+  const cardInstalled = await waitVisibleTextList(L.installed, 5);
   console.log(`4d. installed: configRecord=${installedConfigOk} cardState=${cardInstalled}`);
   if (!installedConfigOk) { await dumpUi("4d 安装记录未落"); throw new Error("安装未完成（config 无 zcode-go@ 记录）"); }
 
