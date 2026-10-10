@@ -1,0 +1,17 @@
+{
+  "name": "zcode-go-marketplace",
+  "description": "ZCode Go 插件市场：ZCode Go 桌面接管插件（官方原生运行时、额度无损）。",
+  "description_i18n": {
+    "en": "ZCode Go plugin marketplace: desktop takeover plugin for ZCode (official native runtime, quota preserved)."
+  },
+  "plugins": [
+    {
+      "name": "zcode-go",
+      "description": "ZCode Go 桌面接管：在任意会话输入 /zcode-go 切换到 ZCode Go 桌面（底层为官方原生运行时，签名与额度保留）；退出 ZCode Go 重开官方即切回。",
+      "description_i18n": {
+        "en": "ZCode Go desktop takeover: type /zcode-go in any session to switch to the ZCode Go desktop (official native runtime underneath, signature and quota preserved); quit ZCode Go and relaunch official ZCode to switch back."
+      },
+      "source": "plugin"
+    }
+  ]
+}
