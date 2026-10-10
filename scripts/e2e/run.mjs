@@ -559,11 +559,15 @@ if (!skipLaunch) {
     await new Promise((r) => setTimeout(r, 2000));
   }
   if (pid <= 0 && process.env.ZCODE_GO_E2E_ALLOW_NO_DESKTOP !== "1") {
-    // linux 失败诊断：desktop-launch.log 尾部（main 启动失败的真因都在这里，
-    // 此前仅 mac 豁免分支有 diag、linux 盲区）
+    // linux 失败诊断：desktop-launch.log 关键行（host 每分钟的 memory 心跳会
+    // 把 main 启动序列刷出尾部窗口——过滤后再取头尾）
     try {
       const text = readFileSync(join(stateDir, "desktop-launch.log"), "utf8");
-      console.error(`[e2e][launch] desktop-launch.log 尾部:\n${text.slice(-2000)}`);
+      const lines = text.split("\n").filter((l) => !l.includes("[memory] role="));
+      console.error(
+        `[e2e][launch] desktop-launch.log 关键行（头30/尾50，共${lines.length}行）：\n` +
+          [...lines.slice(0, 30), "…TAIL…", ...lines.slice(-50)].join("\n"),
+      );
     } catch { /* 无日志 */ }
   }
   if (pid <= 0 && process.env.ZCODE_GO_E2E_ALLOW_NO_DESKTOP === "1") {
