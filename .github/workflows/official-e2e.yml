@@ -45,7 +45,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: services 单测（node:test + tsx）
         run: |
-          npx tsx --test \
+          npx vitest run \
             packages/services/test/zcodeGoStandaloneGate.test.ts \
             packages/services/test/zcodeGoWireFrame.test.ts \
             packages/services/test/zcodeGoGoalKeepAlive.test.ts \
@@ -55,14 +55,15 @@ jobs:
             packages/services/test/sessionHistoryLazyReader.test.ts \
             packages/services/test/zcodeGoSyntheticHistory.test.ts \
             packages/services/test/zcodeGoForkFullHistory.test.ts
-      - name: desktop 静默 fork 归并单测（node:test + tsx）
+      # 上游 3.15.1 起仓库测试基建统一为 vitest（根 vitest.config.ts 的 unit 工程
+      # include 覆盖 packages/*/test/**/*.test.ts），zcode-go 的 node:test 文件已
+      # 全部迁入 vitest；此处仍按清单定向跑（比全量快，语义与本地 test:unit 一致）。
+      - name: desktop 静默 fork 归并单测（vitest）
         run: |
-          npx tsx --test \
-            packages/desktop/test/zcodeGoSilentForkMerge.test.ts
-      - name: ui 单测（tsx + ui tsconfig 路径别名）
+          npx vitest run packages/desktop/test/zcodeGoSilentForkMerge.test.ts
+      - name: ui 单测（vitest）
         run: |
-          npx tsx --tsconfig packages/ui/tsconfig.json --test \
-            packages/ui/test/zcodeGoMobileBehavior.test.ts
+          npx vitest run packages/ui/test/zcodeGoMobileBehavior.test.ts packages/ui/test/zcodeGoDraftModelFallback.test.ts
       - name: desktop 身份模块单测（node:test，原生 mjs）
         run: node --test packages/desktop/scripts/desktop-product-identity.test.mjs
 
