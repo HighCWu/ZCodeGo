@@ -22,6 +22,13 @@ export function onLocalDatabaseStartupReady(listener: () => void): void {
 
 const windowBindings = new WeakMap<BrowserWindow, () => void>();
 const hostStartupIds = new WeakMap<UtilityProcess, string>();
+/** 每 startupId 的最新启动状态：迟挂窗口（桥窗口在桌面启动完成后才配对）在
+ *  bind 时据此播种 latest 并补投——否则 snapshot 请求落空（latest 仅从绑定
+ *  之后的事件积累），web 端启动闸 30s 超时（CI 三平台实证、本地快机不复现）。 */
+const latestByStartupId = new Map<string, DatabaseStartupState>();
+export function getLatestDatabaseStartupState(startupId: string): DatabaseStartupState | undefined {
+  return latestByStartupId.get(startupId);
+}
 export function getDatabaseStartupPortPayload(
   child: UtilityProcess,
 ): { databaseStartupId: string } | undefined {
@@ -47,6 +54,7 @@ export function bindDatabaseStartupRelay(
   const applyState = (state: DatabaseStartupState) => {
     if (latest && state.startupId === latest.startupId && state.sequence <= latest.sequence) return;
     latest = state;
+    latestByStartupId.set(state.startupId, state);
     forward(state);
     try {
       reportDatabaseStartupState(state);
@@ -63,6 +71,14 @@ export function bindDatabaseStartupRelay(
     if (disposed || exited || state.startupId !== startupId) return;
     applyState(state);
   };
+  // 迟挂窗口补投：绑定时若该 startupId 已有终态（典型=ready），播种 latest 使
+  // 后续 snapshot 请求可回放，并立即补投一次（webContents 在 did-finish-load
+  // 后才挂接，preload/shim 监听已就位）。
+  const prior = latestByStartupId.get(startupId);
+  if (prior) {
+    latest = prior;
+    forward(prior);
+  }
   const control = (event: Electron.IpcMainEvent, raw: unknown) => {
     if (disposed || event.sender !== win.webContents) return;
     const result = databaseStartupControlSchema.safeParse(raw);
