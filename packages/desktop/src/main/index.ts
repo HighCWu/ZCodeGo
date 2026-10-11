@@ -2898,8 +2898,6 @@ app.whenReady().then(async () => {
     logger,
   });
 
-);
-
   // zcode-go 分叉裁剪：fork ack 后对子会话存储剔除压缩前惰性历史（不依赖接管模式）。
   ipcMain.handle(PlatformChannels.ZcodeGoTrimForkedSessionHistory, (_event, payload: unknown) => {
     const request = payload as { childSessionId?: unknown; parentSessionId?: unknown };
