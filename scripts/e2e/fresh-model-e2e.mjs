@@ -554,9 +554,9 @@ try {
   // web 侧 JS 异常/报错收集（iframe 内的未捕获异常同页捕获）——错误边界
   // （「这块界面出了点问题」）只吞 UI 不吐日志，这里留下定位线索
   const webErrors = [];
-  page.on("pageerror", (e) => { webErrors.push(`[pageerror] ${String(e).slice(0, 400)}`); });
+  page.on("pageerror", (e) => { webErrors.push(`[pageerror] ${e?.stack || String(e)}`); });
   page.on("console", (m) => {
-    if (m.type() === "error") webErrors.push(`[console.error] ${m.text().slice(0, 400)}`);
+    if (m.type() === "error") webErrors.push(`[console.error] ${m.text()}`);
   });
   await page.goto(qr, { waitUntil: "domcontentloaded" });
   let webReady = false;
@@ -748,7 +748,30 @@ try {
       }
       return -1;
     });
-    if (frameIdx < 0) throw new Error("无可输入 composer 的 /app/ iframe（双帧均空）");
+    if (frameIdx < 0) {
+      // 取证：抓崩溃 chunk 原文 + 完整错误栈落盘沙箱（CI-only 崩溃的逐帧映射依据）
+      try {
+        const dump = await page.evaluate(async () => {
+          const chunks = performance.getEntriesByType("resource")
+            .map((r) => r.name)
+            .filter((n) => n.includes("/app/assets/styles-"));
+          const out = { chunks };
+          for (const url of chunks.slice(0, 2)) {
+            try {
+              out.chunkUrl = url;
+              out.chunkText = await (await fetch(url)).text();
+            } catch {}
+          }
+          return out;
+        }).catch(() => null);
+        if (dump?.chunkText) {
+          const { writeFileSync } = await import("node:fs");
+          writeFileSync(join(ws, "crash-chunk.js"), dump.chunkText);
+          console.log(`4. crash chunk 已存：${dump.chunkUrl}（${dump.chunkText.length}B）`);
+        }
+      } catch {}
+      throw new Error("无可输入 composer 的 /app/ iframe（双帧均空）");
+    }
     const composer = page.locator('iframe[src="/app/"]').nth(frameIdx).contentFrame()
       .locator('[contenteditable="true"]').first();
     await composer.click({ timeout: 15000 });
