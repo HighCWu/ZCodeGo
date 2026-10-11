@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- zcode-go 机制/E2E/插件宿主文件：单文件收口是有意为之（同 SessionPane 惯例），拆散会破坏内聚。 */
 /**
  * zcode-go 移动端远程控制桥（阶段 2/3：out-of-band offer + mailbox + 资源通道
  * + preload API 透传 + 多客户端并发）。

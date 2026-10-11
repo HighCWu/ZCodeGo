@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- zcode-go 机制/E2E/插件宿主文件：单文件收口是有意为之（同 SessionPane 惯例），拆散会破坏内聚。 */
 import { existsSync, readFileSync } from "node:fs";
 import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
 import { homedir } from "node:os";
