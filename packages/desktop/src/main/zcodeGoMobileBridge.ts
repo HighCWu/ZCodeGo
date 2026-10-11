@@ -590,6 +590,13 @@ try {
     exposeInMainWorld: function (key, value) {
       capturedGlobals[key] = value;
     },
+    // 上游 3.15.1 pluginSandbox hostBridge 求值期调用（supportsRetainedMove
+    // 探测）：桥隔离世界无法执行主世界函数，返回 undefined（功能视为不支
+    // 持）。缺这个方法会让真实 preload 求值在尾部监听器（ServicePort/启动
+    // 状态→window 转发）注册前中断——web 端启动闸 30s 超时（CI 三平台实证）。
+    executeInMainWorld: function () {
+      return undefined;
+    },
   };
   var preloadSourceText = fs.readFileSync(realPreload, "utf8");
   var wrappedPreload = new Function("require", "module", "exports", preloadSourceText);
