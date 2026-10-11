@@ -315,28 +315,28 @@ console.log("== [A] 基线补齐（含每段 DB 快照监控） ==");
   rmSync(r.home, { recursive: true, force: true });
 }
 
-console.log("\n== [B] 并发推进器（双连接交替） ==");
+if (!process.env.ZCODE_GO_HARNESS_ONLY_G) console.log("\n== [B] 并发推进器（双连接交替） ==");
 {
   const r = scenarioLifecycle({ tag: "B-concurrent", total: 400, boundarySeq: 300, concurrent: true, crashAfterSegments: 0 });
   rmSync(r.home, { recursive: true, force: true });
 }
 
-console.log("\n== [C] 崩溃恢复（推进 2 段后弃连接重开） ==");
+if (!process.env.ZCODE_GO_HARNESS_ONLY_G) console.log("\n== [C] 崩溃恢复（推进 2 段后弃连接重开） ==");
 {
   const r = scenarioLifecycle({ tag: "C-crash", total: 300, boundarySeq: 220, concurrent: false, crashAfterSegments: 2 });
   rmSync(r.home, { recursive: true, force: true });
 }
 
-console.log("\n== [D] 双边界会话（多 compaction 历史，取最后活跃边界） ==");
+if (!process.env.ZCODE_GO_HARNESS_ONLY_G) console.log("\n== [D] 双边界会话（多 compaction 历史，取最后活跃边界） ==");
 {
   const r = scenarioLifecycle({ tag: "D-multiboundary", total: 200, boundarySeq: 60, concurrent: false, crashAfterSegments: 0 });
   rmSync(r.home, { recursive: true, force: true });
 }
 
-console.log("\n== [E] 幂等重放 ==");
+if (!process.env.ZCODE_GO_HARNESS_ONLY_G) console.log("\n== [E] 幂等重放 ==");
 scenarioIdempotentReplay();
 
-console.log("\n== [F] 数据搬运层对比 ==");
+if (!process.env.ZCODE_GO_HARNESS_ONLY_G) console.log("\n== [F] 数据搬运层对比 ==");
 scenarioPerformance([1000, 5000]);
 
 // ── 场景 G：端到端时延（用户口径：fork → 能发消息 → runtime 响应）──
@@ -484,11 +484,7 @@ function scenarioEndToEndLatency(total: number): void {
 }
 
 console.log("\n== [G] 端到端时延（用户口径）==");
-scenarioEndToEndLatency(1000);
-scenarioEndToEndLatency(5000);
-// 20000 规模在本 harness（逐场景独立沙箱）超 15 分钟——默认两规模已证趋势，
-// 需要时 ZCODE_GO_E2E 环境下单独跑 G-20000（约 5 分钟）。
-void process.env.ZCODE_GO_E2E;
+scenarioEndToEndLatency(Number(process.env.ZCODE_GO_HARNESS_TOTAL ?? 20000));
 
 console.log(pass ? "\nHARNESS-OK ✓" : "\nHARNESS-FAIL ✗");
 process.exit(pass ? 0 : 1);
