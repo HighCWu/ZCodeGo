@@ -561,8 +561,16 @@ try {
   await page.goto(qr, { waitUntil: "domcontentloaded" });
   let webReady = false;
   let webRetries = 0;
-  for (let i = 0; i < 90 && !webReady; i += 1) {
+  // 上游 3.15.1 起 web 壳预缓存膨胀到 ~300 项/9.5MB：慢速 runner 首装可超 3 分钟
+  // （CI 实证 180s 不够、本地秒级），放宽到 8 分钟；每 30 轮留一次现场便于诊断。
+  for (let i = 0; i < 240 && !webReady; i += 1) {
     await sleep(2000);
+    if (i > 0 && i % 30 === 0) {
+      const probe = await page
+        .evaluate(() => document.body.innerText.slice(0, 160))
+        .catch(() => "probe-failed");
+      console.log(`2. web ready-wait ${i * 2}s:`, String(probe).replace(/\s+/g, " "));
+    }
     const st = await page.evaluate(() => {
       const fs = document.querySelectorAll('iframe[src="/app/"]');
       if (!fs.length) return { f: 0 };

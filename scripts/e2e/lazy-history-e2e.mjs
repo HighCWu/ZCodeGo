@@ -615,7 +615,9 @@ try {
   if (!rowSeen) throw new Error("任务行未出现在侧栏");
   await ev2(`document.querySelector('li[data-testid="task-item-${S}"]').click(); "ok"`);
   let tailVisible = false;
-  for (let i = 0; i < 75 && !tailVisible; i += 1) {
+  // 上游 3.15.1 应用体积上涨 + mac runner 冷启动慢：75s 在 CI 上不够（本地秒级），
+  // 放宽到 3 分钟；门本身不变（必须真实看到尾窗标记）。
+  for (let i = 0; i < 180 && !tailVisible; i += 1) {
     await sleep(1000);
     tailVisible = await ev2(`document.body.innerText.includes(${JSON.stringify(TAIL_MARKER)})`);
   }
