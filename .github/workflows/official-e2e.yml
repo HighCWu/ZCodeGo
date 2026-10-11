@@ -79,7 +79,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-    steps:
       # GitHub Windows runner 预装 core.autocrlf=true：检出会把 LF 资产 CRLF 化，
       # Gen UI vendor 快照等按字节校验的文件哈希被打歪（官方锚点与 fork 同受影响）。
       - name: git 全局关闭 autocrlf（字节级资产保护）
@@ -96,7 +95,6 @@ jobs:
     outputs:
       anchor: ${{ steps.anchor.outputs.anchor }}
       strategy: ${{ steps.anchor.outputs.strategy }}
-    steps:
     steps:
       # GitHub Windows runner 预装 core.autocrlf=true：检出会把 LF 资产 CRLF 化，
       # Gen UI vendor 快照等按字节校验的文件哈希被打歪（官方锚点与 fork 同受影响）。
@@ -140,7 +138,6 @@ jobs:
     defaults:
       run:
         shell: bash
-    steps:
     steps:
       # GitHub Windows runner 预装 core.autocrlf=true：检出会把 LF 资产 CRLF 化，
       # Gen UI vendor 快照等按字节校验的文件哈希被打歪（官方锚点与 fork 同受影响）。
