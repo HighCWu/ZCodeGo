@@ -13,7 +13,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
-import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useZCodeIntlOptional } from "@/i18n/IntlProvider.js";
 import { useIsMobileViewport } from "@/hooks/useViewportTier.js";
 import {
   WorkspaceHeaderActionSection,
@@ -47,12 +47,16 @@ export function WorkspaceHeader({
   nativeSessionLogPath,
   nativeSessionLogExists,
   nativeSessionLogLoading,
+  providerWorkspaceConfigPath,
+  providerWorkspaceConfigExists,
+  providerWorkspaceConfigLoading,
   workspaceHeaderState,
   gitSummary,
   gitDirtyFileCount,
   isMacDesktop,
   isMacFullscreen,
   isWindowsDesktop,
+  isWebRemoteControl = false,
 
   isDesktop,
   simplifyForNarrowRemote = false,
@@ -91,6 +95,9 @@ export function WorkspaceHeader({
   nativeSessionLogPath: string | null;
   nativeSessionLogExists: boolean;
   nativeSessionLogLoading: boolean;
+  providerWorkspaceConfigPath: string | null;
+  providerWorkspaceConfigExists: boolean;
+  providerWorkspaceConfigLoading: boolean;
   workspaceHeaderState: WorkspaceHeaderState;
   gitSummary: GitRepositorySummary;
   gitDirtyFileCount: number;
@@ -98,6 +105,7 @@ export function WorkspaceHeader({
   isMacFullscreen?: boolean;
   isWindowsDesktop?: boolean;
   reserveWindowControls?: boolean;
+  isWebRemoteControl?: boolean;
   windowsWindowControlsRightPaddingPx?: number;
   isDesktop?: boolean;
   simplifyForNarrowRemote?: boolean;
@@ -122,7 +130,7 @@ export function WorkspaceHeader({
   allowOpenWorkspace?: boolean;
 }) {
   const [selectedEditor, setSelectedEditor] = useState<EditorInfo | null>(null);
-  const { intl } = useZCodeIntl();
+  const { intl } = useZCodeIntlOptional();
   // 移动视口抽屉形态：顶部浮层不进手机，header 最左侧（folder 按钮之左）补一个
   // 侧栏展开开关；task/draft 两种 variant 都需要它（草稿态没有 TitleSection）。
   // 桌面窗口由浮层 logo 开关承担，不重复渲染。
@@ -215,10 +223,14 @@ export function WorkspaceHeader({
             nativeSessionLogPath={nativeSessionLogPath}
             nativeSessionLogExists={nativeSessionLogExists}
             nativeSessionLogLoading={nativeSessionLogLoading}
+            providerWorkspaceConfigPath={providerWorkspaceConfigPath}
+            providerWorkspaceConfigExists={providerWorkspaceConfigExists}
+            providerWorkspaceConfigLoading={providerWorkspaceConfigLoading}
             workspaceHeaderState={workspaceHeaderState}
             isMacDesktop={isMacDesktop}
             isMacFullscreen={isMacFullscreen}
             isWindowsDesktop={isWindowsDesktop}
+            isWebRemoteControl={isWebRemoteControl}
             simplifyForNarrowRemote={simplifyForNarrowRemote}
             selectedEditor={selectedEditor}
             onReloadSession={onReloadSession}
@@ -238,6 +250,7 @@ export function WorkspaceHeader({
           workspaceIdentity={workspaceIdentity}
           remoteSessionId={remoteSessionId}
           remoteTarget={remoteTarget}
+          isWebRemoteControl={isWebRemoteControl}
           isDesktop={isDesktop}
           isTerminalOpen={isTerminalOpen}
           isSidePaneOpen={isSidePaneOpen}
@@ -251,6 +264,7 @@ export function WorkspaceHeader({
           onSelectedEditorChange={setSelectedEditor}
         />
       </div>
+
     </header>
   );
 }

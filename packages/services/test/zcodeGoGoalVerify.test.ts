@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { describe, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,8 +165,8 @@ function fireVerifiedEdge(sessionId: string): void {
   observeZcodeGoSessionsIndexFrame(WORKSPACE, indexDelta({ sessionId, goalStatus: "verified" }));
 }
 
-test("goal 复核全链（串行三场景：重触发/双确认/重放防护）", async (t) => {
-  await t.test("全链：verified 边沿 → 判定 false → 重触发 goal（真实 wire 帧形状）", async () => {
+describe("goal 复核全链（串行三场景：重触发/双确认/重放防护）", () => {
+  it("全链：verified 边沿 → 判定 false → 重触发 goal（真实 wire 帧形状）", async () => {
     await withEnv(async () => {
       const S = `sess_gv_${randomUUID().slice(0, 8)}`;
       const OBJECTIVE = "把构建修绿并跑通全部测试";
@@ -213,7 +213,7 @@ test("goal 复核全链（串行三场景：重触发/双确认/重放防护）"
     });
   });
 
-  await t.test("双确认：r1 true + r2 false → 重触发（r2 不得回声 r1 结论）", async () => {
+  it("双确认：r1 true + r2 false → 重触发（r2 不得回声 r1 结论）", async () => {
     await withEnv(async () => {
       const S = `sess_gv2_${randomUUID().slice(0, 8)}`;
       const OBJECTIVE = "发布周报";
@@ -242,7 +242,7 @@ test("goal 复核全链（串行三场景：重触发/双确认/重放防护）"
     });
   });
 
-  await t.test("重放防护：快照重放与无基线增量不触发复核", async () => {
+  it("重放防护：快照重放与无基线增量不触发复核", async () => {
     await withEnv(async () => {
       const S = `sess_gv3_${randomUUID().slice(0, 8)}`;
       const { agent, calls } = createMockAgent({

@@ -101,7 +101,17 @@ export function createPrimaryWindowCoordinator(deps: PrimaryWindowCoordinatorDep
       return true;
     }
     // 无隐藏记录（进程内从未走 hide 路径的兜底）：显示最早的存活窗口。
-    return focusLatestVisible([alive[0]!]);
+    // 不可见的兜底目标必须真的 show 出来——只 focus 对隐藏窗口无效
+    // （上游契约：app-activate/dock 点击必须把唯一窗口带回屏幕）。
+    const fallback = alive[0]!;
+    if (!fallback.isVisible()) {
+      if (fallback.isMinimized?.()) {
+        fallback.restore?.();
+      }
+      fallback.show();
+    }
+    fallback.focus?.();
+    return true;
   }
 
   async function ensurePrimaryWindow(reason: string) {

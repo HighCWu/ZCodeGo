@@ -36,18 +36,18 @@ export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean 
       <span
         aria-hidden
         className={cn(
-          "absolute right-[2px] bottom-[2px] flex h-[25px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[13px] font-bold leading-none text-white",
+          // "Go" 字标经 .zcode-go-badge-mark::after 承载（styles.css）：CSS content
+          // 不进 textContent/无障碍文本——静默启动态的上游合约要求零可见文本。
+          "zcode-go-badge-mark absolute right-[2px] bottom-[2px] flex h-[25px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[13px] font-bold leading-none text-white",
           // 跟随 Z 的忽明忽暗：同 begin/dur/values（SMIL 线性 ↔ CSS 线性关键帧）。
           animated && "[animation:zcode-go-badge-pulse_1.8s_linear_3s_infinite]",
         )}
-      >
-        Go
-      </span>
+      />
     </div>
   );
 }
 
-function ZCodeStartupLogo({
+export function ZCodeStartupLogo({
   className,
   animated = true,
 }: {

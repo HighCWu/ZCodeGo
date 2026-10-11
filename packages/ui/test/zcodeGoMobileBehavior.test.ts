@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { computeViewportTier } from "../src/hooks/useViewportTier.js";
 import { resolveComposerAutoFocus } from "../src/v4/composer/composerAutoFocus.js";
 import { shouldOfferSideSlashCommand } from "../src/slashCommandHelpers.js";

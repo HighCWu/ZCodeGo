@@ -8,6 +8,7 @@ import {
   DEFAULT_ENABLED_OFFICIAL_PLUGIN_IDS,
   ZCODE_OFFICIAL_PLUGIN_MARKETPLACE_ID,
   modelSelectionSchema,
+  type SubagentRuntimeConfig,
   type AgentCreateParams,
   type AgentDeleteParams,
   type AgentDiagnostic,
@@ -42,6 +43,8 @@ import {
   scanOfficialPluginCacheRoots,
 } from "@zcode/shared/node";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
+
+import { createSubagentRuntimeConfigCache } from "./subagentRuntimeConfig.js";
 
 const subagentLogger = createServiceLogger("subagents");
 
@@ -163,9 +166,13 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function readAgentStateFile(options?: SubagentsServiceOptions): Promise<AgentsStateFile> {
-  await migrateSubagentStateFile(await resolveSubagentStateFile(options));
+  return readAgentStateAtPath(await resolveSubagentStateFile(options));
+}
+
+async function readAgentStateAtPath(stateFile: string): Promise<AgentsStateFile> {
+  await migrateSubagentStateFile(stateFile);
   try {
-    const raw = await readFile(await resolveSubagentStateFile(options), "utf-8");
+    const raw = await readFile(stateFile, "utf-8");
     const parsed = JSON.parse(raw) as {
       builtInModelSelectionOverrides?: unknown;
       pluginAgentModelSelectionOverrides?: unknown;
@@ -186,8 +193,11 @@ async function readAgentStateFile(options?: SubagentsServiceOptions): Promise<Ag
           )
         : [],
     };
-  } catch {
-    return emptyAgentsState();
+  } catch (error) {
+    // 文件缺失/损坏沿用既有空覆盖语义；IO 失败不能伪装为空配置并重新启用已禁用 agent。
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT")
+      return emptyAgentsState();
+    throw error;
   }
 }
 
@@ -254,7 +264,7 @@ async function discoverFileAgents(params: {
   return agents;
 }
 
-async function collectAgentMarkdownPaths(rootPath: string): Promise<string[]> {
+async function collectAgentMarkdownPaths(rootPath: string, recursive = false): Promise<string[]> {
   if (!(await exists(rootPath))) {
     return [];
   }
@@ -269,7 +279,8 @@ async function collectAgentMarkdownPaths(rootPath: string): Promise<string[]> {
   for (const entry of entries) {
     const entryPath = join(rootPath, entry.name);
     if (entry.isDirectory()) {
-      result.push(...(await collectAgentMarkdownPaths(entryPath)));
+      // 自定义 profile 只支持第一层；插件保留已有递归发现规则。
+      if (recursive) result.push(...(await collectAgentMarkdownPaths(entryPath, true)));
       continue;
     }
     if (entry.isFile() && /\.(md|markdown)$/iu.test(entry.name)) {
@@ -481,7 +492,7 @@ function isInstalledPluginRecord(value: unknown): value is InstalledPluginRecord
 async function collectPluginAgentMarkdownPaths(rootPath: string): Promise<string[]> {
   const manifest = await readPluginManifest(rootPath);
   const roots = collectPluginAgentRoots(rootPath, manifest?.agents);
-  const paths = await Promise.all(roots.map((root) => collectAgentMarkdownPaths(root)));
+  const paths = await Promise.all(roots.map((root) => collectAgentMarkdownPaths(root, true)));
   return paths.flat().sort((left, right) => left.localeCompare(right));
 }
 
@@ -548,11 +559,20 @@ function normalizeBuiltInSelectionOverrides(
 }
 
 export function createSubagentsService(options?: SubagentsServiceOptions): ISubagentsService & {
-  /** Host 启动 Agent 前的一次性存储导入，不暴露为 Renderer RPC。 */
-  prepareRuntimeState(): Promise<void>;
+  /** Host 启动/重启 Agent 前准备配置，不暴露为 Renderer RPC。 */
+  prepareRuntimeState(workspace?: {
+    workspacePath: string;
+    workspaceIdentity?: string;
+  }): Promise<void>;
+  readRuntimeConfig(workspace: {
+    workspacePath: string;
+    workspaceIdentity?: string;
+  }): Promise<SubagentRuntimeConfig>;
+  disposeAll(): void;
 } {
   let writeQueue = Promise.resolve();
-  const storageOptions: SubagentStorageOptions = {
+  let disposed = false;
+  const storageOptions: SubagentsServiceOptions = {
     homeDir: options?.homeDir,
   };
   // 配置落盘后的 runtime 回收通知：尽力而为，通知失败不影响写盘结果。
@@ -566,18 +586,44 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
     }
   };
 
-  return {
-    async prepareRuntimeState() {
-      const markdownMigration = await migrateUserSubagentMarkdown(
-        await resolveUserSubagentRoot(storageOptions),
-      );
-      for (const failure of markdownMigration.failures)
-        subagentLogger.warn(undefined, "用户 Subagent Markdown 迁移失败，保留原文件", failure);
-      const runImport = async () =>
-        migrateSubagentStateFile(await resolveSubagentStateFile(storageOptions));
-      const queued = writeQueue.then(runImport, runImport);
-      writeQueue = queued.catch(() => {});
-      await queued;
+  const runtimeConfig = createSubagentRuntimeConfigCache({
+    readUserRoot: () => resolveUserSubagentRoot(storageOptions),
+    readStatePath: () => resolveSubagentStateFile(storageOptions),
+    readState: readAgentStateAtPath,
+  });
+  function enqueue<T>(run: () => Promise<T>): Promise<T> {
+    const queued = writeQueue.then(run, run);
+    writeQueue = queued.then(
+      () => {},
+      () => {},
+    );
+    return queued;
+  }
+  function mutate<T>(run: () => Promise<T>): Promise<T> {
+    return enqueue(async () => {
+      if (disposed) throw new Error("Subagents service is disposed");
+      const result = await run();
+      // 配置落盘成功即通知 runtime 回收（zcode-go：覆盖原先散落的各写后通知点）
+      notifyRuntimeAffectingChange();
+      return result;
+    });
+  }
+  const service = {
+    readRuntimeConfig: runtimeConfig.read,
+    disposeAll() {
+      disposed = true;
+      runtimeConfig.dispose();
+    },
+    async prepareRuntimeState(workspace?: { workspacePath: string; workspaceIdentity?: string }) {
+      return enqueue(async () => {
+        const markdownMigration = await migrateUserSubagentMarkdown(
+          await resolveUserSubagentRoot(storageOptions),
+        );
+        for (const failure of markdownMigration.failures)
+          subagentLogger.warn(undefined, "用户 Subagent Markdown 迁移失败，保留原文件", failure);
+        // state 的迁移由缓存读取入口统一执行，IO 失败同样发布回退，不能提前阻断 CLI 启动。
+        await runtimeConfig.prepare(workspace);
+      });
     },
 
     async list(params: {
@@ -659,10 +705,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
         await writeAgentStateFile(state, storageOptions);
       };
 
-      const queued = writeQueue.then(runUpdate, runUpdate);
-      writeQueue = queued.catch(() => {});
-      await queued;
-      notifyRuntimeAffectingChange();
+      await mutate(runUpdate);
     },
 
     async setBuiltInModelOverride(params: BuiltInSubagentModelOverrideParams): Promise<void> {
@@ -686,10 +729,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
         );
       };
 
-      const queued = writeQueue.then(runUpdate, runUpdate);
-      writeQueue = queued.catch(() => {});
-      await queued;
-      notifyRuntimeAffectingChange();
+      await mutate(runUpdate);
     },
 
     async setPluginAgentModelOverride(params: PluginSubagentModelOverrideParams): Promise<void> {
@@ -706,10 +746,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
           storageOptions,
         );
       };
-      const queued = writeQueue.then(runUpdate, runUpdate);
-      writeQueue = queued.catch(() => {});
-      await queued;
-      notifyRuntimeAffectingChange();
+      await mutate(runUpdate);
     },
 
     async getPrimaryUserAgentsDirectory(_params: { provider: ZCodeProvider }): Promise<{
@@ -739,8 +776,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       const agent = parseSavedAgent(content, filePath, scope, params.workspacePath);
       // 先验证即将写入的 Markdown 可解析，避免 serializer 回归时把坏 profile 落盘。
       await writeFile(filePath, content, { encoding: "utf-8", flag: "wx" });
-      notifyRuntimeAffectingChange();
-      return { agent };
+      return { agent };return { agent };
     },
 
     async updateAgent(params: AgentUpdateParams): Promise<{ agent: AgentSummary }> {
@@ -769,8 +805,7 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       if (params.oldFilePath && params.oldFilePath !== filePath) {
         await rm(params.oldFilePath, { force: true });
       }
-      notifyRuntimeAffectingChange();
-      return { agent };
+      return { agent };return { agent };
     },
 
     async deleteAgent(params: AgentDeleteParams): Promise<void> {
@@ -781,8 +816,13 @@ export function createSubagentsService(options?: SubagentsServiceOptions): ISuba
       disabledSet.delete(params.agentId);
       state.disabledAgentIds = [...disabledSet].sort();
       await writeAgentStateFile(state, storageOptions);
-      notifyRuntimeAffectingChange();
     },
+  };
+  return {
+    ...service,
+    createAgent: (params: AgentCreateParams) => mutate(() => service.createAgent(params)),
+    updateAgent: (params: AgentUpdateParams) => mutate(() => service.updateAgent(params)),
+    deleteAgent: (params: AgentDeleteParams) => mutate(() => service.deleteAgent(params)),
   };
 }
 
@@ -826,7 +866,7 @@ async function migrateDisabledAgentId(
   }
   disabledSet.delete(previousAgentId);
   disabledSet.add(nextAgentId);
-  await writeAgentStateFile(
+  return writeAgentStateFile(
     {
       ...state,
       disabledAgentIds: [...disabledSet].sort(),

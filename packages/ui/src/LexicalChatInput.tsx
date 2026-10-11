@@ -58,6 +58,7 @@ import {
 import { logger } from "./logger.js";
 import { recordInputLag } from "./lib/uiPerfArmsTelemetry.js";
 import { navigatePromptHistory } from "./lib/promptHistory.js";
+import { resolveMobileInputTextSizeClassName } from "@/lib/mobileTextInput.js";
 import type { MentionItemData } from "@/mentions/mentionTypes.js";
 import type { ComposerMentionPrefill } from "@/store/zcodeSessionStoreTypes.js";
 
@@ -112,7 +113,7 @@ interface LexicalModifiedEnterSubmitOptions {
   text: string;
 }
 
-type LexicalSubmitResult = boolean | void;
+export type LexicalSubmitResult = boolean | void;
 
 interface LeadingChineseSlashAliasInputOptions {
   data: string | null;
@@ -126,7 +127,7 @@ const STANDARD_SLASH_TRIGGER = "/";
 
 import { HISTORY_NAVIGATION_UPDATE_TAG, PROGRAMMATIC_UPDATE_TAG } from "./lib/editorUpdateTags.js";
 
-function shouldSubmitLexicalEnter({
+export function shouldSubmitLexicalEnter({
   allowSubmitWhenEmpty = false,
   ctrlKey = false,
   enterSubmits,
@@ -144,7 +145,7 @@ function shouldSubmitLexicalEnter({
   return Boolean(text.trim() || allowSubmitWhenEmpty);
 }
 
-function shouldSubmitLexicalModifiedEnter({
+export function shouldSubmitLexicalModifiedEnter({
   allowSubmitWhenEmpty = false,
   ctrlKey = false,
   isComposing = false,
@@ -162,11 +163,11 @@ function shouldSubmitLexicalModifiedEnter({
   );
 }
 
-function shouldResetLexicalEditorAfterSubmit(result: LexicalSubmitResult): boolean {
+export function shouldResetLexicalEditorAfterSubmit(result: LexicalSubmitResult): boolean {
   return result !== false;
 }
 
-function shouldNormalizeLeadingChineseSlashAliasInput({
+export function shouldNormalizeLeadingChineseSlashAliasInput({
   data,
   inputType,
   isAtEditorStart,
@@ -247,7 +248,7 @@ function replaceEditorTextWithPluginMentions(editor: LexicalEditor, text: string
   );
 }
 
-function replaceEditorWithMention(
+export function replaceEditorWithMention(
   editor: LexicalEditor,
   mention: ComposerMentionPrefill,
   trailingText = " ",
@@ -273,7 +274,7 @@ function replaceEditorWithMention(
  * 不能通过 getMarkdown → setMention 重建：setMention 是替换型预填，会把旧 mention
  * 序列化后作为普通 TextNode 放回编辑器，导致已有 Plugin / 文件 / Skill chip 降级。
  */
-function prependEditorMentionIfMissing(
+export function prependEditorMentionIfMissing(
   editor: LexicalEditor,
   mention: ComposerMentionPrefill,
 ): boolean {
@@ -907,8 +908,7 @@ function E2ELexicalInputBridgePlugin({ inputTestId }: { inputTestId?: string }) 
       getEditorState: () => editor.getEditorState(),
       getText: () => getEditorMarkdown(editor.getEditorState()),
       setText: (text: string) => replaceEditorText(editor, text),
-      setTextWithPluginMentions: (text: string) =>
-        replaceEditorTextWithPluginMentions(editor, text),
+      setTextWithPluginMentions: (text: string) => replaceEditorTextWithPluginMentions(editor, text),
       setEditorStateJson: (editorStateJson: string) =>
         replaceEditorStateJson(editor, editorStateJson),
     };
@@ -1229,7 +1229,7 @@ function PasteCapturePlugin({
 }
 
 /** 暴露 focus / clear / getText 给外部 */
-function insertEditorMention(
+export function insertEditorMention(
   editor: LexicalEditor,
   mention: ComposerMentionPrefill,
   selectionState?: EditorState,
@@ -1288,8 +1288,7 @@ function EditorApiPlugin({
       setMention: (mention, trailingText) =>
         replaceEditorWithMention(editor, mention, trailingText),
       setText: (text: string) => replaceEditorText(editor, text),
-      setTextWithPluginMentions: (text: string) =>
-        replaceEditorTextWithPluginMentions(editor, text),
+      setTextWithPluginMentions: (text: string) => replaceEditorTextWithPluginMentions(editor, text),
       setEditorStateJson: (editorStateJson: string) =>
         replaceEditorStateJson(editor, editorStateJson),
       setSkillMention: (skillName: string, markdown = `$${skillName}`, trailingText = " ") =>
@@ -1328,6 +1327,7 @@ interface LexicalChatInputProps {
   inputTestId?: string;
   editorApiRef?: React.MutableRefObject<LexicalChatInputHandle | null>;
   promptHistory?: readonly string[];
+  avoidIosInputFocusZoom?: boolean;
   compactPlaceholder?: boolean;
   onWhiteboardMentionSelected?: (boardId: string) => void | Promise<void>;
   onPaste?: (event: ChatComposerPasteEvent) => void;
@@ -1360,6 +1360,7 @@ export function LexicalChatInput({
   inputTestId,
   editorApiRef,
   promptHistory = [],
+  avoidIosInputFocusZoom = false,
   compactPlaceholder = false,
   onWhiteboardMentionSelected,
   onPaste,
@@ -1448,7 +1449,11 @@ export function LexicalChatInput({
         "aria-placeholder": placeholder,
         placeholder: (
           <div
-            className={`pointer-events-none absolute left-0 top-0 ${compactPlaceholder ? "line-clamp-2" : ""} ${inputTypographyClass} text-foreground-subtlest`}
+            className={`pointer-events-none absolute left-0 top-0 ${compactPlaceholder ? "line-clamp-2" : ""} ${resolveMobileInputTextSizeClassName(
+              {
+                avoidIosInputFocusZoom,
+              },
+            )} text-foreground-subtlest`}
           >
             {placeholder}
           </div>
@@ -1460,9 +1465,11 @@ export function LexicalChatInput({
 
   const contentEditable = (
     <ContentEditable
-      // mention node 使用固定行高的 inline-flex chip，普通正文如果继承浏览器 normal line-height，
-      // 在 token 后继续输入文字时会按不同 line box 计算基线；这里显式收口正文行高。
-      className={`min-h-10 max-h-40 overflow-y-auto ${inputTypographyClass} text-foreground outline-none`}
+      // Bugfix: mention node 使用固定行高的 inline-flex chip，普通正文如果继承浏览器 normal line-height，
+      // 在 token 后继续输入文字时会按不同 line box 计算基线；这里显式收口正文行高，并允许手机远控使用 16px 防止 iOS 聚焦放大。
+      className={`min-h-10 max-h-40 overflow-y-auto ${resolveMobileInputTextSizeClassName({
+        avoidIosInputFocusZoom,
+      })} text-foreground outline-none`}
       data-testid={inputTestId}
       onFocus={onFocus}
       {...contentEditableProps}
