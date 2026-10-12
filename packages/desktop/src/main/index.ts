@@ -181,7 +181,6 @@ import {
   handleDesktopWindowCloseRequest,
 } from "./desktopWindowLifecycle.js";
 import {
-  initZCodeGoTakeover,
   enterZCodeGo,
   isZCodeGoTakeoverEnabled,
 } from "./zcodeGoTakeover.js";
@@ -2837,48 +2836,18 @@ app.whenReady().then(async () => {
   logger.info("[startup] 创建主窗口");
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
 
-  // zcode-go 接管模式：写就绪标记、监听 SHOW 信号、准备悬浮气泡。
-  // zcode-go 接管初始化：职责内联（zcodeGoTakeover.ts 工作区被外部进程反复
-  // 改写、init 导出不稳定——index.ts 直接管，仅引用其稳定导出）。
-  if (isZCodeGoTakeoverEnabled()) {
-    try {
-      mkdirSync(join(homedir(), ".zcode-go"), { recursive: true });
-      writeFileSync(ZCODE_GO_DESKTOP_PID_FILE, String(process.pid), "utf8");
-    } catch (error) {
-      logger.warn("[zcode-go] 写 desktop.pid 失败", error);
-    }
-    try {
-      zcodeGoShowWatcher = watch(join(homedir(), ".zcode-go"), (_event, filename) => {
-        if (filename === "SHOW") handleZcodeGoShowSignal();
-      });
-      zcodeGoShowWatcher.on("error", () => {
-        /* 目录被删等：编排的 SHOW 信号退化为下次启动处理 */
-      });
-    } catch {
-      /* 忽略 */
-    }
-    app.on("will-quit", () => {
-      try {
-        if (existsSync(ZCODE_GO_SHOW_FILE)) unlinkSync(ZCODE_GO_SHOW_FILE);
-      } catch {
-        /* 忽略 */
-      }
-      zcodeGoShowWatcher?.close();
-    });
-    // 编排可能在 watcher 就绪前已触碰 SHOW
-    if (existsSync(ZCODE_GO_SHOW_FILE)) handleZcodeGoShowSignal();
-    // 接管意图即启动即退官方：稍缓 800ms 让主窗先上屏。
-    // 「触发后关闭官版」关闭时（设置页 ZCode Go），enterZCodeGo 按设置共存。
-    setTimeout(() => {
-      void enterZCodeGo();
-    }, 800);
-    // 孤儿任务清扫（/zcode-go 空会话删除与 syncer 插行的时序竞态收敛）。
-    scheduleOrphanTaskSweeps({
-      info: (message, extra) => logger.info(message, extra),
-      warn: (message, extra) => logger.warn(message, extra),
-    });
-    logger.info("[zcode-go] takeover 模式就绪", { pid: process.pid });
-  }
+  // zcode-go 接管初始化：pid 写入、SHOW watcher、800ms enterZCodeGo、孤儿清扫
+  // 全部收敛回 zcodeGoTakeover.ts 的 initZcodeGoTakeover（此前内联版漏设模块
+  // context，enterZCodeGo 的 guard 恒 return——官方进程不退出）。
+  initZcodeGoTakeover({
+    // getAllWindows 顺序未定义：显式排除气泡窗口，取真正的应用主窗
+    getMainWindow: () =>
+      getApplicationWindowsExcludingCuaIndicator().find((win) => win !== updateStatusWindow) ?? null,
+    logger,
+    // 设置页「ZCode Go → 触发后关闭官版」（缺省 true = 退出官版）
+    shouldCloseOfficialZcode: async () =>
+      (await mainSettingService.get()).zcodeGoTakeoverCloseOfficial !== false,
+  });
 
   // zcode-go 分叉裁剪：fork ack 后对子会话存储剔除压缩前惰性历史（不依赖接管模式）。
   ipcMain.handle(PlatformChannels.ZcodeGoTrimForkedSessionHistory, (_event, payload: unknown) => {

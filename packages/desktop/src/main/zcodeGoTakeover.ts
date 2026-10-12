@@ -18,7 +18,7 @@
  */
 import { app, BrowserWindow } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { scheduleOrphanTaskSweeps } from "./zcodeGoTaskSweep.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +49,15 @@ interface TakeoverContext {
 let context: TakeoverContext | null = null;
 let showWatcher: ReturnType<typeof watch> | null = null;
 let switching = false;
+
+/** 接管诊断通道：直写文件（绕开 stdout 缓冲），定位触发链卡点。 */
+function takeoverDebug(msg: string): void {
+  try {
+    appendFileSync(join(ZCODE_GO_DIR, "takeover-debug.log"), `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    /* 诊断失败不影响主流程 */
+  }
+}
 
 export function isZCodeGoTakeoverEnabled(): boolean {
   const value = process.env.ZCODE_GO_TAKEOVER;
@@ -213,8 +222,10 @@ export async function killOfficialProcesses(): Promise<boolean> {
 
 /** 接管完成：显示自己 + 退出原版（SHOW 信号触发；不再隐藏/气泡共存）。 */
 export async function enterZCodeGo(): Promise<void> {
+  takeoverDebug(`enter: 进入 context=${Boolean(context)} switching=${switching}`);
   if (!context || switching) return;
   switching = true;
+  takeoverDebug("enter: 通过 guard");
   try {
     const main = context.getMainWindow();
     if (main && !main.isDestroyed()) {
@@ -223,8 +234,10 @@ export async function enterZCodeGo(): Promise<void> {
       main.focus();
     }
     // 设置页「ZCode Go → 触发后关闭官版」：关闭时与官版共存运行（不再退官方）。
+    takeoverDebug("enter: show 完成，读取设置");
     context.logger.info("[zcode-go] enterZCodeGo：读取关闭官版设置");
-    const closeOfficial = (await context.shouldCloseOfficialZcode?.()) ?? true;
+    const closeOfficial = (await Promise.race([context.shouldCloseOfficialZcode?.() ?? true, new Promise((resolve) => setTimeout(() => resolve(true), 5000))])) ?? true;
+    takeoverDebug(`enter: 设置读取完成 closeOfficial=${closeOfficial}`);
     context.logger.info("[zcode-go] enterZCodeGo：closeOfficial=" + closeOfficial);
     if (closeOfficial) {
       context.logger.info("[zcode-go] enterZCodeGo：开始退出官版进程");
@@ -239,6 +252,7 @@ export async function enterZCodeGo(): Promise<void> {
 }
 
 function handleShowSignal(): void {
+  takeoverDebug("SHOW 信号触发");
   try {
     if (existsSync(SHOW_FILE)) unlinkSync(SHOW_FILE);
   } catch {
@@ -286,5 +300,6 @@ export function initZCodeGoTakeover(options: TakeoverContext): void {
     info: (message, extra) => options.logger.info(message, extra),
     warn: (message, extra) => options.logger.warn(message, extra),
   });
+  takeoverDebug("init: 完成（800ms 定时器已注册）");
   options.logger.info("[zcode-go] takeover 模式就绪", { pid: process.pid });
 }
