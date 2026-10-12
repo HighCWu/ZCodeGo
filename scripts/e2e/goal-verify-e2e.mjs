@@ -397,6 +397,7 @@ try {
     })()`);
     console.log("onboarding stuck dump:", dump);
     // renderer 取证：注入错误监听 + 主资源清单（CI-only 空白页的定位依据）
+    console.log("onboarding stuck console:", c.consoleLines().slice(-15).join("\n") || "(empty)");
     console.log("onboarding stuck forensics:", await ev(`(async () => {
       try {
         const res = performance.getEntriesByType("resource").map(r => r.name.split("/").pop() + "@" + r.transferSize).slice(0, 20);
