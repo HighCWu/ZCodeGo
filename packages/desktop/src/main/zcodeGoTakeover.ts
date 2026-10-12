@@ -223,8 +223,11 @@ export async function enterZCodeGo(): Promise<void> {
       main.focus();
     }
     // 设置页「ZCode Go → 触发后关闭官版」：关闭时与官版共存运行（不再退官方）。
+    context.logger.info("[zcode-go] enterZCodeGo：读取关闭官版设置");
     const closeOfficial = (await context.shouldCloseOfficialZcode?.()) ?? true;
+    context.logger.info("[zcode-go] enterZCodeGo：closeOfficial=" + closeOfficial);
     if (closeOfficial) {
+      context.logger.info("[zcode-go] enterZCodeGo：开始退出官版进程");
       await killOfficialProcesses();
       context.logger.info("[zcode-go] enterZCodeGo 完成（原版已退出，zcode-go 独立运行）");
     } else {

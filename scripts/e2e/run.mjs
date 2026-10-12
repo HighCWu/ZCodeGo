@@ -747,7 +747,9 @@ if (!skipLaunch) {
       // bare /zcode-go → SHOW → enterZCodeGo（定版：显示自己 + 官方进程全部退出）
       const bare = hookFeed("/zcode-go");
       check("gui: bare /zcode-go 即时回复", bare.stdout.includes("正在切换"));
-      const entered = await waitLog("enterZCodeGo 完成（原版已退出");
+      // enterZCodeGo 流程含 3s SIGTERM 宽限 + kill 全流程，慢 runner 上 20s 偏紧，
+      // 放宽到 45s（标记协议不变）。
+      const entered = await waitLog("enterZCodeGo 完成（原版已退出", 45_000);
       check("gui: SHOW → enterZCodeGo 完成（官方进程退出，日志标记）", entered.ok, entered.detail);
       check("gui: SHOW 已被桌面消费", !existsSync(join(stateDir, "SHOW")));
       await settle(600);
