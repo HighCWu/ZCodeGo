@@ -182,6 +182,7 @@ import {
 } from "./desktopWindowLifecycle.js";
 import {
   enterZCodeGo,
+  initZCodeGoTakeover,
   isZCodeGoTakeoverEnabled,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
@@ -2837,9 +2838,9 @@ app.whenReady().then(async () => {
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
 
   // zcode-go 接管初始化：pid 写入、SHOW watcher、800ms enterZCodeGo、孤儿清扫
-  // 全部收敛回 zcodeGoTakeover.ts 的 initZcodeGoTakeover（此前内联版漏设模块
+  // 全部收敛回 zcodeGoTakeover.ts 的 initZCodeGoTakeover（此前内联版漏设模块
   // context，enterZCodeGo 的 guard 恒 return——官方进程不退出）。
-  initZcodeGoTakeover({
+  initZCodeGoTakeover({
     // getAllWindows 顺序未定义：显式排除气泡窗口，取真正的应用主窗
     getMainWindow: () =>
       getApplicationWindowsExcludingCuaIndicator().find((win) => win !== updateStatusWindow) ?? null,
