@@ -176,7 +176,7 @@ import {
 } from "./desktopWindowLifecycle.js";
 import {
   initZCodeGoTakeover,
-  enterZcodeGo,
+  enterZCodeGo,
   isZcodeGoTakeoverEnabled,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
@@ -792,7 +792,7 @@ const handleZcodeGoShowSignal = (): void => {
   } catch {
     /* 忽略 */
   }
-  void enterZcodeGo();
+  void enterZCodeGo();
 };
 const webRemoteControlCredentialService = createCredentialService();
 const appLaunchGate = createAppLaunchGate();
@@ -2862,9 +2862,9 @@ app.whenReady().then(async () => {
     // 编排可能在 watcher 就绪前已触碰 SHOW
     if (existsSync(ZCODE_GO_SHOW_FILE)) handleZcodeGoShowSignal();
     // 接管意图即启动即退官方：稍缓 800ms 让主窗先上屏。
-    // 「触发后关闭官版」关闭时（设置页 ZCode Go），enterZcodeGo 按设置共存。
+    // 「触发后关闭官版」关闭时（设置页 ZCode Go），enterZCodeGo 按设置共存。
     setTimeout(() => {
-      void enterZcodeGo();
+      void enterZCodeGo();
     }, 800);
     // 孤儿任务清扫（/zcode-go 空会话删除与 syncer 插行的时序竞态收敛）。
     scheduleOrphanTaskSweeps({
