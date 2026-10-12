@@ -2046,8 +2046,12 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
           // main 执行 fork 事务（host 侧已设派发门闩，redirect 落盘即放行）。
           onZcodeGoSilentForkArm: (event) => {
             const createdBy = event.createdBy ?? "auto-compaction";
+            logger.info("[zcode-go-silent-fork] arm 送达 main（开始执行事务）", {
+              sessionId: event.sessionId,
+              createdBy,
+            });
             const attempt = () =>
-        executeZcodeGoSilentForkTransaction(event.sessionId, createdBy, zcodeGoForkDeps);
+              executeZcodeGoSilentForkTransaction(event.sessionId, createdBy, zcodeGoForkDeps);
             const reportFailure = (error?: string) => {
               logger.warn("[zcode-go-silent-fork] 自动触发失败，回落原会话继续", {
                 sessionId: event.sessionId,
@@ -2058,7 +2062,17 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
             };
             const benign = (error?: string) =>
               error === "no active compaction boundary" || error === "no fresh compaction boundary";
-            const result = attempt();
+            let result: { ok: boolean; forkSessionId?: string; error?: string };
+            try {
+              result = attempt();
+            } catch (error) {
+              // 执行器同步异常不能静默吞掉（否则 main 无任何痕迹、e2e 只看到超时）
+              logger.warn("[zcode-go-silent-fork] 执行器同步异常", {
+                sessionId: event.sessionId,
+                error: error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error),
+              });
+              result = { ok: false, error: `executor-throw:${String(error)}` };
+            }
             // 良性拒绝（无新鲜边界/无边界）今天完全静默——轮换链排障时不可见，
             // 低频（每次 arm 至多一条）留痕。
             if (!result.ok && benign(result.error)) {
