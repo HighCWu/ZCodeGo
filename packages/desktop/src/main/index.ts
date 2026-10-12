@@ -72,6 +72,7 @@ import {
   getZcodeGoSessionRedirect,
   setZcodeGoSessionRedirect,
 } from "@zcode/services/node";
+import { executeZcodeGoSilentForkTransaction } from "./zcodeGoSilentForkTransaction.js";
 import {
   desktopMenuMessageIds,
   type Locale,

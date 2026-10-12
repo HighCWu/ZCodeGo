@@ -66,6 +66,19 @@ zcodeGoUiAutoRecovery.ts、zcode-go.css、i18n/locales/zcode-go-{zh-CN,en-US}.ts
    `packages/desktop/src/preload/` 对 `contextBridge.`/新 Electron API 的
    使用，逐一在 zcodeGoMobileBridge.ts 伪造对象补 no-op 实现。
 
+## ⚠️ 关键盲区：packages/desktop/src/main 与 src/preload 不在 typecheck 覆盖内
+
+`pnpm run typecheck` 对 desktop 只含 tsconfig.host.json + tsconfig.e2e.json
+（host/e2e 侧），**src/main 与 src/preload 由 tsup/esbuild 直接构建，tsc 不查**。
+后果（三轮实证）：漏 import、未定义标识符在这两个目录里 typecheck 全绿，
+只有运行时炸。改这两个目录后必须：
+1. `cd packages/desktop && npx tsup`（构建成功 ≠ 可运行）；
+2. grep 构建产物验证新符号真的在 bundle 里；
+3. 跑相关 e2e（silent-fork-auto 覆盖 main 的 fork 链；fresh-model 覆盖
+   preload/renderer 链）。
+另外：脚本化插 import 后必须 `grep` 验证 import 行真的落盘——锚串与实际
+写法（单行 vs 多行块）不符时 replace 静默 no-op（三轮同模式踩坑）。
+
 ## 新增 zcode-go 功能的规范
 
 - 一律新文件；对上游文件最多加「import + 调用行」两段插入，注释锚统一
