@@ -35,6 +35,7 @@ import { logger } from "@/logger.js";
 import { getBotProviderRegionTagLabelId } from "@/botsUi.js";
 // zcode-go：P2P 直连区为独立子组件（新文件，门控点仅此 import + 渲染行）
 import { ZcodeGoMobileBridgeSection } from "@/zcodeGoMobileBridgeSection.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
 
 type RemoteControlBotProvider = Extract<
   BotProvider,
@@ -275,6 +276,23 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
 }) {
   const platform = usePlatform();
   const confirmDialog = useConfirmDialog();
+  // zcode-go：P2P 直连区开关（设置页「ZCode Go」；关闭后弹层仅保留官方 relay）。
+  // useOptionalServices + 局部快照：上游测试以无 Service 环境静态渲染本弹层，
+  // 服务缺失视为启用（默认形态），不阻断渲染。
+  const zcodeGoServices = useOptionalServices();
+  const [zcodeGoP2pBridgeEnabled, setZcodeGoP2pBridgeEnabled] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void zcodeGoServices?.settingService
+      ?.get()
+      .then((settings) => {
+        if (!cancelled) setZcodeGoP2pBridgeEnabled(settings.zcodeGoP2pMobileBridge !== false);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [zcodeGoServices]);
   const { intl } = useZCodeIntl();
   const [status, setStatus] = useState<WebRemoteControlStatus>({
     status: "idle",
@@ -873,7 +891,7 @@ export const WebRemoteControlDialog = memo(function WebRemoteControlDialogCompon
                 </div>
               </section>
             </div>
-            <ZcodeGoMobileBridgeSection />
+            {zcodeGoP2pBridgeEnabled ? <ZcodeGoMobileBridgeSection /> : null}
           </div>
         </DialogContent>
       </Dialog>

@@ -486,6 +486,11 @@ const appSettingsObjectSchema = z.object({
   // default(false)：新装与存量用户首次启动都视为未归位，由 main 进程按平台决定是否迁移。
   closeToTrayLinuxMigrationInitialized: z.boolean().default(false),
   keepAwakeWhileRunning: z.boolean().default(false),
+  /* zcode-go 功能开关（设置页「ZCode Go」板块；全部默认启用，用户可逐项关闭） */
+  zcodeGoP2pMobileBridge: z.boolean().default(true),
+  zcodeGoHoverForkDualSession: z.boolean().default(true),
+  zcodeGoMobileDrawerViewport: z.boolean().default(true),
+  zcodeGoUiAutoRecovery: z.boolean().default(true),
   desktopZoomLevel: desktopZoomLevelSchema.optional(),
   desktopWindowSize: desktopWindowSizeSchema.optional(),
   desktopChromiumHardwareAccelerationEnabled: z.boolean().default(true),
@@ -561,6 +566,10 @@ export const appSettingsPatchSchema = z.object({
   taskAutoArchiveOlderThanDays: z.number().int().positive().max(365).optional(),
   closeToTrayOnWindows: z.boolean().optional(),
   keepAwakeWhileRunning: z.boolean().optional(),
+  zcodeGoP2pMobileBridge: z.boolean().optional(),
+  zcodeGoHoverForkDualSession: z.boolean().optional(),
+  zcodeGoMobileDrawerViewport: z.boolean().optional(),
+  zcodeGoUiAutoRecovery: z.boolean().optional(),
   closeToTrayOnWindowsMigrationInitialized: z.boolean().optional(),
   closeToTrayLinuxMigrationInitialized: z.boolean().optional(),
   desktopZoomLevel: desktopZoomLevelSchema.optional(),

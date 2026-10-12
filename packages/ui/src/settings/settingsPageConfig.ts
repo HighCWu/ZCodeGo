@@ -18,6 +18,7 @@ import {
   WandSparkles,
   Keyboard,
   FileSearch,
+  Puzzle,
 } from "lucide-react";
 import { isSettingsSectionEnabled, type SettingsSectionId } from "@/lib/settingsNavigation.js";
 import type { Theme } from "@/useTheme.js";
@@ -141,6 +142,13 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     id: "shortcuts",
     icon: Keyboard,
     titleId: "settings.shortcuts.title",
+    groupId: "basics",
+  },
+  // zcode-go 功能板块（P2P 远程 / fork 策略 / 界面与稳定性开关）
+  {
+    id: "zcodeGo",
+    icon: Puzzle,
+    titleId: "settings.zcodeGo.title",
     groupId: "basics",
   },
   // 工作区搜索范围（.zcodeignore）：面向所有用户的基础工作区行为配置，收在基础设置末尾。

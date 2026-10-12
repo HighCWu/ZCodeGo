@@ -2985,11 +2985,16 @@ app.whenReady().then(async () => {
   // 共用，见 executeZcodeGoSilentForkTransaction）。
   ipcMain.handle(
     PlatformChannels.ZcodeGoSilentFork,
-    (_event: Electron.IpcMainInvokeEvent, payload: unknown) => {
+    async (_event: Electron.IpcMainInvokeEvent, payload: unknown) => {
       const request = payload as { sessionId?: unknown };
       const sessionId = typeof request?.sessionId === "string" ? request.sessionId : "";
-      // 手动 hover fork = 双会话模型（流式全量）；自动轮换走
+      // 手动 hover fork 默认 = 双会话模型（流式全量）；自动轮换走
       // executeZcodeGoSilentForkTransaction（host arm 路径）——两特性勿混。
+      // 设置页「ZCode Go」可切换手动路径走兼容轮换模型。
+      const settings = await mainSettingService.get();
+      if (settings.zcodeGoHoverForkDualSession === false) {
+        return executeZcodeGoSilentForkTransaction(sessionId, "manual", zcodeGoForkDeps);
+      }
       return executeZcodeGoHoverForkDualSession(sessionId, zcodeGoForkDeps);
     },
   );

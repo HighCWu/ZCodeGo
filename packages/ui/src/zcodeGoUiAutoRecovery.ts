@@ -5,7 +5,9 @@
  * 根级边界直接 reload。会话级滑动额度（每 scope 5 分钟 3 次）防无限循环，
  * 超限退回手动恢复。
  */
+import { useEffect } from "react";
 import { logger } from "@/logger.js";
+import { useSettings } from "@/hooks/useSettingService.js";
 
 // ── zcode-go：UI 崩溃自动恢复 ─────────────────────────────
 // 官方错误边界只提供手动恢复按钮；go 版在崩溃进入 fallback 后自动恢复：
@@ -14,6 +16,16 @@ import { logger } from "@/logger.js";
 // reload。会话级滑动额度（每 scope 5 分钟 3 次）防无限循环，超限退回手动。
 const ZCODE_GO_AUTO_RECOVERY_KEY = "zcodeGoUiAutoRecovery";
 export const ZCODE_GO_AUTO_RECOVERY_DELAY_MS = 8_000;
+
+// 设置页「ZCode Go」开关的运行态镜像（App 挂载时经 useZcodeGoUiAutoRecoverySync
+// 同步；ErrorBoundary 是 class 组件读不到 hook，plan 阶段读本标志短路）。
+let zcodeGoUiAutoRecoveryEnabled = true;
+export function setZcodeGoUiAutoRecoveryEnabled(enabled: boolean): void {
+  zcodeGoUiAutoRecoveryEnabled = enabled;
+}
+export function isZcodeGoUiAutoRecoveryEnabled(): boolean {
+  return zcodeGoUiAutoRecoveryEnabled;
+}
 const ZCODE_GO_AUTO_RECOVERY_WINDOW_MS = 5 * 60_000;
 const ZCODE_GO_AUTO_RECOVERY_MAX = 3;
 
@@ -33,6 +45,9 @@ export function readZcodeGoAutoRecoveryStore(): Record<string, number[]> {
  * scoped 边界第 1 次 reset、后续 reload；App 边界恒 reload。
  */
 export function planZcodeGoAutoRecovery(scope: string, preferReset: boolean): "reset" | "reload" | null {
+  if (!zcodeGoUiAutoRecoveryEnabled) {
+    return null;
+  }
   const now = Date.now();
   const store = readZcodeGoAutoRecoveryStore();
   const history = (store[scope] ?? []).filter((at) => now - at < ZCODE_GO_AUTO_RECOVERY_WINDOW_MS);
@@ -44,4 +59,12 @@ export function planZcodeGoAutoRecovery(scope: string, preferReset: boolean): "r
     /* 隐私模式等 sessionStorage 不可用时退化为本次会话不限额（崩溃循环仍受 8s 延迟约束） */
   }
   return preferReset && history.length === 1 ? "reset" : "reload";
+}
+
+/** 设置同步 hook：App 挂载时把「ZCode Go」设置镜像进本模块运行态标志。 */
+export function useZcodeGoUiAutoRecoverySync(): void {
+  const { settings } = useSettings();
+  useEffect(() => {
+    setZcodeGoUiAutoRecoveryEnabled(settings?.zcodeGoUiAutoRecovery !== false);
+  }, [settings?.zcodeGoUiAutoRecovery]);
 }

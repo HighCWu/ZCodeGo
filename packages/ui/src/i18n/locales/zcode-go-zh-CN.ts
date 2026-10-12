@@ -17,4 +17,13 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "zcodeGo.fork.inProgress": "正在分叉 {count} 条历史（官方分叉完整复制需较长时间；模型上下文从压缩摘要处继续），完成后自动切换…",
   "taskList.openInNewWindow": "在新窗口打开",
   "taskList.openInNewWindowFailed": "在新窗口打开会话失败：{error}",
+  "settings.zcodeGo.title": "ZCode Go",
+  "settings.zcodeGo.p2pBridge": "P2P 直连远程桥",
+  "settings.zcodeGo.p2pBridgeDescription": "远程弹层中启用 ZCode Go 的 WebRTC 直连通道（手机与桌面同网时零中继、不经第三方服务器）。关闭后弹层仅保留官方 relay 入口。",
+  "settings.zcodeGo.hoverForkDualSession": "hover fork 双会话模型",
+  "settings.zcodeGo.hoverForkDualSessionDescription": "手动 fork 时产出可见任务行 + 精简活跃端点 + hover 转接 + 边界前历史后台补齐。关闭后手动 fork 走兼容轮换模型。",
+  "settings.zcodeGo.mobileDrawer": "移动端抽屉视口",
+  "settings.zcodeGo.mobileDrawerDescription": "移动浏览器视口下侧栏以左滑抽屉呈现。关闭后移动视口按桌面布局渲染。",
+  "settings.zcodeGo.uiAutoRecovery": "UI 崩溃自动恢复",
+  "settings.zcodeGo.uiAutoRecoveryDescription": "界面子树崩溃后自动重渲染或整页重载（每区域 5 分钟最多 3 次）。关闭后仅提供手动恢复按钮。",
 };

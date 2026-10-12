@@ -91,6 +91,24 @@ v3.15.1 合并时 index.ts 出现两个 `ZcodeGoSilentFork` handler（Electron �
 另外：脚本化插 import 后必须 `grep` 验证 import 行真的落盘——锚串与实际
 写法（单行 vs 多行块）不符时 replace 静默 no-op（三轮同模式踩坑）。
 
+## 设置页「ZCode Go」板块（功能开关）
+
+四个功能开关（settings 页侧边栏「ZCode Go」，全部默认启用）：
+| 设置键 | 门控点 |
+|---|---|
+| zcodeGoP2pMobileBridge | WebRemoteControlDialog 的 P2P 直连区渲染（useOptionalServices 局部快照；关闭=弹层仅官方 relay） |
+| zcodeGoHoverForkDualSession | index.ts 手动 IPC 路由（false=手动 fork 走兼容轮换模型；arm 自动路径恒为轮换） |
+| zcodeGoMobileDrawerViewport | WorkspaceShellLayout 的 isMobileViewport（false=移动视口按桌面布局） |
+| zcodeGoUiAutoRecovery | zcodeGoUiAutoRecovery 运行态标志（App 挂载时经 useZcodeGoUiAutoRecoverySync 同步；false=错误边界仅手动恢复） |
+
+存储走上游 AppSettings（validationAppSettings 主/patch schema + protocol.ts
+接口，三处纯新增键）；UI 在 settings/ZcodeGoSettingsSection.tsx（新文件），
+上游触碰 = settingsPageConfig 条目 + settingsNavigation union + SettingsPage
+render 三处小插入；文案在 zcode-go-{locale}.ts spread 文件。
+**新增功能开关照此模式**：schema 三处加键 → 板块组件加行 → 门控点读
+`settings?.key !== false`（无 Provider 环境用 useOptionalServices 局部快照，
+缺失视为启用；class 组件用运行态标志 + 挂载同步 hook）。
+
 ## 新增 zcode-go 功能的规范
 
 - 一律新文件；对上游文件最多加「import + 调用行」两段插入，注释锚统一

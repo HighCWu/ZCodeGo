@@ -79,6 +79,8 @@ import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSectio
 import { MemorySettingsSection } from "@/settings/MemorySettingsSection.js";
 import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
+// zcode-go 设置板块（新文件，门控点 = import + render 一行）
+import { ZcodeGoSettingsSection } from "@/settings/ZcodeGoSettingsSection.js";
 import { ShortcutSettingsSection } from "@/settings/ShortcutSettingsSection.js";
 import { MigrationSection } from "@/settings/MigrationSection.js";
 import { SETTINGS_FRAME_CONTENT_CLASSNAME } from "@/settings/SettingsPageParts.js";
@@ -2005,7 +2007,9 @@ export function SettingsPage({
                             remoteTarget={activeWorkspaceTab?.remoteTarget}
                             localWorkspacePath={activeWorkspaceTab?.localWorkspacePath}
                           />
-                        ) : null}
+                                                ) : activeSection === "zcodeGo" ? (
+                          <ZcodeGoSettingsSection />
+) : null}
                       </div>
                     </div>
                   </main>

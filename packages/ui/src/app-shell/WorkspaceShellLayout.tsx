@@ -90,6 +90,7 @@ import {
 } from "@/components/ui/resizable.js";
 import { toast } from "@/components/ui/toast.js";
 import { getGitDirtyFileCount } from "@/git-branch-switcher/display.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { getPathLeaf, toFileUrl } from "@/lib/path.js";
@@ -573,7 +574,24 @@ export const WorkspaceShellLayout = memo(
     const isSidebarPanelVisible = isSidebarVisible;
     // 移动视口：侧栏为左滑抽屉，整体走「桌面浏览器响应式」形态（不再做官方
     // mobileShell 的整页切换）；抽屉默认收起，首屏即新建任务空会话。
-    const isMobileViewport = useIsMobileViewport();
+    // zcode-go：移动抽屉视口可在设置页「ZCode Go」关闭（关闭=按桌面布局渲染）。
+    // 局部快照 + 服务缺失视为启用（默认形态）。
+    const zcodeGoServices = useOptionalServices();
+    const [zcodeGoMobileDrawerViewport, setZcodeGoMobileDrawerViewport] = useState(true);
+    useEffect(() => {
+      let cancelled = false;
+      void zcodeGoServices?.settingService
+        ?.get()
+        .then((settings) => {
+          if (!cancelled) setZcodeGoMobileDrawerViewport(settings.zcodeGoMobileDrawerViewport !== false);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [zcodeGoServices]);
+    const isMobileViewport =
+      useIsMobileViewport() && zcodeGoMobileDrawerViewport;
 
     // 抽屉表面是否仍在屏幕上：关闭瞬间退出动画（duration-200）还在进行时，抽屉
     // 依然盖在会话区上方。此时若立即 pointer-events-none / 卸下 scrim，用户在

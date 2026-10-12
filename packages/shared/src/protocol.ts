@@ -295,6 +295,11 @@ export interface AppSettings {
   closeToTrayOnWindows?: boolean;
   /** 存在执行中的闲时任务时阻止系统闲置休眠（手动开关，防不了合盖）。 */
   keepAwakeWhileRunning?: boolean;
+  /* zcode-go 功能开关（设置页「ZCode Go」板块；缺省 true = 启用） */
+  zcodeGoP2pMobileBridge?: boolean;
+  zcodeGoHoverForkDualSession?: boolean;
+  zcodeGoMobileDrawerViewport?: boolean;
+  zcodeGoUiAutoRecovery?: boolean;
   /** Windows 关闭到托盘默认值是否已执行过一次性迁移；只用于设置迁移，不参与业务判断。 */
   closeToTrayOnWindowsMigrationInitialized?: boolean;
   /**

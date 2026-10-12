@@ -17,4 +17,13 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "zcodeGo.fork.inProgress": "Forking {count} messages — the official fork copies full history and may take a while; the model context continues from the compaction summary. Switching automatically…",
   "taskList.openInNewWindow": "Open in new window",
   "taskList.openInNewWindowFailed": "Failed to open session in a new window: {error}",
+  "settings.zcodeGo.title": "ZCode Go",
+  "settings.zcodeGo.p2pBridge": "P2P direct remote bridge",
+  "settings.zcodeGo.p2pBridgeDescription": "Enable the ZCode Go WebRTC direct channel in the remote dialog (zero relay when phone and desktop share a network; no third-party server). When off, the dialog keeps only the official relay entry.",
+  "settings.zcodeGo.hoverForkDualSession": "Hover fork dual-session model",
+  "settings.zcodeGo.hoverForkDualSessionDescription": "Manual fork produces a visible task row plus a lean active endpoint with hover redirect and background history backfill. When off, manual fork uses the compatible rotation model.",
+  "settings.zcodeGo.mobileDrawer": "Mobile drawer viewport",
+  "settings.zcodeGo.mobileDrawerDescription": "Render the sidebar as a slide-in drawer on mobile viewports. When off, mobile viewports render with the desktop layout.",
+  "settings.zcodeGo.uiAutoRecovery": "UI crash auto-recovery",
+  "settings.zcodeGo.uiAutoRecoveryDescription": "Automatically re-render or reload after a UI subtree crash (max 3 times per area within 5 minutes). When off, only manual recovery buttons are offered.",
 };

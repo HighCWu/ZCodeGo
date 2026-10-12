@@ -57,6 +57,7 @@ import {
   useZcodeGoInitialSessionClaim,
   useZcodeGoWindowTaskListSync,
 } from "@/zcodeGoWindowIntegration.js";
+import { useZcodeGoUiAutoRecoverySync } from "@/zcodeGoUiAutoRecovery.js";
 import { useAppChromeState } from "@/app-shell/useAppChromeState.js";
 import { useWorkspaceSessionReload } from "@/app-shell/useWorkspaceSessionReload.js";
 import { useWorkspaceShellLifecycle } from "@/app-shell/useWorkspaceShellLifecycle.js";
@@ -928,6 +929,8 @@ export function App({
   // 门控点仅此两行——实现整体在 zcodeGoWindowIntegration.ts（上游合并零冲突面）。
   useZcodeGoWindowTaskListSync(workspaceAbsPath, workspaceIdentity);
   useZcodeGoInitialSessionClaim(handleSelectTask);
+  // zcode-go：崩溃自动恢复开关的运行态同步（门控点 = 本行）
+  useZcodeGoUiAutoRecoverySync();
   // 完成卡「已保存」芯片的落点（docs/dynamic-workflow/transcript-and-notifications.md「Saving the
   // run, and running it again」）：走「自动化」入口的同一条导航（进历史、切主视图），落在「工作流」
   // 标签，再由深链把中枢定位到那一页。项目档按 workspaceKey 找组，全局档只要名字。
