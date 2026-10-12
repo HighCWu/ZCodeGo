@@ -399,10 +399,23 @@ try {
     // renderer 取证：注入错误监听 + 主资源清单（CI-only 空白页的定位依据）
     console.log("onboarding stuck forensics:", await ev(`(async () => {
       try {
-        const res = performance.getEntriesByType("resource").map(r => r.name.split("/").pop()).slice(0, 20);
+        const res = performance.getEntriesByType("resource").map(r => r.name.split("/").pop() + "@" + r.transferSize).slice(0, 20);
+        const scripts = Array.from(document.scripts).map(s => s.src || "(inline)");
+        const scriptStatus = [];
+        for (const src of scripts.slice(0, 4)) {
+          try {
+            const r = await fetch(src, { cache: "no-store" });
+            scriptStatus.push(src.split("/").pop() + "=" + r.status);
+          } catch (e) {
+            scriptStatus.push(src.split("/").pop() + "=FETCH-ERR:" + String(e).slice(0, 80));
+          }
+        }
         return JSON.stringify({
+          href: location.href,
           res,
-          html: document.documentElement.outerHTML.slice(0, 800),
+          scripts,
+          scriptStatus,
+          html: document.documentElement.outerHTML.slice(0, 500),
         });
       } catch (e) { return "forensics-failed: " + e; }
     })()`));
