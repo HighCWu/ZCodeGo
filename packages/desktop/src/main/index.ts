@@ -56,6 +56,7 @@ import { existsSync,
   unlinkSync,
   watch
 } from "node:fs";
+import { scheduleOrphanTaskSweeps } from "./zcodeGoTaskSweep.js";
 import { homedir, hostname } from "node:os";
 import {
   createCredentialService,
@@ -2841,13 +2842,13 @@ app.whenReady().then(async () => {
   // 改写、init 导出不稳定——index.ts 直接管，仅引用其稳定导出）。
   if (isZCodeGoTakeoverEnabled()) {
     try {
-      mkdirSync(ZCODE_GO_DIR, { recursive: true });
+      mkdirSync(join(homedir(), ".zcode-go"), { recursive: true });
       writeFileSync(ZCODE_GO_DESKTOP_PID_FILE, String(process.pid), "utf8");
     } catch (error) {
       logger.warn("[zcode-go] 写 desktop.pid 失败", error);
     }
     try {
-      zcodeGoShowWatcher = watch(ZCODE_GO_DIR, (_event, filename) => {
+      zcodeGoShowWatcher = watch(join(homedir(), ".zcode-go"), (_event, filename) => {
         if (filename === "SHOW") handleZcodeGoShowSignal();
       });
       zcodeGoShowWatcher.on("error", () => {
