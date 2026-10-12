@@ -387,9 +387,25 @@ try {
       const btns = Array.from(document.querySelectorAll('button'))
         .filter(b => b.offsetParent !== null)
         .map(b => (b.innerText || '').trim()).filter(Boolean).slice(0, 15);
-      return JSON.stringify({ body: document.body.innerText.slice(0, 400), btns });
+      return JSON.stringify({
+        body: document.body.innerText.slice(0, 400),
+        btns,
+        readyState: document.readyState,
+        rootHtml: (document.getElementById('root')?.outerHTML ?? 'no-root').slice(0, 600),
+        headTitle: document.title,
+      });
     })()`);
     console.log("onboarding stuck dump:", dump);
+    // renderer 取证：注入错误监听 + 主资源清单（CI-only 空白页的定位依据）
+    console.log("onboarding stuck forensics:", await ev(`(async () => {
+      try {
+        const res = performance.getEntriesByType("resource").map(r => r.name.split("/").pop()).slice(0, 20);
+        return JSON.stringify({
+          res,
+          html: document.documentElement.outerHTML.slice(0, 800),
+        });
+      } catch (e) { return "forensics-failed: " + e; }
+    })()`));
     throw new Error("onboarding 未完成（见上 dump）");
   }
 
