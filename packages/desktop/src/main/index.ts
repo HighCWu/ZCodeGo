@@ -50,7 +50,12 @@ import {
 import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync,
+  mkdirSync,
+  writeFileSync,
+  unlinkSync,
+  watch
+} from "node:fs";
 import { homedir, hostname } from "node:os";
 import {
   createCredentialService,
