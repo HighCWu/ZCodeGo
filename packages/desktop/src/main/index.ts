@@ -72,7 +72,10 @@ import {
   getZcodeGoSessionRedirect,
   setZcodeGoSessionRedirect,
 } from "@zcode/services/node";
-import { executeZcodeGoSilentForkTransaction } from "./zcodeGoSilentForkTransaction.js";
+import {
+  executeZcodeGoHoverForkDualSession,
+  executeZcodeGoSilentForkTransaction,
+} from "./zcodeGoSilentForkTransaction.js";
 import {
   desktopMenuMessageIds,
   type Locale,
@@ -2985,7 +2988,9 @@ app.whenReady().then(async () => {
     (_event: Electron.IpcMainInvokeEvent, payload: unknown) => {
       const request = payload as { sessionId?: unknown };
       const sessionId = typeof request?.sessionId === "string" ? request.sessionId : "";
-      return executeZcodeGoSilentForkTransaction(sessionId, "manual", zcodeGoForkDeps);
+      // 手动 hover fork = 双会话模型（流式全量）；自动轮换走
+      // executeZcodeGoSilentForkTransaction（host arm 路径）——两特性勿混。
+      return executeZcodeGoHoverForkDualSession(sessionId, zcodeGoForkDeps);
     },
   );
   ipcMain.handle(PlatformChannels.ZcodeGoTakeSessionInitial, (event) => {

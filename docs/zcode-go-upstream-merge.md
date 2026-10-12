@@ -66,6 +66,17 @@ zcodeGoUiAutoRecovery.ts、zcode-go.css、i18n/locales/zcode-go-{zh-CN,en-US}.ts
    `packages/desktop/src/preload/` 对 `contextBridge.`/新 Electron API 的
    使用，逐一在 zcodeGoMobileBridge.ts 伪造对象补 no-op 实现。
 
+## ⚠️ 去重教训：合并出现同名双 handler 时，先辨语义再取舍
+
+v3.15.1 合并时 index.ts 出现两个 `ZcodeGoSilentFork` handler（Electron 首注册
+生效、第二个抛未处理拒绝被吞——这个事实分工恰好是「手动=双会话模型、
+自动=轮换模型」）。去重时按「执行器版是重构后的新架构」的臆断删掉了双会话
+内联版，导致手动 hover fork 退化为轮换模型（无可见任务行 F、无 hover 标记、
+无全量补齐），CI（只测 auto 路径）未能拦截。已恢复：手动=
+`executeZcodeGoHoverForkDualSession`、自动=`executeZcodeGoSilentForkTransaction`，
+两者共存于 zcodeGoSilentForkTransaction.ts、共用在途互斥。
+**规则：去重前先确认两份代码是"新旧同物"还是"两个特性"。**
+
 ## ⚠️ 关键盲区：packages/desktop/src/main 与 src/preload 不在 typecheck 覆盖内
 
 `pnpm run typecheck` 对 desktop 只含 tsconfig.host.json + tsconfig.e2e.json

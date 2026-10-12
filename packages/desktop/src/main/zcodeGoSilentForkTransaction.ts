@@ -11,6 +11,10 @@ import {
   runZcodeGoSilentForkFinalMerge,
 } from "./zcodeGoSilentForkLifecycle.js";
 import { resetZcodeGoSilentForkEntryState, runZcodeGoSilentForkMergePass } from "./zcodeGoSilentForkMerge.js";
+import {
+  registerForkFullHistoryFromParent,
+  runContinuousForkFullHistoryBackfill,
+} from "./zcodeGoForkFullHistoryWorker.js";
 import { getZcodeGoSessionRedirect, setZcodeGoSessionRedirect } from "@zcode/services/node";
 import type { logger as zcodeGoLogger } from "./logger.js";
 
@@ -130,4 +134,93 @@ export function executeZcodeGoSilentForkTransaction(
   deps: ZcodeGoForkTransactionDeps,
 ): { ok: boolean; forkSessionId?: string; error?: string } {
   return executeZcodeGoSilentForkTransactionInternal(sessionId, createdBy, deps);
+}
+
+
+/**
+ * 双会话 hover fork（用户定稿的流式全量模型；从合并时误删的 index.ts 内联
+ * handler 逐字恢复）：手动触发（ZcodeGoSilentFork IPC）专用。与上方轮换执行
+ * 器是两个特性——手动=双会话（F 可见任务行 + F' 精简端点 + hover redirect +
+ * 边界前历史后台补齐），自动=轮换（活跃端点静默 fork + 终末归并 + 删旧）。
+ * 在途互斥两路共用（同一模块级标志）。
+ */
+export function executeZcodeGoHoverForkDualSession(
+  sessionId: string,
+  deps: ZcodeGoForkTransactionDeps,
+): { ok: boolean; forkSessionId?: string; error?: string } {
+  if (!sessionId.startsWith("sess_")) {
+    return { ok: false, error: "invalid session id" };
+  }
+  if (zcodeGoForkTransactionInFlight) {
+    return { ok: false, error: "another silent fork transaction is in flight" };
+  }
+  zcodeGoForkTransactionInFlight = true;
+  try {
+    // ① F'：silent fork direct 快速产出精简端点（不建任务行、不建 redirect）
+    const endpoint = forkCompactSessionDirect({
+      parentSessionId: sessionId,
+      silent: true,
+      log: (message, meta) => deps.logger.info(`[zcode-go-hover-fork] ${message}`, meta),
+    });
+    if (!endpoint.ok) {
+      deps.logger.warn("[zcode-go] hover fork 端点 fork 失败", { sessionId, error: endpoint.error });
+      return { ok: false, error: endpoint.error };
+    }
+    const endpointId = endpoint.childSessionId!;
+    // ② F：可见任务行副本（fork 对外 ID，初始=边界后内容）
+    const visible = forkCompactSessionDirect({
+      parentSessionId: sessionId,
+      silent: false,
+      log: (message, meta) => deps.logger.info(`[zcode-go-hover-fork] ${message}`, meta),
+    });
+    if (!visible.ok) {
+      // F' 回收（孤儿精简副本无用）
+      deleteZcodeGoSilentForkSession({ forkSessionId: endpointId });
+      deps.logger.warn("[zcode-go] hover fork 可见副本失败（已回收端点）", {
+        sessionId,
+        error: visible.error,
+      });
+      return { ok: false, error: visible.error };
+    }
+    const forkId = visible.childSessionId!;
+    // ③ redirect F → F'（hover 标记：send 域翻译/read 域保持 F 本体）
+    setZcodeGoSessionRedirect(forkId, {
+      forkSessionId: endpointId,
+      createdAt: Date.now(),
+      createdBy: "manual",
+      hover: true,
+    });
+    // ④ 全量补齐任务：S 的边界前历史倒序注入 F + 立即连续推进
+    let boundaryTotal: number | undefined;
+    try {
+      const task = registerForkFullHistoryFromParent(sessionId, forkId);
+      if (task) {
+        boundaryTotal = task.boundaryTotal;
+        runContinuousForkFullHistoryBackfill(forkId, (message, meta) =>
+          deps.logger.info(`[zcode-go-fork-fullhistory] ${message}`, meta),
+        );
+      }
+    } catch (error) {
+      deps.logger.warn("[zcode-go] hover fork 全量补齐登记失败（F 保持精简形态）", {
+        sessionId,
+        forkId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    deps.logger.info("[zcode-go] hover fork 完成", {
+      sessionId,
+      forkId,
+      endpointId,
+      boundaryTotal: boundaryTotal ?? 0,
+    });
+    return { ok: true, forkSessionId: forkId };
+  } catch (error) {
+    deps.logger.warn("[zcode-go] hover fork 异常", {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    zcodeGoForkTransactionInFlight = false;
+  }
 }
