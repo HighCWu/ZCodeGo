@@ -1,3 +1,4 @@
+/* zcode-go 样式拆分见 zcode-go.css（上游合并门控点仅此一行 import） */
 @import "tailwindcss" source(".");
 @import "tw-animate-css";
 @import "tailwind-scrollbar-hide/v4";
@@ -938,24 +939,6 @@ html[data-document-hidden] *::after {
       background-position: 0% 0;
     }
   }
-}
-
-/* zcode-go 启动画面 Go 徽章脉动：与 ZCodeStartupLogo 的 SMIL animate
-   （begin 3s / dur 1.8s / values 1;0.4;1 线性）同步忽明忽暗。 */
-@keyframes zcode-go-badge-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-/* zcode-go 启动徽章的 Go 字标：经 ::after content 承载，不进 textContent
-   （SILENTDB 静默启动态合约要求零可见文本；aria-hidden 不影响 textContent）。 */
-.zcode-go-badge-mark::after {
-  content: "Go";
 }
 
 /* 工具摘要行细进度条的 indeterminate 扫光（ToolCallProgressIndicator，第三批 R7）。 */

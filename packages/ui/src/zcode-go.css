@@ -1,0 +1,22 @@
+/**
+ * zcode-go 专属样式（从 styles.css 拆出——上游合并门控点仅 styles.css 一行 @import）。
+ */
+
+/* zcode-go 启动画面 Go 徽章脉动：与 ZCodeStartupLogo 的 SMIL animate
+   （begin 3s / dur 1.8s / values 1;0.4;1 线性）同步忽明忽暗。 */
+@keyframes zcode-go-badge-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* zcode-go 启动徽章的 Go 字标：经 ::after content 承载，不进 textContent
+   （SILENTDB 静默启动态合约要求零可见文本；aria-hidden 不影响 textContent）。 */
+.zcode-go-badge-mark::after {
+  content: "Go";
+}
+

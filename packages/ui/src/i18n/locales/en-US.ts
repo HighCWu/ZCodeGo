@@ -1,6 +1,8 @@
+import { zcodeGoMessagesEnUs } from "./zcode-go-en-US.js";
 import { requestSecurityMessagesEnUS } from "@/request-security-edition/messages.js";
 /** English translations */
 const enUS: Record<string, string> = {
+  ...zcodeGoMessagesEnUs,
   "startPlan.recommendation.subagentDescription":
     "Your Start Plan has quota available for {model}. Switch this subagent’s model to the Start Plan?",
   "startPlan.recommendation.preferenceSaveFailed":
@@ -1948,18 +1950,6 @@ const enUS: Record<string, string> = {
   "remote.connectingStepDescription":
     "We are establishing the {method} connection. You can follow the live setup progress here.",
   "webRemoteControl.trigger": "Mobile remote control",
-  "zcodeGoMobileBridge.signalingOrigin.title": "P2P signaling server",
-  "zcodeGoMobileBridge.signalingOrigin.description": "Defaults to the official service; point to your own Worker for self-deployment.",
-  "zcodeGoMobileBridge.signalingOrigin.apply": "Apply",
-  "zcodeGoMobileBridge.signalingOrigin.applied": "Saved, QR refreshed",
-  "zcodeGoMobileBridge.signalingOrigin.resetHint": "Clear and apply to restore the default service",
-  "zcodeGoMobileBridge.signalingOrigin.saveFailed": "Save failed, please retry",
-  "zcodeGoMobileBridge.signalingOrigin.invalidUrl": "Enter a valid https:// URL (http://localhost allowed for local testing)",
-  "zcodeGoMobileBridge.signalingOrigin.envOverride": "Env ZCODE_GO_SIGNALING_ORIGIN is overriding — saved but not effective",
-  "zcodeGoMobileBridge.section": "P2P direct",
-  "zcodeGoMobileBridge.hint": "Scan the QR code or open the link on your phone to control this desktop. The connection is phone-to-desktop directly (WebRTC P2P).",
-  "zcodeGoMobileBridge.copyLink.copied": "Copied",
-  "zcodeGoMobileBridge.refresh": "Regenerate pairing code",
   "webRemoteControl.triggerStatus.idle": "Remote control is off",
   "webRemoteControl.triggerStatus.starting": "Remote control is starting",
   "webRemoteControl.triggerStatus.waiting": "Waiting for phone",
@@ -7366,9 +7356,6 @@ const enUS: Record<string, string> = {
   "scheduledPreview.toast.view": "View",
   "scheduledPreview.addSchedule": "Add schedule",
 
-  "zcodeGo.fork.inProgress": "Forking {count} messages — the official fork copies full history and may take a while; the model context continues from the compaction summary. Switching automatically…",
-  "taskList.openInNewWindow": "Open in new window",
-  "taskList.openInNewWindowFailed": "Failed to open session in a new window: {error}",
   "chat.highspeed.label": "Highspeed",
   "chat.highspeed.expiresAt": "Highspeed card expires at {time}",
   "chat.highspeed.modelLocked": "Model is locked while Highspeed is active",
