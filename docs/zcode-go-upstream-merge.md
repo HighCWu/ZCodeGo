@@ -93,6 +93,12 @@ v3.15.1 合并时 index.ts 出现两个 `ZcodeGoSilentFork` handler（Electron �
    preload/renderer 链）。
 另外：脚本化插 import 后必须 `grep` 验证 import 行真的落盘——锚串与实际
 写法（单行 vs 多行块）不符时 replace 静默 no-op（三轮同模式踩坑）。
+第四轮同根因变体（takeover）：import 缺失 + 调用点大小写错
+（`initZCodeGoTakeover` vs `initZcodeGoTakeover`）时 esbuild 把调用留成
+自由全局变量，**构建期零报错**。bundle grep 必须：搜**模块体内的特征
+字面量**（如日志串 `takeover-debug.log`）而非只搜调用点标识符——调用在、
+定义不在才是 "is not defined" 的形态；只搜 `.js` 排除 `.map`（source map
+永远含全部源串，假阳性）；大小写敏感精确匹配。
 
 ## 设置页「ZCode Go」板块（功能开关）
 
