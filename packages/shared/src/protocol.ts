@@ -300,6 +300,8 @@ export interface AppSettings {
   zcodeGoHoverForkDualSession?: boolean;
   zcodeGoMobileDrawerViewport?: boolean;
   zcodeGoUiAutoRecovery?: boolean;
+  /** 插件接管（/zcode-go 拉起）时是否退出官版 ZCode；缺省 true = 退出。 */
+  zcodeGoTakeoverCloseOfficial?: boolean;
   /** Windows 关闭到托盘默认值是否已执行过一次性迁移；只用于设置迁移，不参与业务判断。 */
   closeToTrayOnWindowsMigrationInitialized?: boolean;
   /**

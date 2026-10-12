@@ -2818,11 +2818,14 @@ app.whenReady().then(async () => {
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");
 
   // zcode-go 接管模式：写就绪标记、监听 SHOW 信号、准备悬浮气泡。
-  initZCodeGoTakeover({
+  initZcodeGoTakeover({
     // getAllWindows 顺序未定义：显式排除气泡窗口，取真正的应用主窗
     getMainWindow: () =>
       getApplicationWindowsExcludingCuaIndicator().find((win) => win !== updateStatusWindow) ?? null,
     logger,
+    // 设置页「ZCode Go → 触发后关闭官版」（缺省 true = 退出官版）
+    shouldCloseOfficialZcode: async () =>
+      (await mainSettingService.get()).zcodeGoTakeoverCloseOfficial !== false,
   });
 
   // zcode-go 分叉裁剪：fork ack 后对子会话存储剔除压缩前惰性历史（不依赖接管模式）。

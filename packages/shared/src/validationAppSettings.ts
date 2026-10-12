@@ -491,6 +491,8 @@ const appSettingsObjectSchema = z.object({
   zcodeGoHoverForkDualSession: z.boolean().default(true),
   zcodeGoMobileDrawerViewport: z.boolean().default(true),
   zcodeGoUiAutoRecovery: z.boolean().default(true),
+  /* 插件接管（/zcode-go 拉起）时是否退出官版 ZCode；缺省 true = 退出 */
+  zcodeGoTakeoverCloseOfficial: z.boolean().default(true),
   desktopZoomLevel: desktopZoomLevelSchema.optional(),
   desktopWindowSize: desktopWindowSizeSchema.optional(),
   desktopChromiumHardwareAccelerationEnabled: z.boolean().default(true),
@@ -570,6 +572,7 @@ export const appSettingsPatchSchema = z.object({
   zcodeGoHoverForkDualSession: z.boolean().optional(),
   zcodeGoMobileDrawerViewport: z.boolean().optional(),
   zcodeGoUiAutoRecovery: z.boolean().optional(),
+  zcodeGoTakeoverCloseOfficial: z.boolean().optional(),
   closeToTrayOnWindowsMigrationInitialized: z.boolean().optional(),
   closeToTrayLinuxMigrationInitialized: z.boolean().optional(),
   desktopZoomLevel: desktopZoomLevelSchema.optional(),

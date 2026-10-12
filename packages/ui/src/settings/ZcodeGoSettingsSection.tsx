@@ -15,7 +15,8 @@ type ZcodeGoSettingKey =
   | "zcodeGoP2pMobileBridge"
   | "zcodeGoHoverForkDualSession"
   | "zcodeGoMobileDrawerViewport"
-  | "zcodeGoUiAutoRecovery";
+  | "zcodeGoUiAutoRecovery"
+  | "zcodeGoTakeoverCloseOfficial";
 
 export function ZcodeGoSettingsSection() {
   const { intl } = useZCodeIntl();
@@ -27,6 +28,7 @@ export function ZcodeGoSettingsSection() {
     zcodeGoHoverForkDualSession: settings?.zcodeGoHoverForkDualSession !== false,
     zcodeGoMobileDrawerViewport: settings?.zcodeGoMobileDrawerViewport !== false,
     zcodeGoUiAutoRecovery: settings?.zcodeGoUiAutoRecovery !== false,
+    zcodeGoTakeoverCloseOfficial: settings?.zcodeGoTakeoverCloseOfficial !== false,
   };
 
   const toggleRows: Array<{
@@ -53,6 +55,11 @@ export function ZcodeGoSettingsSection() {
       key: "zcodeGoUiAutoRecovery",
       labelId: "settings.zcodeGo.uiAutoRecovery",
       descriptionId: "settings.zcodeGo.uiAutoRecoveryDescription",
+    },
+    {
+      key: "zcodeGoTakeoverCloseOfficial",
+      labelId: "settings.zcodeGo.takeoverCloseOfficial",
+      descriptionId: "settings.zcodeGo.takeoverCloseOfficialDescription",
     },
   ];
 

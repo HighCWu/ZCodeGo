@@ -26,4 +26,6 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "settings.zcodeGo.mobileDrawerDescription": "移动浏览器视口下侧栏以左滑抽屉呈现。关闭后移动视口按桌面布局渲染。",
   "settings.zcodeGo.uiAutoRecovery": "UI 崩溃自动恢复",
   "settings.zcodeGo.uiAutoRecoveryDescription": "界面子树崩溃后自动重渲染或整页重载（每区域 5 分钟最多 3 次）。关闭后仅提供手动恢复按钮。",
+  "settings.zcodeGo.takeoverCloseOfficial": "触发后关闭官版 ZCode",
+  "settings.zcodeGo.takeoverCloseOfficialDescription": "在官方 ZCode 对话中触发 /zcode-go 拉起本应用时，自动退出官方进程（接管独占）。关闭后两者共存运行。",
 };

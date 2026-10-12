@@ -12,7 +12,8 @@
  *
  * 生命周期：
  * - 就绪标记（desktop.pid）供插件编排探活
- * - 监听 ~/.zcode-go/SHOW（编排就绪信号）→ 显示自己 + 退出原版（enterZCodeGo）
+ * - 监听 ~/.zcode-go/SHOW（编排就绪信号）→ 显示自己 + 按设置决定是否退出原版
+ *   （enterZCodeGo；默认退出，设置页「ZCode Go → 触发后关闭官版」可改为共存）
  * - 官方路径解析链：official.json（插件探测）→ config.json 覆盖 → 平台默认
  */
 import { app, BrowserWindow } from "electron";
@@ -41,6 +42,8 @@ const OFFICIAL_BIN_DEFAULTS: Record<NodeJS.Platform, string[]> = {
 interface TakeoverContext {
   getMainWindow: () => BrowserWindow | null;
   logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
+  /** 是否在接管时退出官版 ZCode（设置页「ZCode Go」；缺省 true = 退出）。 */
+  shouldCloseOfficialZcode?: () => Promise<boolean>;
 }
 
 let context: TakeoverContext | null = null;
@@ -219,8 +222,14 @@ export async function enterZCodeGo(): Promise<void> {
       main.show();
       main.focus();
     }
-    await killOfficialProcesses();
-    context.logger.info("[zcode-go] enterZCodeGo 完成（原版已退出，zcode-go 独立运行）");
+    // 设置页「ZCode Go → 触发后关闭官版」：关闭时与官版共存运行（不再退官方）。
+    const closeOfficial = (await context.shouldCloseOfficialZcode?.()) ?? true;
+    if (closeOfficial) {
+      await killOfficialProcesses();
+      context.logger.info("[zcode-go] enterZCodeGo 完成（原版已退出，zcode-go 独立运行）");
+    } else {
+      context.logger.info("[zcode-go] enterZCodeGo 完成（共存模式：官版保持运行）");
+    }
   } finally {
     switching = false;
   }

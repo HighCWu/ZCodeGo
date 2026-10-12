@@ -26,4 +26,6 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "settings.zcodeGo.mobileDrawerDescription": "Render the sidebar as a slide-in drawer on mobile viewports. When off, mobile viewports render with the desktop layout.",
   "settings.zcodeGo.uiAutoRecovery": "UI crash auto-recovery",
   "settings.zcodeGo.uiAutoRecoveryDescription": "Automatically re-render or reload after a UI subtree crash (max 3 times per area within 5 minutes). When off, only manual recovery buttons are offered.",
+  "settings.zcodeGo.takeoverCloseOfficial": "Close official ZCode on takeover",
+  "settings.zcodeGo.takeoverCloseOfficialDescription": "When /zcode-go launches this app from the official ZCode conversation, quit the official processes automatically (exclusive takeover). When off, both apps keep running.",
 };
