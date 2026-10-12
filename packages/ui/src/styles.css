@@ -1,9 +1,10 @@
-/* zcode-go 样式拆分见 zcode-go.css（上游合并门控点仅此一行 import） */
 @import "tailwindcss" source(".");
 @import "tw-animate-css";
 @import "tailwind-scrollbar-hide/v4";
 @import "shadcn/tailwind.css";
 @import "@xterm/xterm/css/xterm.css";
+/* zcode-go 样式拆分见 zcode-go.css（上游合并门控点仅此一行 import） */
+@import "./zcode-go.css";
 @import "katex/dist/katex.min.css";
 @import "./highspeed/highspeed-activation.css";
 @import "./highspeed/highspeed-share.css";
