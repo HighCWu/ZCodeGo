@@ -176,6 +176,7 @@ import {
 } from "./desktopWindowLifecycle.js";
 import {
   initZCodeGoTakeover,
+  initZcodeGoTakeover,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import {
