@@ -4,8 +4,9 @@
 
 1. **新文件优先**：zcode-go 的一切实现放独立新文件；对上游文件的触碰收敛为
    "门控点"——import + 少量调用/渲染行。
-2. **门控点要小、纯插入、带 zcode-go 注释锚**：纯插入行只在上游恰好同位置
-   加代码时才冲突，且解决方式显然（两段都保留）。
+2. **门控点要小、纯插入、带 zcode-go 注释锚**：我们对于上游文件的侵入
+   是纯新增插入——插入行只在上游恰好同位置加代码时才冲突，且解决方式
+   显然（两段都保留）。
 3. **行为替换必须函数级整替**：当 zcode-go 必须改变上游行为（如 hover fork
    取代 forkAssistant），把上游原实现整体替换为一个工厂调用（保持原变量名），
    并在新文件头注释记录上游原语义——未来冲突时整块取舍，不做行级纠缠。
@@ -21,7 +22,7 @@
 | packages/ui/src/v4/SessionPane.tsx | 115+/31- | **23+/44-** | 三个 hook 工厂调用行 + rows 过滤一行；删除集中在两处函数级整替（hover fork / goal 命令），冲突时整块取我们侧 |
 | packages/desktop/src/main/index.ts | 533+ | **442+** | fork 事务执行器迁 zcodeGoSilentForkTransaction.ts；门控点 = deps 常量 + 两处调用行 |
 | packages/desktop/src/preload/index.ts | 92+ | **2+** | import + `...installZcodeGoPreloadEntries({ ipcRenderer }),` 一行 spread。**注意：preload 不在 `pnpm run typecheck` 覆盖内（tsc 盲区）**——改 preload 后必须 `npx tsup` 重建 + e2e 实测（CI 实证：漏 import 的 preload 在 typecheck 全绿下仍炸空白页） |
-| packages/ui/src/ErrorBoundary.tsx | 102+ | ~**63+** | 常量/额度逻辑迁 zcodeGoUiAutoRecovery.ts；两个边界类内保持纯新增插桩 |
+| packages/ui/src/ErrorBoundary.tsx | 102+ | ~**63+** | 常量/额度逻辑迁 zcodeGoUiAutoRecovery.ts；两个边界类内的侵入保持纯新增插桩 |
 
 新文件承载（上游不存在，零冲突）：zcodeGoMobileBridgeSection.tsx、
 zcodeGoWindowIntegration.ts、zcodeGoSessionPaneIntegration.ts、
@@ -95,5 +96,5 @@ v3.15.1 合并时 index.ts 出现两个 `ZcodeGoSilentFork` handler（Electron �
 - 一律新文件；对上游文件最多加「import + 调用行」两段插入，注释锚统一
   `// zcode-go：`开头（合并时 grep 该前缀即可盘点全部门控点）。
 - 文案进 i18n/locales/zcode-go-{locale}.ts；样式进 zcode-go.css；
-  通道键进 shared 侧独立对象后 spread（当前 channels.ts 为历史形态，纯新增
-  行保留即可，不必回改）。
+  通道键进 shared 侧独立对象后 spread（当前 channels.ts 为历史形态——我们
+  对它的侵入本就是纯新增行，保留即可，不必回改）。
