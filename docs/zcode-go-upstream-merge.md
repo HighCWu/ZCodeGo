@@ -77,6 +77,9 @@ v3.15.1 合并时 index.ts 出现两个 `ZcodeGoSilentFork` handler（Electron �
 `executeZcodeGoHoverForkDualSession`、自动=`executeZcodeGoSilentForkTransaction`，
 两者共存于 zcodeGoSilentForkTransaction.ts、共用在途互斥。
 **规则：去重前先确认两份代码是"新旧同物"还是"两个特性"。**
+同族教训（takeover 空白页）：脚本化编辑对 src/main 的 import 块顶掉一行
+成员后，本地 out/ 的陈旧产物会让 tsup 失败被"成功"假象掩盖——bundle 验证
+必须核对产物 mtime，或直接以 CI 全新构建为权威。
 
 ## ⚠️ 关键盲区：packages/desktop/src/main 与 src/preload 不在 typecheck 覆盖内
 
