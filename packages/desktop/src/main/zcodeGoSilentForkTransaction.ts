@@ -11,7 +11,7 @@ import {
   runZcodeGoSilentForkFinalMerge,
 } from "./zcodeGoSilentForkLifecycle.js";
 import { resetZcodeGoSilentForkEntryState, runZcodeGoSilentForkMergePass } from "./zcodeGoSilentForkMerge.js";
-import { getZcodeGoSessionRedirect } from "@zcode/services/node";
+import { getZcodeGoSessionRedirect, setZcodeGoSessionRedirect } from "@zcode/services/node";
 import type { logger as zcodeGoLogger } from "./logger.js";
 
 export interface ZcodeGoForkTransactionDeps {
