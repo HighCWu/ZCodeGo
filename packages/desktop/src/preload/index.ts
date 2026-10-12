@@ -97,6 +97,8 @@ import {
   formatZCodeRendererProcessName,
   shouldEnableE2ETestBridge,
 } from "@zcode/shared";
+// zcode-go：preload 暴露面（新文件，门控点 = import + 对象内一行 spread）
+import { installZcodeGoPreloadEntries } from "./zcodeGoEntries.js";
 import { createOAuthCallbackHandler } from "./oauthCallbackBridge.js";
 
 if (shouldEnableE2ETestBridge(process.env)) {

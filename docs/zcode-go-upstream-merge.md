@@ -20,7 +20,7 @@
 | packages/ui/src/styles.css | 18+ | **1+** | `@import "./zcode-go.css";` |
 | packages/ui/src/v4/SessionPane.tsx | 115+/31- | **23+/44-** | 三个 hook 工厂调用行 + rows 过滤一行；删除集中在两处函数级整替（hover fork / goal 命令），冲突时整块取我们侧 |
 | packages/desktop/src/main/index.ts | 533+ | **442+** | fork 事务执行器迁 zcodeGoSilentForkTransaction.ts；门控点 = deps 常量 + 两处调用行 |
-| packages/desktop/src/preload/index.ts | 92+ | **1+** | `...installZcodeGoPreloadEntries({ ipcRenderer }),` 一行 spread |
+| packages/desktop/src/preload/index.ts | 92+ | **2+** | import + `...installZcodeGoPreloadEntries({ ipcRenderer }),` 一行 spread。**注意：preload 不在 `pnpm run typecheck` 覆盖内（tsc 盲区）**——改 preload 后必须 `npx tsup` 重建 + e2e 实测（CI 实证：漏 import 的 preload 在 typecheck 全绿下仍炸空白页） |
 | packages/ui/src/ErrorBoundary.tsx | 102+ | ~**63+** | 常量/额度逻辑迁 zcodeGoUiAutoRecovery.ts；两个边界类内保持纯新增插桩 |
 
 新文件承载（上游不存在，零冲突）：zcodeGoMobileBridgeSection.tsx、
@@ -41,7 +41,9 @@ zcodeGoUiAutoRecovery.ts、zcode-go.css、i18n/locales/zcode-go-{zh-CN,en-US}.ts
    会截断，本轮实测），用 AST 或整段匹配；改完必须跑
    `npx esbuild --loader:.ts=ts` 解析探针（tsc -b 增量缓存会漏检语法错）；
    CSS 门控行检查「注释存在」不等于「import 存在」（首轮实测：替换目标
-   字符串与实际 @import 写法不符时静默跳过）。
+   字符串与实际 @import 写法不符时静默跳过）；**脚本化插 import 后 grep
+   验证 import 行真的存在**（二轮实测：preload 提取漏插 import，typecheck
+   盲区 + 本地旧构建产物掩盖，CI 全新构建下三平台空白页）。
 2. **packages/services/src/zcode-agent/zcodeAgentService.ts（371+/12-）**  # 评估结论不变
    25 个散布接缝（send/read 域翻译、rowsRange 拦截、fork ack 登记等）。强抽会
    制造 20+ 个小冲突点，得不偿失；建议维持现状，等上游大改该文件时借机收敛。
