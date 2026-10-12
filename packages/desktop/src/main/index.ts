@@ -177,7 +177,7 @@ import {
 import {
   initZCodeGoTakeover,
   enterZCodeGo,
-  isZcodeGoTakeoverEnabled,
+  isZCodeGoTakeoverEnabled,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import {
@@ -2834,7 +2834,7 @@ app.whenReady().then(async () => {
   // zcode-go 接管模式：写就绪标记、监听 SHOW 信号、准备悬浮气泡。
   // zcode-go 接管初始化：职责内联（zcodeGoTakeover.ts 工作区被外部进程反复
   // 改写、init 导出不稳定——index.ts 直接管，仅引用其稳定导出）。
-  if (isZcodeGoTakeoverEnabled()) {
+  if (isZCodeGoTakeoverEnabled()) {
     try {
       mkdirSync(ZCODE_GO_DIR, { recursive: true });
       writeFileSync(ZCODE_GO_DESKTOP_PID_FILE, String(process.pid), "utf8");
