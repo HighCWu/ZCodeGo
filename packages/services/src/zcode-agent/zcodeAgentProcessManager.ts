@@ -5,7 +5,9 @@ import type { ZCodeAgentStorageStartupSnapshot } from "#src/zcode-agent/zcodeAge
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+// zcode-go：官方运行时重定向读 ~/.zcode-go/official.json（上游 import 行保持原样）。
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Emitter } from "@zcode/rpc";
@@ -457,11 +459,11 @@ export function resolveDefaultZCodeAgentCommand(
     );
   }
 
-  // 顺序：env 显式覆盖 → zcode-go 官方运行时重定向（~/.zcode-go/official.json，与打包态
-  // 官方完全同构：ELECTRON_RUN_AS_NODE=1 跑官方 zcode.cjs，保 150% 额度签名路径；
-  // ZCODE_GO_STANDALONE=1 时硬隔离跳过——独立版只用随包自建 runtime，脱离官方遥测）→
-  // monorepo dev 源码/dist（dev 改源码立刻生效，不会被远端历史装的 native binary
+  // 顺序：env 显式覆盖 → monorepo dev 源码/dist（dev 改源码立刻生效，不会被远端历史装的 native binary
   // 抢先匹配）→ 桌面打包态 Electron Node runtime 跑 zcode.cjs → 已部署 native binary（远端 SSH 兜底）。
+  // zcode-go：官方运行时重定向插在 env 显式覆盖之后（~/.zcode-go/official.json，与打包态
+  // 官方完全同构：ELECTRON_RUN_AS_NODE=1 跑官方 zcode.cjs，保 150% 额度签名路径；
+  // ZCODE_GO_STANDALONE=1 时硬隔离跳过——独立版只用随包自建 runtime，脱离官方遥测）。
   const bundled =
     resolveZcodeGoOfficialRuntimeCommand(context) ??
     resolveBundledWorkspaceZCodeAgentCommand(context) ??

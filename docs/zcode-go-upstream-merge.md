@@ -30,6 +30,23 @@ zcodeGoSilentForkTransaction.ts、preload/zcodeGoEntries.ts、
 zcodeGoUiAutoRecovery.ts、zcode-go.css、i18n/locales/zcode-go-{zh-CN,en-US}.ts，
 以及历史上已独立的全部 zcodeGo* 模块（desktop main/services/ui/plugin/mobile-bridge/scripts）。
 
+## 变更面全量审计基准（对 aac4755，第四轮收敛后）
+
+118 新文件 + 63 个上游文件改动，其中 **36 个已纯新增插入（零删改行）**，
+27 个含删改行但全部属于四类可接受形态（复验脚本：
+`git diff --unified=0 aac4755 -- <file> | grep -c "^-[^-]"`，逐文件归零或归类）：
+1. **函数级整替**（原则 3）：SessionPane（上游实现挪新文件，门控点=工厂调用行）、
+   wire-assembler（自由函数→类方法供子类覆写）、primaryWindowCoordinator（单函数重构）；
+2. **设置/环境门控分支**：WorkspaceShellLayout/WorkspaceSidebar/WorkspaceHeader/
+   SettingsPage（`isMobileViewport` 分支）、useAppPanels（上游 useState 行保持
+   原样 + useLayoutEffect 门控收起，设置关闭时回正）、zcodeAgentProcessManager
+   重定向（official.json 存在才命中）；
+3. **fork 惰性等价改写**（无 fork 活动时行为恒等上游）：zcodeAgentService 订阅
+   翻译、zcodeTaskIndexSyncer remap、agentConversationTransport 别名、
+   desktopHostProcess 多引用清理、index.ts disposeHostProcess 引用计数；
+4. **品牌/类型不可避免**：logo import 资产行 ×3、index.html 启动屏、
+   env.ts/settingsNavigation 类型联合扩展、services/package.json 逗号。
+
 ## 后续提取候选（按收益排序；本轮未做的原因与做法）
 
 1. **packages/desktop/src/main/index.ts（第二轮后 442+，纯插入为主）**

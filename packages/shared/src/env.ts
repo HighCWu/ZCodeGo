@@ -1,8 +1,8 @@
 import type { ZCodeRuntimeEnv } from "./runtimeEnv.js";
 
 export type ZCodeEnv = "test" | "production";
-/** 安装包身份：决定应用名、app id、Electron 数据目录与更新策略；与后端环境 `ZCodeEnv` 是两个轴。
- * standalone = zcode-go 独立完整桌面版（自带 CLI runtime，硬隔离官方 runtime/遥测）。 */
+/** 安装包身份：决定应用名、app id、Electron 数据目录与更新策略；与后端环境 `ZCodeEnv` 是两个轴。 */
+// zcode-go：standalone = 独立完整桌面版（自带 CLI runtime，硬隔离官方 runtime/遥测）。
 export type ZCodeProductFlavor = "production" | "preview" | "standalone";
 export type ArmsRumEnv = "local" | "prod";
 

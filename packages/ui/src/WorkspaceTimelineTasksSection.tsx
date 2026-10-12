@@ -19,7 +19,10 @@ import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import { compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { buildWorkspaceServiceLookup } from "@/lib/workspaceServiceResolver.js";
 import { logger } from "@/logger.js";
-import { MemoTaskItem, TaskListItemContextMenuContent } from "@/TaskListItem.js";
+import {
+  MemoTaskItem,
+  TaskListItemContextMenuContent,
+} from "@/TaskListItem.js";
 import { openSessionInNewWindow } from "@/v4/zcodeGoNewWindowState.js";
 import { TaskListLoadingHint } from "@/TaskListLoadingHint.js";
 import { TaskListRemoteSyncHint } from "@/TaskListRemoteSyncHint.js";

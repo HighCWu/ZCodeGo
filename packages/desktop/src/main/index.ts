@@ -3,7 +3,9 @@ import { createLocalTtftExporter } from "./localTtftExporter.js";
 /* eslint-disable max-lines */
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
-import { powerMonitor, powerSaveBlocker, MessageChannelMain } from "electron";
+import { powerMonitor, powerSaveBlocker } from "electron";
+// zcode-go：移动端桥窗口的无头传输通道（上游 import 行保持原样）。
+import { MessageChannelMain } from "electron";
 import { randomUUID } from "node:crypto";
 import { crashCapturePaths } from "./appCrashCaptureBootstrap.js";
 import { armsInitPromise } from "./appARMSBootstrap.js";

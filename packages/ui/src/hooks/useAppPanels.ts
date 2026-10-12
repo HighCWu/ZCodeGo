@@ -1,9 +1,12 @@
 /* eslint-disable max-lines */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// zcode-go：移动抽屉首屏收起（上游 import 行保持原样）。
+import { useLayoutEffect } from "react";
 import { createUuid } from "@zcode/shared";
 import type { EmbeddedBrowserOpenUrlRequest, IPlatformService } from "@zcode/shared";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { computeViewportTier } from "@/hooks/useViewportTier.js";
+import { useOptionalServices } from "@/hooks/useServices.js";
 // 保活：side pane terminal 跨 workspace 会话上移到模块级 registry。
 // 关闭 terminal tab 时必须显式 release，杀掉 PTY，避免常驻 registry 造成孤儿进程。
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
@@ -206,8 +209,28 @@ export function useAppPanels(options: {
   // 交互说明：侧栏显隐按钮放在 App 外层，而不是 Sidebar 内部。
   // 这样即使侧栏被隐藏，入口也仍然留在左上角，不会出现"收起后没有地方再展开"的问题；
   // 同时这里统一处理 macOS 红绿灯安全区，避免按钮和系统窗口控件重叠。
-  // 移动视口侧栏是左滑抽屉：首屏默认收起，直接落在新建任务空会话上。
-  const [isSidebarVisible, setIsSidebarVisible] = useState(() => computeViewportTier() !== "mobile");
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  // zcode-go：移动视口侧栏是左滑抽屉，首屏默认收起（直接落在新建任务空会话上）。
+  // 门控与 WorkspaceShellLayout 同源（设置页「ZCode Go → 移动抽屉视口」，缺省启用；
+  // 服务缺失视为启用）。首帧绘制前乐观收起（无闪现）；设置读取为关闭时回正展开，
+  // 与上游行为一致。上游 useState 行保持原样——本文件整体保持纯新增插入。
+  const zcodeGoServices = useOptionalServices();
+  useLayoutEffect(() => {
+    if (computeViewportTier() !== "mobile") return;
+    setIsSidebarVisible(false);
+    let cancelled = false;
+    void zcodeGoServices?.settingService
+      ?.get()
+      .then((settings) => {
+        if (!cancelled && settings.zcodeGoMobileDrawerViewport === false) {
+          setIsSidebarVisible(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [zcodeGoServices]);
   const [browserNavigationRequest, setBrowserNavigationRequest] =
     useState<BrowserNavigationRequest | null>(null);
   const [allRecentClosedSidePaneTabs, setAllRecentClosedSidePaneTabs] = useState<

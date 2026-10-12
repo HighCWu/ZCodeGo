@@ -173,7 +173,7 @@ export function createWindowHostControllerRuntime(options: {
     sourceAvailability.delete(key);
     sourceTaskServices.delete(key);
     sourceSnapshotTaskServices.delete(key);
-    sourceSnapshotRefreshedAtByKey.delete(key);
+      sourceSnapshotRefreshedAtByKey.delete(key);
     sourceEventSubscriptions.get(key)?.dispose();
     sourceEventSubscriptions.delete(key);
     sourceSessionObservers.get(key)?.observer.dispose();
@@ -313,7 +313,7 @@ export function createWindowHostControllerRuntime(options: {
       sourceSnapshotTaskServices.get(key) !== resolved.taskService
     ) {
       sourceSnapshotTaskServices.delete(key);
-    sourceSnapshotRefreshedAtByKey.delete(key);
+      sourceSnapshotRefreshedAtByKey.delete(key);
     }
     if (
       resolved.taskService &&
@@ -346,7 +346,7 @@ export function createWindowHostControllerRuntime(options: {
       sourceSessionObservers.get(key)?.observer.dispose();
       sourceSessionObservers.delete(key);
       sourceSnapshotTaskServices.delete(key);
-    sourceSnapshotRefreshedAtByKey.delete(key);
+      sourceSnapshotRefreshedAtByKey.delete(key);
       projection.disconnectSource(resolved.scope);
     }
   }
@@ -790,7 +790,7 @@ export function createWindowHostControllerRuntime(options: {
       sourceSessionObservers.get(key)?.observer.dispose();
       sourceSessionObservers.delete(key);
       sourceSnapshotTaskServices.delete(key);
-    sourceSnapshotRefreshedAtByKey.delete(key);
+      sourceSnapshotRefreshedAtByKey.delete(key);
       projection.disconnectSource(scope);
     },
     removeSource(scope: WindowHostControllerSourceScope): void {
