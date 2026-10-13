@@ -1369,7 +1369,7 @@ export function LexicalChatInput({
   enableMentionPanel = true,
 }: LexicalChatInputProps) {
   const inputMountedAtRef = useRef(Date.now());
-  // iOS Safari 聚焦 <16px 的可编辑区会强制放大整页（官方 remote 同款规避）：
+  // zcode-go：iOS Safari 聚焦 <16px 的可编辑区会强制放大整页（官方 remote 同款规避）：
   // 移动视口下输入区提到 16px 并放宽行高，桌面保持 text-ui-base。
   const isMobileViewport = useIsMobileViewport();
   const inputTypographyClass = isMobileViewport

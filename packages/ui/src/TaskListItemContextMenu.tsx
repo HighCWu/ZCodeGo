@@ -53,6 +53,7 @@ export function TaskListItemContextMenu({
   onMarkTaskAsUnread: () => void;
   /** 「在分屏打开」（仅桌面 shell 传入）。 */
   onOpenInSplitPane?: () => void;
+  // zcode-go：「在新窗口打开」——透传链（解构/接口/渲染三处同名词）。
   onOpenInNewWindow?: () => void;
   /** 叶子数达上限且该 session 未在任何 pane 时禁用。 */
   openInSplitPaneDisabled?: boolean;

@@ -50,7 +50,7 @@ export function useWebRemoteControlStatus({
       if (disposed || !nextStatus) {
         return;
       }
-      // web 远控路径的状态可能缺位：phone 端 platform 是 P2P shim 代理，
+      // zcode-go：web 远控路径的状态可能缺位：phone 端 platform 是 P2P shim 代理，
       // 轮询/事件在通道未就绪或对端无该方法时 resolve undefined——保持当前
       // 状态即可，不能让比较器读 undefined.status 炸掉整个 home（CI 三平台
       // fresh-model 实证：错误边界接管后再无 composer 可输入）。

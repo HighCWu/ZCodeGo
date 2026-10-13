@@ -1,4 +1,5 @@
 import { cn } from "@/components/lib/utils.js";
+// zcode-go：品牌资产行。
 import zaiLogoUrl from "@/assets/provider-icons/logo-zai-go.svg";
 
 export function WindowsTopLeftLogo({

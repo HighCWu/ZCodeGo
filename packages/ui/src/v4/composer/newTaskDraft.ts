@@ -8,7 +8,7 @@ import {
 } from "@/v4/composer/composerDraftStore.js";
 
 /**
- * 新任务草稿的「自动勾上」兜底：preferredSelection 缺失（全新环境无偏好记录，
+ * zcode-go 新任务草稿的「自动勾上」兜底：preferredSelection 缺失（全新环境无偏好记录，
  * 或 Registry 对全部模型给不出 reasoning 档位）时，按 View 顺序取第一个有模型
  * 的 provider 的第一个模型。只用于新任务草稿——会话快照的空选择是确定结果，
  * 绝不进入本兜底。选择不带 options（与用户手动选模同形），档位由控件自行呈现。

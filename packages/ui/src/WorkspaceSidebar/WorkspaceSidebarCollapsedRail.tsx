@@ -1,4 +1,5 @@
 import { PanelLeftOpen } from "lucide-react";
+// zcode-go：品牌资产行。
 import appLogoUrl from "@/assets/provider-icons/logo-zai-go.svg";
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";

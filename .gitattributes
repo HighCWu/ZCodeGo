@@ -5,7 +5,7 @@
 # E2E PDF fixture 含规范 xref 尾空格，必须按二进制处理，避免 diff --check 误报。
 packages/desktop/test/e2e/fixtures/fs/**/*.pdf binary
 
-# Gen UI vendor 离线快照按字节保存：构建时 sha256 对 manifest 校验，
+# zcode-go：Gen UI vendor 离线快照按字节保存：构建时 sha256 对 manifest 校验，
 # Windows 检出 CRLF 化会把 floating-ui 等 vendor 文件的哈希打歪（CI 实证）。
 apps/zcode-cli/packages/visualize-plugin/skills/visualize/assets/** -text
 

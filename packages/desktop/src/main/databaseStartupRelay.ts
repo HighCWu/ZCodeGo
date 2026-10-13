@@ -22,7 +22,7 @@ export function onLocalDatabaseStartupReady(listener: () => void): void {
 
 const windowBindings = new WeakMap<BrowserWindow, () => void>();
 const hostStartupIds = new WeakMap<UtilityProcess, string>();
-/** 每 startupId 的最新启动状态：迟挂窗口（桥窗口在桌面启动完成后才配对）在
+/** zcode-go：每 startupId 的最新启动状态：迟挂窗口（桥窗口在桌面启动完成后才配对）在
  *  bind 时据此播种 latest 并补投——否则 snapshot 请求落空（latest 仅从绑定
  *  之后的事件积累），web 端启动闸 30s 超时（CI 三平台实证、本地快机不复现）。 */
 const latestByStartupId = new Map<string, DatabaseStartupState>();

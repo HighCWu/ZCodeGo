@@ -334,7 +334,7 @@ export class ConversationProjectionStore {
       > & { directoryRevision: number })
     | null = null;
   private closed = false;
-  /** notOwned 自愈退避计数（成功 live 后复位）。 */
+  /** zcode-go notOwned 自愈退避计数（成功 live 后复位）。 */
   private notOwnedRecoveryAttempts = 0;
 
   constructor(

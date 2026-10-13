@@ -364,7 +364,7 @@ export function useZCodeIntl(): IntlContextValue {
 }
 
 /**
- * 获取 intl 上下文的可选版：Provider 缺失时回落默认语言实例，不抛错。
+ * zcode-go 获取 intl 上下文的可选版：Provider 缺失时回落默认语言实例，不抛错。
  * 供嵌在可独立渲染的宿主片段（如 WorkspaceHeader）里的组件使用——上游的
  * 单测以静态渲染为主、不包 Provider，无条件版会在测试与 SSR 场景炸掉整树。
  */

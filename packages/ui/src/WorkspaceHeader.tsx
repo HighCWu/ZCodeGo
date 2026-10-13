@@ -131,7 +131,7 @@ export function WorkspaceHeader({
 }) {
   const [selectedEditor, setSelectedEditor] = useState<EditorInfo | null>(null);
   const { intl } = useZCodeIntlOptional();
-  // 移动视口抽屉形态：顶部浮层不进手机，header 最左侧（folder 按钮之左）补一个
+  // zcode-go 移动视口抽屉形态：顶部浮层不进手机，header 最左侧（folder 按钮之左）补一个
   // 侧栏展开开关；task/draft 两种 variant 都需要它（草稿态没有 TitleSection）。
   // 桌面窗口由浮层 logo 开关承担，不重复渲染。
   const isMobileViewport = useIsMobileViewport();

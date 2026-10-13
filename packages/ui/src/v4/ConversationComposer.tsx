@@ -900,7 +900,7 @@ function ConversationComposerImpl({
   const reversePointerDeliveryRef = useRef(false);
   const appliedComposerRestoreRequestRef = useRef<number | null>(null);
   const appliedExternalTextInsertRequestRef = useRef<number | null>(null);
-  // 移动视口不自动聚焦：软键盘弹出会顶起整页（官方 remote 同款取舍），仅在用户点输入框时聚焦。
+  // zcode-go：移动视口不自动聚焦：软键盘弹出会顶起整页（官方 remote 同款取舍），仅在用户点输入框时聚焦。
   const isMobileViewport = useIsMobileViewport();
   // 决策入参经 ref 读取，避免把 autoFocusEnabled/disabled/viewport 灌进 scope effect 依赖，
   // 触发多余的草稿重恢复（disabled 变化本不应重放草稿）。

@@ -326,7 +326,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
   automationsActive?: boolean;
   pluginStoreActive?: boolean;
   onFileTreeOpenChange?: (open: boolean) => void;
-  /** 移动抽屉形态下顶部浮层不渲染，侧栏不再预留 h-12 空条。 */
+  /** zcode-go：移动抽屉形态下顶部浮层不渲染，侧栏不再预留 h-12 空条（WorkspaceShellLayout 传值）。 */
   hideTopOverlaySpacer?: boolean;
   onWebRemoteTaskOpen?: (options: { crossWorkspace: boolean }) => void;
   onWebRemoteTaskSwitchingChange?: (switching: boolean) => void;
