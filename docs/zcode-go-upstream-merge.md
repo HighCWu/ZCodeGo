@@ -47,6 +47,11 @@ zcodeGoUiAutoRecovery.ts、zcode-go.css、i18n/locales/zcode-go-{zh-CN,en-US}.ts
 4. **品牌/类型不可避免**：logo import 资产行 ×3、index.html 启动屏、
    env.ts/settingsNavigation 类型联合扩展、services/package.json 逗号。
 
+锚纪律：63/63 个上游改动文件的新增插入点均带 zcode-go 锚标识
+（复验：`git diff --unified=0 aac4755 -- <file> | grep "^+" | grep -c zcode-go`，
+为 0 即缺锚）。合并冲突时 `git diff aac4755...HEAD --name-only` +
+逐文件 grep zcode-go 即可枚举我们全部插入位置。
+
 ## 后续提取候选（按收益排序；本轮未做的原因与做法）
 
 1. **packages/desktop/src/main/index.ts（第二轮后 442+，纯插入为主）**
