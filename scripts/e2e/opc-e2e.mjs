@@ -519,8 +519,15 @@ writeFileSync(
     receivedAt: new Date().toISOString(),
   }),
 );
-let si = await getState(ev);
-assert((si.inbox ?? []).length === 2, "入站扫描可见 2 条");
+let si = await getState();
+// 按 title 断言而非总数：Telegram worker 的首轮拉取可能已把 mock 消息投进
+// 同一队列（渠道中立 ingest 的合法并发，CI 三平台实证总数竞态）。
+assert(
+  ["入站转正", "忽略我"].every((t) =>
+    (si.inbox ?? []).some((i) => i.title === t),
+  ),
+  "入站扫描可见 drop 的 2 条",
+);
 si = JSON.parse(
   await ev(
     `window.zcode.zcodeGoOpcConsumeInbox({ workspacePath: ${JSON.stringify(WORKSPACE)}, fileName: "1-convert.json", convert: { title: "入站转正", priority: "high" } }).then(r => JSON.stringify(r))`,
@@ -536,7 +543,13 @@ si = JSON.parse(
     `window.zcode.zcodeGoOpcConsumeInbox({ workspacePath: ${JSON.stringify(WORKSPACE)}, fileName: "2-dismiss.json", convert: null }).then(r => JSON.stringify(r))`,
   ),
 );
-assert(si.ok === true && (si.inbox ?? []).length === 0, "dismiss 删文件");
+assert(
+  si.ok === true &&
+    !["入站转正", "忽略我"].some((t) =>
+      (si.inbox ?? []).some((i) => i.title === t),
+    ),
+  "dismiss 删文件（drop 的两条不再可见）",
+);
 
 // ── 6. Telegram 渠道桥：mock API → 入站 ───────────────────────────────────
 console.log("6. 等待 Telegram 渠道桥首个轮询周期（10s）…");
