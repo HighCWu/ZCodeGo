@@ -24,6 +24,8 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOpcStore } from "@/store/opcStore.js";
 import {
   buildOpcDelegationPrompt,
+  buildOpcIntegrationPrompt,
+  isOpcWorkItemRunnable,
   type OpcRoleTemplateDraft,
   type OpcWorkItem,
 } from "@zcode/shared";
@@ -35,6 +37,7 @@ import { OpcSkillsView } from "./OpcSkillsView.js";
 import { OpcEvolutionView } from "./OpcEvolutionView.js";
 import { insertOpcPrompt } from "./opcComposerBridge.js";
 import {
+  OpcReworkDialog,
   OpcWorkItemDialog,
   type OpcWorkItemDialogState,
 } from "./opcDialogs.js";
@@ -75,6 +78,7 @@ export function ZcodeGoOpcPanelRoot({
   const [retroDialog, setRetroDialog] = useState<OpcRetroDialogState | null>(
     null,
   );
+  const [reworkDialog, setReworkDialog] = useState<OpcWorkItem | null>(null);
   const [upgradeDialog, setUpgradeDialog] =
     useState<OpcUpgradeDialogState | null>(null);
 
@@ -89,6 +93,50 @@ export function ZcodeGoOpcPanelRoot({
       void apply([{ kind: "workitem.status", workItemId, status }]);
     },
     [apply],
+  );
+
+  const handleEscalate = useCallback(
+    (workItemId: string) => {
+      void apply([{ kind: "workitem.escalate", workItemId }]);
+    },
+    [apply],
+  );
+
+  const handleResolveEscalation = useCallback(
+    (workItemId: string, action: "resume" | "takeover") => {
+      void apply([{ kind: "workitem.resolveEscalation", workItemId, action }]);
+    },
+    [apply],
+  );
+
+  const handleRework = useCallback((workItem: OpcWorkItem) => {
+    setReworkDialog(workItem);
+  }, []);
+
+  /** integrate：完成产出 → 下游整合 prompt 注入 composer（Self-Run 整合动作）。 */
+  const handleIntegrate = useCallback(
+    (workItem: OpcWorkItem) => {
+      if (!state || !workspacePath) return;
+      const dependents = state.workItems
+        .filter((item) => item.dependsOn.includes(workItem.id))
+        .map((item) => ({
+          title: item.title,
+          assigneeName:
+            state.employees.find((employee) => employee.id === item.assigneeId)
+              ?.name ?? null,
+        }));
+      const inserted = insertOpcPrompt({
+        workspacePath,
+        workspaceIdentity: workspaceIdentity ?? undefined,
+        text: buildOpcIntegrationPrompt({
+          completedTitle: workItem.title,
+          completedDetail: workItem.detail,
+          dependents,
+        }),
+      });
+      if (inserted) setOpen(false);
+    },
+    [state, workspacePath, workspaceIdentity],
   );
 
   const handleDeleteWorkItem = useCallback(
@@ -133,13 +181,28 @@ export function ZcodeGoOpcPanelRoot({
         skillNamesRemaining: [],
         recentLessons,
         memoryFilePath: `.opc/memory/${employee.id}.md`,
+        reworkNotes: workItem.reworkNotes,
       });
+      // 依赖就绪门控（与 reducer/看板同规则）：未就绪不允许委派。
+      if (!isOpcWorkItemRunnable(workItem, state.workItems)) return;
       const inserted = insertOpcPrompt({
         workspacePath,
         workspaceIdentity: workspaceIdentity ?? undefined,
         text: prompt,
       });
-      if (inserted) setOpen(false);
+      if (inserted) {
+        // 委派即开跑：ready → in_progress（reducer 同规则门控兜底）。
+        if (workItem.status === "ready") {
+          void apply([
+            {
+              kind: "workitem.status",
+              workItemId: workItem.id,
+              status: "in_progress",
+            },
+          ]);
+        }
+        setOpen(false);
+      }
     },
     [
       state,
@@ -254,6 +317,10 @@ export function ZcodeGoOpcPanelRoot({
                 onStatusChange={handleStatusChange}
                 onDeleteWorkItem={handleDeleteWorkItem}
                 onDelegate={handleDelegate}
+                onEscalate={handleEscalate}
+                onResolveEscalation={handleResolveEscalation}
+                onRework={handleRework}
+                onIntegrate={handleIntegrate}
               />
             </TabsContent>
             <TabsContent value="org" className="min-h-0 flex-1">
@@ -302,6 +369,16 @@ export function ZcodeGoOpcPanelRoot({
           </Tabs>
         </DialogContent>
       </Dialog>
+      {reworkDialog ? (
+        <OpcReworkDialog
+          workItem={reworkDialog}
+          onClose={() => setReworkDialog(null)}
+          onSubmit={(mutations) => {
+            void apply(mutations);
+            setReworkDialog(null);
+          }}
+        />
+      ) : null}
       {workItemDialog ? (
         <OpcWorkItemDialog
           state={state}

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -65,8 +66,14 @@ export function OpcWorkItemDialog({
   const [priority, setPriority] = useState<OpcWorkItemPriority>(
     editing?.priority ?? "medium",
   );
+  const [dependsOn, setDependsOn] = useState<string[]>(
+    editing?.dependsOn ?? [],
+  );
   const activeEmployees = state.employees.filter(
     (employee) => employee.status === "active",
+  );
+  const dependencyCandidates = state.workItems.filter(
+    (item) => item.id !== editing?.id,
   );
 
   return (
@@ -153,6 +160,39 @@ export function OpcWorkItemDialog({
               </Select>
             </div>
           </div>
+          {dependencyCandidates.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <Label>{intl.formatMessage({ id: "opc.workitem.deps" })}</Label>
+              <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-card-border bg-surface p-2">
+                {dependencyCandidates.map((candidate) => {
+                  const selected = dependsOn.includes(candidate.id);
+                  return (
+                    <Button
+                      key={candidate.id}
+                      size="xs"
+                      variant={selected ? "secondary" : "ghost"}
+                      onClick={() =>
+                        setDependsOn((current) =>
+                          selected
+                            ? current.filter((id) => id !== candidate.id)
+                            : [...current, candidate.id],
+                        )
+                      }
+                      title={candidate.title}
+                    >
+                      {selected ? "✓ " : ""}
+                      <span className="max-w-40 truncate">
+                        {candidate.title}
+                      </span>
+                    </Button>
+                  );
+                })}
+              </div>
+              <p className="text-ui-xs text-foreground-faint">
+                {intl.formatMessage({ id: "opc.workitem.depsHint" })}
+              </p>
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose}>
@@ -173,6 +213,7 @@ export function OpcWorkItemDialog({
                       detail,
                       assigneeId: patchAssignee,
                       priority,
+                      dependsOn,
                     },
                   },
                 ]);
@@ -184,12 +225,88 @@ export function OpcWorkItemDialog({
                     detail,
                     assigneeId: patchAssignee,
                     priority,
+                    dependsOn,
                   },
                 ]);
               }
             }}
           >
             {intl.formatMessage({ id: "opc.common.save" })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 返工退回对话框（review → in_progress + 返工意见）
+// ---------------------------------------------------------------------------
+
+export function OpcReworkDialog({
+  workItem,
+  onClose,
+  onSubmit,
+}: {
+  workItem: OpcWorkItem;
+  onClose: () => void;
+  onSubmit: (mutations: OpcMutation[]) => void;
+}) {
+  const { intl } = useZCodeIntl();
+  const [note, setNote] = useState("");
+  const existing = workItem.reworkNotes ?? [];
+
+  return (
+    <Dialog open onOpenChange={(next) => (!next ? onClose() : undefined)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {intl.formatMessage({ id: "opc.rework.title" })}
+          </DialogTitle>
+          <DialogDescription>
+            {intl.formatMessage({ id: "opc.rework.description" })}
+          </DialogDescription>
+        </DialogHeader>
+        {existing.length > 0 ? (
+          <div className="rounded-lg border border-card-border bg-surface p-2">
+            <p className="mb-1 text-ui-xs text-foreground-faint">
+              {intl.formatMessage({ id: "opc.rework.existing" })}
+            </p>
+            <ul className="space-y-0.5">
+              {existing.map((item) => (
+                <li key={item} className="text-ui-xs text-foreground-subtle">
+                  · {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <Textarea
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          rows={4}
+          placeholder={intl.formatMessage({ id: "opc.rework.notePlaceholder" })}
+          autoFocus
+        />
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            {intl.formatMessage({ id: "opc.common.cancel" })}
+          </Button>
+          <Button
+            size="sm"
+            disabled={!note.trim()}
+            onClick={() => {
+              onSubmit([
+                {
+                  kind: "workitem.rework",
+                  workItemId: workItem.id,
+                  note: note.trim(),
+                },
+              ]);
+              onClose();
+            }}
+          >
+            {intl.formatMessage({ id: "opc.rework.submit" })}
           </Button>
         </DialogFooter>
       </DialogContent>

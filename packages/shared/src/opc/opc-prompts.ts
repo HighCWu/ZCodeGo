@@ -66,6 +66,14 @@ export function buildOpcDelegationPrompt(
       `注意：本任务依赖以下前置工作项的产出：${workItem.dependsOn.join("、")}。`,
     );
   }
+  if (input.reworkNotes && input.reworkNotes.length > 0) {
+    sections.push(
+      "",
+      "## 返工意见（上一轮验收未通过，必须逐条解决）",
+      "",
+      ...input.reworkNotes.map((note, index) => `${index + 1}. ${note}`),
+    );
+  }
   sections.push(
     "",
     "## 执行要求",
@@ -121,4 +129,42 @@ export function buildOpcSkillUpgradePrompt(input: {
     "<完整的 SKILL.md 新正文>",
     "````" + OPC_SKILL_FENCE,
   ].join("\n");
+}
+
+export function buildOpcIntegrationPrompt(input: {
+  completedTitle: string;
+  completedDetail: string;
+  /** 下游被依赖项（标题 + 负责人名）。 */
+  dependents: Array<{ title: string; assigneeName: string | null }>;
+}): string {
+  const sections: string[] = [
+    "以下是刚完成的工作项产出，请把它的成果整合进后续工作：",
+    "",
+    `## 已完成：${input.completedTitle}`,
+  ];
+  if (input.completedDetail.trim().length > 0) {
+    sections.push("", input.completedDetail.trim());
+  }
+  if (input.dependents.length > 0) {
+    sections.push(
+      "",
+      "## 依赖本项产出的后续工作项",
+      "",
+      ...input.dependents.map((dependent) => {
+        const assignee = dependent.assigneeName
+          ? `（负责人：${dependent.assigneeName}）`
+          : "";
+        return `- ${dependent.title}${assignee}`;
+      }),
+      "",
+      "整合要求：梳理已完成产出中对上述后续项可直接复用的部分（结论/文档/代码/数据），",
+      "指出各项应从哪里接续、需要注意的前置假设，并明确下一步动作建议。",
+    );
+  } else {
+    sections.push(
+      "",
+      "当前没有登记的下游依赖项；请把可复用的产出整理成一段可直接归档引用的摘要。",
+    );
+  }
+  return sections.join("\n");
 }

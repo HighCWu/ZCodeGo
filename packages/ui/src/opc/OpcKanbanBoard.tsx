@@ -1,13 +1,16 @@
 /**
  * zcode-go OPC 看板（吸收 OpenOPC WorkItem 状态机：backlog→ready→in_progress→review→done）。
- * 状态推进按钮由共享 reducer 的流转表驱动（非法流转不渲染按钮）。
+ * 状态推进按钮由共享 reducer 的流转表驱动（非法流转不渲染按钮）；
+ * Self-Run 管理动作齐备：依赖就绪门控（🔒）、委派、审查（通过/退回返工）、
+ * 升级上报（escalation）与所有者接手、完成产出的下游整合（integrate）。
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { ScrollArea } from "@/components/ui/scroll-area.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
+  isOpcWorkItemRunnable,
   OPC_WORK_ITEM_TRANSITIONS,
   type OpcCompanyState,
   type OpcWorkItem,
@@ -28,6 +31,17 @@ export interface OpcKanbanBoardProps {
   onStatusChange: (workItemId: string, status: OpcWorkItemStatus) => void;
   onDeleteWorkItem: (workItemId: string) => void;
   onDelegate: (workItem: OpcWorkItem) => void;
+  /** 升级上报（OpenOPC escalation：超权限/阻塞，待所有者处理）。 */
+  onEscalate: (workItemId: string) => void;
+  /** 解除升级；takeover = 所有者接手（转派创始人）。 */
+  onResolveEscalation: (
+    workItemId: string,
+    action: "resume" | "takeover",
+  ) => void;
+  /** review 退回返工（打开意见对话框）。 */
+  onRework: (workItem: OpcWorkItem) => void;
+  /** done 且有被依赖项 → 生成整合 prompt 注入 composer。 */
+  onIntegrate: (workItem: OpcWorkItem) => void;
 }
 
 export function OpcKanbanBoard({
@@ -37,19 +51,42 @@ export function OpcKanbanBoard({
   onStatusChange,
   onDeleteWorkItem,
   onDelegate,
+  onEscalate,
+  onResolveEscalation,
+  onRework,
+  onIntegrate,
 }: OpcKanbanBoardProps) {
   const { intl } = useZCodeIntl();
+  const [escalationFilter, setEscalationFilter] = useState(false);
   const employeesById = useMemo(
     () => new Map(state.employees.map((employee) => [employee.id, employee])),
     [state.employees],
   );
+  const escalationCount = state.workItems.filter(
+    (item) => item.escalatedAt,
+  ).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-ui-sm text-foreground-subtle">
-          {intl.formatMessage({ id: "opc.kanban.hint" })}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-ui-sm text-foreground-subtle">
+            {intl.formatMessage({ id: "opc.kanban.hint" })}
+          </p>
+          {escalationCount > 0 ? (
+            <Button
+              size="xs"
+              variant={escalationFilter ? "default" : "outline"}
+              onClick={() => setEscalationFilter((current) => !current)}
+            >
+              ⬆{" "}
+              {intl.formatMessage(
+                { id: "opc.kanban.escalationFilter" },
+                { count: escalationCount },
+              )}
+            </Button>
+          ) : null}
+        </div>
         <Button size="sm" onClick={onCreateWorkItem}>
           <Plus className="size-4" />
           {intl.formatMessage({ id: "opc.kanban.create" })}
@@ -58,7 +95,8 @@ export function OpcKanbanBoard({
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {OPC_WORK_ITEM_STATUSES.map((status) => {
           const items = state.workItems.filter(
-            (item) => item.status === status,
+            (item) =>
+              item.status === status && (!escalationFilter || item.escalatedAt),
           );
           return (
             <div
@@ -82,6 +120,29 @@ export function OpcKanbanBoard({
                     const transitions = OPC_WORK_ITEM_TRANSITIONS[
                       item.status
                     ].filter((next) => next !== "cancelled");
+                    const runnable = isOpcWorkItemRunnable(
+                      item,
+                      state.workItems,
+                    );
+                    const unresolvedDeps = item.dependsOn
+                      .map((depId) =>
+                        state.workItems.find((dep) => dep.id === depId),
+                      )
+                      .filter(
+                        (dep): dep is OpcWorkItem =>
+                          dep !== undefined &&
+                          dep.status !== "done" &&
+                          dep.status !== "cancelled",
+                      );
+                    const dependents = state.workItems.filter((dep) =>
+                      dep.dependsOn.includes(item.id),
+                    );
+                    const canDelegate =
+                      assignee !== null &&
+                      item.status !== "done" &&
+                      item.status !== "cancelled" &&
+                      item.status !== "review" &&
+                      runnable;
                     return (
                       <div
                         key={item.id}
@@ -93,21 +154,41 @@ export function OpcKanbanBoard({
                           onClick={() => onEditWorkItem(item)}
                         >
                           <p className="line-clamp-2 text-ui-sm font-medium text-foreground">
+                            {item.escalatedAt ? "⬆ " : ""}
                             {item.title}
                           </p>
                         </button>
-                        <div className="mt-2 flex items-center gap-1.5">
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           <OpcPriorityBadge priority={item.priority} />
                           {item.status !== "done" ? (
                             <OpcStatusBadge status={item.status} />
                           ) : null}
+                          {!runnable &&
+                          item.status !== "done" &&
+                          item.status !== "cancelled" ? (
+                            <span
+                              className="inline-flex items-center rounded-md bg-surface-hover px-1.5 py-0.5 text-ui-xs text-foreground-faint"
+                              title={unresolvedDeps
+                                .map((dep) => dep.title)
+                                .join("、")}
+                            >
+                              🔒{" "}
+                              {intl.formatMessage(
+                                { id: "opc.kanban.locked" },
+                                { count: unresolvedDeps.length },
+                              )}
+                            </span>
+                          ) : null}
                         </div>
+                        {item.escalationNote ? (
+                          <p className="mt-1 line-clamp-1 text-ui-xs text-amber-600 dark:text-amber-400">
+                            {item.escalationNote}
+                          </p>
+                        ) : null}
                         <div className="mt-2 flex items-center justify-between">
                           <OpcEmployeeAvatar employee={assignee} />
                           <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                            {assignee &&
-                            item.status !== "done" &&
-                            item.status !== "cancelled" ? (
+                            {canDelegate ? (
                               <Button
                                 size="xs"
                                 variant="ghost"
@@ -119,6 +200,88 @@ export function OpcKanbanBoard({
                                 {intl.formatMessage({
                                   id: "opc.kanban.delegate",
                                 })}
+                              </Button>
+                            ) : null}
+                            {item.status === "review" ? (
+                              <>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    onStatusChange(item.id, "done")
+                                  }
+                                  title={intl.formatMessage({
+                                    id: "opc.kanban.approve",
+                                  })}
+                                >
+                                  ✓
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={() => onRework(item)}
+                                  title={intl.formatMessage({
+                                    id: "opc.kanban.rework",
+                                  })}
+                                >
+                                  ↩
+                                </Button>
+                              </>
+                            ) : null}
+                            {item.status === "done" && dependents.length > 0 ? (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => onIntegrate(item)}
+                                title={intl.formatMessage({
+                                  id: "opc.kanban.integrate",
+                                })}
+                              >
+                                {intl.formatMessage({
+                                  id: "opc.kanban.integrate",
+                                })}
+                              </Button>
+                            ) : null}
+                            {item.escalatedAt ? (
+                              <>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    onResolveEscalation(item.id, "takeover")
+                                  }
+                                  title={intl.formatMessage({
+                                    id: "opc.kanban.takeover",
+                                  })}
+                                >
+                                  {intl.formatMessage({
+                                    id: "opc.kanban.takeover",
+                                  })}
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    onResolveEscalation(item.id, "resume")
+                                  }
+                                  title={intl.formatMessage({
+                                    id: "opc.kanban.resolveEscalation",
+                                  })}
+                                >
+                                  ✕
+                                </Button>
+                              </>
+                            ) : item.status !== "done" &&
+                              item.status !== "cancelled" ? (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => onEscalate(item.id)}
+                                title={intl.formatMessage({
+                                  id: "opc.kanban.escalate",
+                                })}
+                              >
+                                ⬆
                               </Button>
                             ) : null}
                             {transitions.map((next) => (

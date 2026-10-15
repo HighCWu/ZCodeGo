@@ -36,8 +36,25 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    ```
 3. 工作项状态机：`backlog → ready → in_progress → review → done`（侧向 `cancelled`）。
    状态流转由 reducer 校验，任意跳转仅允许沿状态机或回退到 `backlog`。
+   - **依赖就绪门控（runnability）**：`ready → in_progress` 仅当全部 `dependsOn`
+     前置为 done/cancelled（悬空 id 视为已解决，避免删除依赖造成死锁）；backlog→ready
+     不受限（规划自由）。委派按钮同规则门控。
+   - **依赖传播**：前置项变为 done 时，`backlog` 中的被依赖项若已全部就绪，自动升到
+     `ready`（静默，无事件），实现「独立项并行、依赖项等待」的最小语义。
+   - **升级上报（escalation）**：工作项可 `escalate`（记 escalatedAt + 说明，进化事件
+     留痕）；升级项在看板徽标并计入「待所有者处理」；`resolveEscalation` 支持
+     `resume`（解除）与 `takeover`（解除并转派给创始人执行）。
+   - **返工（rework）**：review 态工作项可退回 in_progress 并落 `reworkNotes`
+     （追加式）；委派 prompt 注入「返工意见（必须逐条解决）」，闭环 rework 循环。
+   - **整合（integrate）**：done 且存在被依赖项时，可一键生成整合 prompt
+     （注入 composer，面向下游负责人说明产出与后续动作）。
 4. 招聘（Self-Built）：从人才市场模板一键实例化员工（含内置 24 角色 + 导入模板 +
    自定义），或先建岗位再招人；员工可暂停/离职（离职不删历史经验）。
+   - **组织智能**：「按目标生成架构」——把生成 prompt 注入 composer，agent 输出
+     ```opc-org 围栏 JSON（slots/hires），粘贴回弹窗解析预览后一键应用（岗位去重、
+     模板按名称匹配内置/导入库，未命中按自定义招聘）；另内置 corporate 预设一键应用。
+     招聘对话框对同模板的暂停/离职员工给出「复用」建议（改状态而非重复招聘）。
+     ```
 5. 执行（Self-Run）：工作项「委派」把角色模板正文 + 挂接技能 + 工作项上下文合成为
    委派 prompt，经既有 `requestComposerTextInsert` 注入 composer，由用户确认发送
    （不自动发送，不绕过既有会话准入）。完成的判定与推进由用户驱动。

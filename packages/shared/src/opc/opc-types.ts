@@ -48,6 +48,23 @@ export function isOpcWorkItemTransition(
   return from !== to && OPC_WORK_ITEM_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * 依赖就绪门控（OpenOPC "runnability"）：全部 dependsOn 前置为 done/cancelled
+ * 才可进入执行。悬空 id（依赖项被删）视为已解决，避免删除依赖造成死锁。
+ * backlog→ready 不受限（规划自由）；本门控只拦执行态进入与委派动作。
+ */
+export function isOpcWorkItemRunnable(
+  workItem: Pick<OpcWorkItem, "dependsOn">,
+  allItems: OpcWorkItem[],
+): boolean {
+  if (workItem.dependsOn.length === 0) return true;
+  const statusById = new Map(allItems.map((item) => [item.id, item.status]));
+  return workItem.dependsOn.every((depId) => {
+    const status = statusById.get(depId);
+    return status === undefined || status === "done" || status === "cancelled";
+  });
+}
+
 export type OpcWorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export interface OpcWorkItem {
@@ -64,6 +81,11 @@ export interface OpcWorkItem {
   completedAt: number | null;
   /** 最近一次委派对应的会话 id（可选留痕，便于回溯）。 */
   sessionId?: string;
+  /** 升级上报时间（OpenOPC escalation 语义：超权限/阻塞，待所有者处理）。 */
+  escalatedAt?: number | null;
+  escalationNote?: string;
+  /** 返工意见（review 退回时追加；委派 prompt 注入，必须逐条解决）。 */
+  reworkNotes?: string[];
 }
 
 export type OpcEmployeeSeniority = "junior" | "senior" | "lead";
@@ -249,6 +271,14 @@ export type OpcMutation =
     }
   | { kind: "workitem.status"; workItemId: string; status: OpcWorkItemStatus }
   | { kind: "workitem.delete"; workItemId: string }
+  | { kind: "workitem.escalate"; workItemId: string; note?: string }
+  | {
+      kind: "workitem.resolveEscalation";
+      workItemId: string;
+      /** resume：仅解除升级；takeover：解除并转派创始人执行。 */
+      action: "resume" | "takeover";
+    }
+  | { kind: "workitem.rework"; workItemId: string; note: string }
   | {
       kind: "retro.record";
       employeeId: string;
@@ -320,6 +350,8 @@ export interface OpcDelegationPromptInput {
   /** 该员工最近的私人经验（新→旧，最多 10 条）。 */
   recentLessons: string[];
   memoryFilePath: string;
+  /** 返工意见（上一轮验收退回，必须逐条解决）。 */
+  reworkNotes?: string[];
 }
 
 /** agent 复盘输出围栏名：```opc-lessons { "lessons": [...] } */

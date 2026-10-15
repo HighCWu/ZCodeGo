@@ -336,3 +336,231 @@ describe("内置模板包", () => {
     expect(ids.size).toBe(16);
   });
 });
+
+import { isOpcWorkItemRunnable } from "../src/opc/opc-types.js";
+
+describe("依赖就绪门控与传播（Self-Run）", () => {
+  function makeDeps() {
+    let state = createEmptyOpcCompanyState(NOW);
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.create", title: "上游" },
+      NOW + 1,
+    ).state;
+    state = applyOpcMutation(
+      state,
+      {
+        kind: "workitem.create",
+        title: "下游",
+        dependsOn: [state.workItems[0]!.id],
+      },
+      NOW + 2,
+    ).state;
+    return state;
+  }
+
+  it("runnability：前置 done/cancelled 才就绪；悬空 id 视为已解决", () => {
+    const state = makeDeps();
+    const [up, down] = state.workItems;
+    expect(isOpcWorkItemRunnable(down!, state.workItems)).toBe(false);
+    // 上游走完整链（backlog→ready→in_progress→review→done）
+    let walking = state;
+    for (const next of ["ready", "in_progress", "review", "done"] as const) {
+      walking = applyOpcMutation(
+        walking,
+        { kind: "workitem.status", workItemId: up!.id, status: next },
+        NOW + 3,
+      ).state;
+    }
+    const done = { state: walking };
+    // 传播：下游 backlog → ready
+    expect(done.state.workItems[1]?.status).toBe("ready");
+    expect(
+      isOpcWorkItemRunnable(done.state.workItems[1]!, done.state.workItems),
+    ).toBe(true);
+    const withDangling = {
+      ...done.state,
+      workItems: [
+        {
+          ...done.state.workItems[1]!,
+          status: "backlog" as const,
+          dependsOn: ["wi_deleted"],
+        },
+      ],
+    };
+    expect(
+      isOpcWorkItemRunnable(withDangling.workItems[0]!, withDangling.workItems),
+    ).toBe(true);
+  });
+
+  it("ready→in_progress 在前置未解决时被拒绝", () => {
+    const state = makeDeps();
+    const down = state.workItems[1]!;
+    const ready = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: down.id, status: "ready" },
+      NOW + 3,
+    );
+    const blocked = applyOpcMutation(
+      ready.state,
+      { kind: "workitem.status", workItemId: down.id, status: "in_progress" },
+      NOW + 4,
+    );
+    expect(blocked.state).toBe(ready.state);
+  });
+
+  it("部分依赖完成不触发传播（还有其他未解决前置）", () => {
+    let state = createEmptyOpcCompanyState(NOW);
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.create", title: "前置A" },
+      NOW + 1,
+    ).state;
+    const a = state.workItems[0]!.id;
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.create", title: "前置B" },
+      NOW + 2,
+    ).state;
+    const b = state.workItems[1]!.id;
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.create", title: "汇总", dependsOn: [a, b] },
+      NOW + 3,
+    ).state;
+    const half = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: a, status: "done" },
+      NOW + 4,
+    );
+    expect(half.state.workItems[2]?.status).toBe("backlog");
+  });
+});
+
+describe("升级上报与接手（escalation）", () => {
+  it("升级留痕 + 进化事件；takeover 转派创始人", () => {
+    let state = createEmptyOpcCompanyState(NOW);
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.create", title: "卡住的任务" },
+      NOW + 1,
+    ).state;
+    const id = state.workItems[0]!.id;
+    const escalated = applyOpcMutation(
+      state,
+      { kind: "workitem.escalate", workItemId: id, note: "超预算" },
+      NOW + 2,
+    );
+    expect(escalated.state.workItems[0]?.escalatedAt).toBe(NOW + 2);
+    expect(escalated.state.workItems[0]?.escalationNote).toBe("超预算");
+    expect(
+      escalated.events.some((event) => event.summary.includes("升级给所有者")),
+    ).toBe(true);
+    const takeover = applyOpcMutation(
+      escalated.state,
+      {
+        kind: "workitem.resolveEscalation",
+        workItemId: id,
+        action: "takeover",
+      },
+      NOW + 3,
+    );
+    expect(takeover.state.workItems[0]?.escalatedAt).toBeNull();
+    expect(takeover.state.workItems[0]?.assigneeId).toBe(
+      takeover.state.employees.find((item) => item.isFallback)?.id,
+    );
+    // resume 仅解除不转派
+    state = applyOpcMutation(
+      takeover.state,
+      { kind: "workitem.escalate", workItemId: id },
+      NOW + 4,
+    ).state;
+    const resumed = applyOpcMutation(
+      state,
+      { kind: "workitem.resolveEscalation", workItemId: id, action: "resume" },
+      NOW + 5,
+    );
+    expect(resumed.state.workItems[0]?.assigneeId).toBe(
+      takeover.state.workItems[0]?.assigneeId,
+    );
+    // done/cancelled 不可升级
+    state = applyOpcMutation(
+      resumed.state,
+      { kind: "workitem.status", workItemId: id, status: "ready" },
+      NOW + 6,
+    ).state;
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: id, status: "in_progress" },
+      NOW + 7,
+    ).state;
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: id, status: "review" },
+      NOW + 8,
+    ).state;
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: id, status: "done" },
+      NOW + 9,
+    ).state;
+    const after = applyOpcMutation(
+      state,
+      { kind: "workitem.escalate", workItemId: id },
+      NOW + 10,
+    );
+    expect(after.state.workItems[0]?.escalatedAt).toBeNull();
+  });
+});
+
+describe("返工（rework）", () => {
+  it("review 退回 in_progress + 意见追加；非 review 态拒绝", () => {
+    let state = createEmptyOpcCompanyState(NOW);
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.create", title: "要返工" },
+      NOW + 1,
+    ).state;
+    const id = state.workItems[0]!.id;
+    for (const next of ["ready", "in_progress", "review"] as const) {
+      state = applyOpcMutation(
+        state,
+        { kind: "workitem.status", workItemId: id, status: next },
+        NOW + 2,
+      ).state;
+    }
+    const reworked = applyOpcMutation(
+      state,
+      { kind: "workitem.rework", workItemId: id, note: "边界没覆盖" },
+      NOW + 3,
+    );
+    expect(reworked.state.workItems[0]?.status).toBe("in_progress");
+    expect(reworked.state.workItems[0]?.reworkNotes).toEqual(["边界没覆盖"]);
+    const reReview = applyOpcMutation(
+      reworked.state,
+      { kind: "workitem.status", workItemId: id, status: "review" },
+      NOW + 4,
+    );
+    const again = applyOpcMutation(
+      reReview.state,
+      { kind: "workitem.rework", workItemId: id, note: "还不行" },
+      NOW + 5,
+    );
+    expect(again.state.workItems[0]?.reworkNotes).toEqual([
+      "边界没覆盖",
+      "还不行",
+    ]);
+    // 非 review 态（in_progress）不可返工
+    const inProgress = applyOpcMutation(
+      again.state,
+      { kind: "workitem.status", workItemId: id, status: "in_progress" },
+      NOW + 6,
+    );
+    const rejected = applyOpcMutation(
+      inProgress.state,
+      { kind: "workitem.rework", workItemId: id, note: "x" },
+      NOW + 7,
+    );
+    expect(rejected.state).toBe(inProgress.state);
+  });
+});

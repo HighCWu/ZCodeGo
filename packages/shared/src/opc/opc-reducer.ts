@@ -11,6 +11,7 @@ import {
 } from "./opc-evolution.js";
 import { opcStableId, parseOpcRoleTemplate } from "./opc-template-format.js";
 import {
+  isOpcWorkItemRunnable,
   isOpcWorkItemTransition,
   type OpcCompanyState,
   type OpcEmployee,
@@ -18,6 +19,7 @@ import {
   type OpcMutation,
   type OpcMutationResult,
   type OpcRoleSlot,
+  type OpcWorkItem,
 } from "./opc-types.js";
 
 export function createEmptyOpcCompanyState(now: number): OpcCompanyState {
@@ -313,20 +315,35 @@ function applyOnce(
       if (!isOpcWorkItemTransition(target.status, mutation.status)) {
         return { state, events: [] };
       }
+      // 依赖就绪门控：进入执行态必须前置全部解决（OpenOPC "runnability"）。
+      if (
+        mutation.status === "in_progress" &&
+        !isOpcWorkItemRunnable(target, state.workItems)
+      ) {
+        return { state, events: [] };
+      }
+      let workItems: OpcWorkItem[] = state.workItems.map((item) =>
+        item.id === mutation.workItemId
+          ? {
+              ...item,
+              status: mutation.status,
+              updatedAt: now,
+              completedAt: mutation.status === "done" ? now : null,
+            }
+          : item,
+      );
+      // 依赖传播：前置完成 → backlog 中的被依赖项全部就绪时自动升 ready（静默）。
+      if (mutation.status === "done") {
+        workItems = workItems.map((item) =>
+          item.status === "backlog" &&
+          item.dependsOn.includes(mutation.workItemId) &&
+          isOpcWorkItemRunnable(item, workItems)
+            ? { ...item, status: "ready" as const, updatedAt: now }
+            : item,
+        );
+      }
       return {
-        state: {
-          ...state,
-          workItems: state.workItems.map((item) =>
-            item.id === mutation.workItemId
-              ? {
-                  ...item,
-                  status: mutation.status,
-                  updatedAt: now,
-                  completedAt: mutation.status === "done" ? now : null,
-                }
-              : item,
-          ),
-        },
+        state: { ...state, workItems },
         events:
           mutation.status === "done"
             ? [
@@ -338,6 +355,110 @@ function applyOnce(
                 },
               ]
             : [],
+      };
+    }
+    case "workitem.escalate": {
+      const target = state.workItems.find(
+        (item) => item.id === mutation.workItemId,
+      );
+      if (
+        !target ||
+        target.status === "done" ||
+        target.status === "cancelled"
+      ) {
+        return { state, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          workItems: state.workItems.map((item) =>
+            item.id === mutation.workItemId
+              ? {
+                  ...item,
+                  escalatedAt: now,
+                  escalationNote: mutation.note?.trim() || undefined,
+                  updatedAt: now,
+                }
+              : item,
+          ),
+        },
+        events: [
+          {
+            id: createOpcEntityId("ev", now),
+            at: now,
+            kind: "workitem",
+            summary: `升级给所有者：${target.title}${mutation.note ? `（${mutation.note}）` : ""}`,
+          },
+        ],
+      };
+    }
+    case "workitem.resolveEscalation": {
+      const target = state.workItems.find(
+        (item) => item.id === mutation.workItemId,
+      );
+      if (!target || !target.escalatedAt) return { state, events: [] };
+      // takeover：解除升级并转派创始人（所有者亲自接手）。
+      const founder = state.employees.find((item) => item.isFallback);
+      return {
+        state: {
+          ...state,
+          workItems: state.workItems.map((item) =>
+            item.id === mutation.workItemId
+              ? {
+                  ...item,
+                  escalatedAt: null,
+                  escalationNote: undefined,
+                  updatedAt: now,
+                  ...(mutation.action === "takeover" && founder
+                    ? { assigneeId: founder.id }
+                    : {}),
+                }
+              : item,
+          ),
+        },
+        events:
+          mutation.action === "takeover"
+            ? [
+                {
+                  id: createOpcEntityId("ev", now),
+                  at: now,
+                  kind: "workitem",
+                  summary: `所有者接手：${target.title}`,
+                },
+              ]
+            : [],
+      };
+    }
+    case "workitem.rework": {
+      const target = state.workItems.find(
+        (item) => item.id === mutation.workItemId,
+      );
+      const note = mutation.note.trim();
+      if (!target || target.status !== "review" || note.length === 0) {
+        return { state, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          workItems: state.workItems.map((item) =>
+            item.id === mutation.workItemId
+              ? {
+                  ...item,
+                  status: "in_progress" as const,
+                  reworkNotes: [...(item.reworkNotes ?? []), note],
+                  updatedAt: now,
+                }
+              : item,
+          ),
+        },
+        events: [
+          {
+            id: createOpcEntityId("ev", now),
+            at: now,
+            kind: "workitem",
+            summary: `返工退回：${target.title}`,
+          },
+        ],
       };
     }
     case "workitem.delete": {

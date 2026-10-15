@@ -104,3 +104,45 @@ describe("复盘 / 升级 prompt", () => {
     expect(state.company.name.length).toBeGreaterThan(0);
   });
 });
+
+import { buildOpcIntegrationPrompt } from "../src/opc/opc-prompts.js";
+
+describe("整合与返工 prompt", () => {
+  it("integration prompt 列出完成项与下游依赖", () => {
+    const prompt = buildOpcIntegrationPrompt({
+      completedTitle: "发布脚本重构",
+      completedDetail: "验收：冒烟通过",
+      dependents: [{ title: "接入 CI", assigneeName: "小李" }],
+    });
+    expect(prompt).toContain("发布脚本重构");
+    expect(prompt).toContain("接入 CI");
+    expect(prompt).toContain("小李");
+    expect(prompt).toContain("冒烟通过");
+  });
+
+  it("无下游依赖时输出归档摘要要求", () => {
+    const prompt = buildOpcIntegrationPrompt({
+      completedTitle: "独立任务",
+      completedDetail: "",
+      dependents: [],
+    });
+    expect(prompt).toContain("归档");
+  });
+
+  it("委派 prompt 注入返工意见段", () => {
+    const prompt = buildOpcDelegationPrompt({
+      companyName: "演示公司",
+      employee,
+      roleBody: null,
+      workItem,
+      skillBodies: [],
+      skillNamesRemaining: [],
+      recentLessons: [],
+      memoryFilePath: ".opc/memory/emp_a.md",
+      reworkNotes: ["边界没覆盖", "性能不达标"],
+    });
+    expect(prompt).toContain("返工意见");
+    expect(prompt).toContain("边界没覆盖");
+    expect(prompt).toContain("性能不达标");
+  });
+});
