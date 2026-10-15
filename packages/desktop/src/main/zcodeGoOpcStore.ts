@@ -232,20 +232,31 @@ async function scanInbox(workspaceRoot: string): Promise<OpcInboxItem[]> {
     return [];
   }
   const items: OpcInboxItem[] = [];
+  const skipped: string[] = [];
   for (const entry of entries) {
     // d_type 兼容：DT_UNKNOWN 的文件系统上 isFile() 为 false，按扩展名兜底
     const looksLikeJsonFile =
       entry.isFile() || (!entry.isDirectory() && entry.name.endsWith(".json"));
-    if (!looksLikeJsonFile) continue;
+    if (!looksLikeJsonFile) {
+      skipped.push(`${entry.name}(非文件项)`);
+      continue;
+    }
     try {
       const item = parseOpcInboxFile(
         entry.name,
         await readFile(join(inboxDir, entry.name), "utf8"),
       );
       if (item) items.push(item);
-    } catch {
-      /* 单文件损坏不中断扫描 */
+      else skipped.push(`${entry.name}(解析不通过)`);
+    } catch (error) {
+      // 单文件损坏不中断扫描，但必须留痕——静默会让「入站永远为空」无从排查
+      skipped.push(`${entry.name}(${(error as Error).message})`);
     }
+  }
+  if (skipped.length > 0) {
+    opcLoggerWarn(
+      `[zcode-go] OPC 入站扫描跳过 ${skipped.length}/${entries.length} 项: ${skipped.join("; ")}`,
+    );
   }
   return items.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
 }
