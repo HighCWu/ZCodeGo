@@ -211,10 +211,19 @@ export type PersistedWorkspaceSessionEntry =
 // ── Process Monitor ──
 
 /** 资源管理器分类：基础服务 / 内置插件 / 社区插件 */
-export type ResourceUsageCategory = "base" | "builtin-plugin" | "community-plugin";
+export type ResourceUsageCategory =
+  | "base"
+  | "builtin-plugin"
+  | "community-plugin";
 
 /** 基础服务分组键；插件分组键为插件名或 MCP server name */
-export type ResourceUsageBaseGroupKey = "main" | "gpu" | "renderer" | "host" | "cli" | "utility";
+export type ResourceUsageBaseGroupKey =
+  | "main"
+  | "gpu"
+  | "renderer"
+  | "host"
+  | "cli"
+  | "utility";
 
 /** 资源管理器中的一个进程行（CPU 为整机归一化百分比，内存为字节） */
 export interface ResourceUsageProcess {
@@ -302,6 +311,8 @@ export interface AppSettings {
   zcodeGoUiAutoRecovery?: boolean;
   /** 插件接管（/zcode-go 拉起）时是否退出官版 ZCode；缺省 true = 退出。 */
   zcodeGoTakeoverCloseOfficial?: boolean;
+  /** zcode-go：OPC 编排器——一键无界面派发全部就绪工作项（desktop-continuous）。 */
+  zcodeGoOpcAutoOrchestrate?: boolean;
   /** Windows 关闭到托盘默认值是否已执行过一次性迁移；只用于设置迁移，不参与业务判断。 */
   closeToTrayOnWindowsMigrationInitialized?: boolean;
   /**
@@ -389,14 +400,18 @@ export interface AppSettings {
     title: string;
     markdown: string;
     releaseDate?: string;
-    releaseNotesByLocale?: Partial<Record<Locale, { title: string; markdown: string }>>;
+    releaseNotesByLocale?: Partial<
+      Record<Locale, { title: string; markdown: string }>
+    >;
   };
   /** 设置页“接收 preview 自动更新”偏好；仅桌面端自动更新读取。 */
   receivePreviewUpdates?: boolean;
   /** 设置页/更新弹窗“以后自动下载并安装更新”偏好；仅桌面端自动更新读取。 */
   autoDownloadAndInstallUpdates?: boolean;
   /** 用户跳过的 Electron 自动更新版本；按通道隔离，避免 stable / preview 互相遮挡。 */
-  skippedElectronUpdateVersions?: Partial<Record<ElectronReleaseChannel, string>>;
+  skippedElectronUpdateVersions?: Partial<
+    Record<ElectronReleaseChannel, string>
+  >;
   /** 首次启动设置同步提示是否已消费；只表示弹窗不再出现，不代表导入成功。 */
   settingsSyncFirstRunPromptHandled?: boolean;
   /** 外部 Web 远控 relay 的非敏感设备身份；passHash 必须存 credentialService。 */

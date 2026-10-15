@@ -242,4 +242,11 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.inbox.dismiss": "忽略",
   "opc.inbox.empty": "入站队列为空（外部投递契约见 spec「入站队列」节）",
   "opc.common.close": "关闭",
+  // zcode-go：OPC 编排器文案
+  "settings.zcodeGo.opcAutoOrchestrate": "OPC 自动编排",
+  "settings.zcodeGo.opcAutoOrchestrateDescription":
+    "看板「一键编排」把全部就绪且已分配的工作项无界面派发为后台会话（desktop-continuous，并发上限 3）。",
+  "opc.kanban.orchestrate": "一键编排 {count} 项",
+  "opc.kanban.orchestrateTitle":
+    "无界面派发全部就绪且已分配的工作项（后台会话，完成后请在任务列表验收）",
 };

@@ -144,6 +144,13 @@ talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」
    （会话消息即投递，零 token）。
 10. **Office 像素质感**：桌位卡对执行中员工做像素风微动画（bob），像素级
     精灵（Phaser/贴图）仍为可选彩蛋。
+11. **编排器（Self-Run 自动派发，desktop-continuous）**：看板「🚀 一键编排」
+    把全部就绪且已分配的工作项经 IZCodeTaskService 无界面派发为后台会话
+    （createTask v4Create + deferPersistenceUntilFirstPrompt + sendPrompt——
+    bots/automation 同款执行器；并发上限 3，desktop-continuous 链路），
+    派发即 in_progress。门控：AppSettings.zcodeGoOpcAutoOrchestrate（默认启用，
+    ZCode Go 设置页开关）。如实边界：opc-done 完成检测只覆盖有面板的会话，
+    headless 会话的完成判定仍为人工（任务列表验收）。
 
 ## 所有权与边界
 

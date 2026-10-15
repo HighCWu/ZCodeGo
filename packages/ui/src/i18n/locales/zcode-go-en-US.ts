@@ -253,4 +253,11 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.inbox.dismiss": "Dismiss",
   "opc.inbox.empty": "Inbound queue is empty (see the ingest contract in spec)",
   "opc.common.close": "Close",
+  // zcode-go: OPC orchestrator messages
+  "settings.zcodeGo.opcAutoOrchestrate": "OPC auto-orchestrate",
+  "settings.zcodeGo.opcAutoOrchestrateDescription":
+    'The kanban "orchestrate" button dispatches every ready & assigned work item as a background session (desktop-continuous, concurrency cap 3).',
+  "opc.kanban.orchestrate": "Orchestrate {count}",
+  "opc.kanban.orchestrateTitle":
+    "Dispatch all ready & assigned items headlessly (background sessions; verify in the task list when done)",
 };

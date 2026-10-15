@@ -39,7 +39,10 @@ export const localePreferenceSchema = z.enum(["system", "zh-CN", "en-US"]);
 const zcodeInteractionBehaviorSchema = z.enum(["queue", "guide"]);
 // launch.md「The user's choice」：读文件时未知取值（降级后读到新版本写的值）按「跟随」处理，
 // 不能让一个偏好字段把整份设置读坏。
-const dynamicWorkflowModeSettingSchema = z.enum(DYNAMIC_WORKFLOW_MODES).optional().catch(undefined);
+const dynamicWorkflowModeSettingSchema = z
+  .enum(DYNAMIC_WORKFLOW_MODES)
+  .optional()
+  .catch(undefined);
 const electronReleaseChannelSchema = z.enum(["stable", "preview"]);
 const desktopZoomLevelSchema = z.number().int().min(-3).max(5);
 const desktopWindowSizeSchema = z.object({
@@ -47,18 +50,21 @@ const desktopWindowSizeSchema = z.object({
   height: z.number().int().min(640),
   maximized: z.boolean(),
 });
-export const integratedTerminalShellSelectionSchema = z.discriminatedUnion("mode", [
-  z.object({
-    mode: z.literal("auto"),
-  }),
-  z.object({
-    mode: z.literal("shell"),
-    dialect: z.enum(["cmd", "git-bash"]),
-    id: nonEmptyStringSchema,
-    label: nonEmptyStringSchema,
-    path: nonEmptyStringSchema,
-  }),
-]);
+export const integratedTerminalShellSelectionSchema = z.discriminatedUnion(
+  "mode",
+  [
+    z.object({
+      mode: z.literal("auto"),
+    }),
+    z.object({
+      mode: z.literal("shell"),
+      dialect: z.enum(["cmd", "git-bash"]),
+      id: nonEmptyStringSchema,
+      label: nonEmptyStringSchema,
+      path: nonEmptyStringSchema,
+    }),
+  ],
+);
 const enabledBuiltinAgentCliProvidersSchema = z
   // 兼容旧 settings：历史列表可能残留三方 CLI provider，解析后统一归一为 ZCode Agent。
   .array(z.enum(["claude", "opencode", "gemini", "codex", "glm"]))
@@ -93,7 +99,9 @@ const remoteWorkspaceTargetSchema = z.discriminatedUnion("kind", [
     assetInstallMode: z.enum(REMOTE_ASSET_INSTALL_MODES).optional(),
     resourcePackages: z
       .object({
-        selectedPackageIds: z.array(z.string().refine(isKnownRemoteResourcePackageId)).optional(),
+        selectedPackageIds: z
+          .array(z.string().refine(isKnownRemoteResourcePackageId))
+          .optional(),
       })
       .optional(),
     passwordCredentialKey: nonEmptyStringSchema.optional(),
@@ -209,7 +217,10 @@ function sanitizeEmbeddedBrowserViewportPreference(value: unknown): unknown {
   if (parsed.success) {
     return value;
   }
-  const { embeddedBrowserViewportPreference: _embeddedBrowserViewportPreference, ...next } = raw;
+  const {
+    embeddedBrowserViewportPreference: _embeddedBrowserViewportPreference,
+    ...next
+  } = raw;
   // 显示偏好不是关键启动状态，单字段损坏不应让整份 setting.json 被隔离。
   // 读取时只丢弃坏偏好并回到默认值；patch 写入仍严格拒绝非法尺寸与缩放。
   return next;
@@ -355,7 +366,8 @@ function migrateLegacyWorkspaceSession(value: unknown): unknown {
               ),
             }
           : entry;
-      const parsed = legacyRemoteWorkspaceHistoryEntrySchema.safeParse(sanitizedEntry);
+      const parsed =
+        legacyRemoteWorkspaceHistoryEntrySchema.safeParse(sanitizedEntry);
       return parsed.success ? [[parsed.data.id, parsed.data] as const] : [];
     }),
   );
@@ -368,13 +380,18 @@ function migrateLegacyWorkspaceSession(value: unknown): unknown {
           }
 
           const rawEntry = entry as Record<string, unknown>;
-          if (rawEntry.kind === "local" && typeof rawEntry.workspacePath === "string") {
+          if (
+            rawEntry.kind === "local" &&
+            typeof rawEntry.workspacePath === "string"
+          ) {
             return [
               {
                 kind: "local",
                 workspacePath: rawEntry.workspacePath,
                 workspacePurpose:
-                  rawEntry.workspacePurpose === "conversation" ? "conversation" : "project",
+                  rawEntry.workspacePurpose === "conversation"
+                    ? "conversation"
+                    : "project",
               },
             ];
           }
@@ -384,29 +401,45 @@ function migrateLegacyWorkspaceSession(value: unknown): unknown {
               return [
                 {
                   ...rawEntry,
-                  target: stripHistoricalRemoteResourcePackages(rawEntry.target),
+                  target: stripHistoricalRemoteResourcePackages(
+                    rawEntry.target,
+                  ),
                 },
               ];
             }
 
             if (typeof rawEntry.historyId === "string") {
-              const legacyRemoteEntry = legacyRemoteHistoryById.get(rawEntry.historyId);
+              const legacyRemoteEntry = legacyRemoteHistoryById.get(
+                rawEntry.historyId,
+              );
               return legacyRemoteEntry
                 ? [
                     {
                       kind: "remote",
                       workspacePath: legacyRemoteEntry.workspacePath,
                       ...(legacyRemoteEntry.localWorkspacePath
-                        ? { localWorkspacePath: legacyRemoteEntry.localWorkspacePath }
+                        ? {
+                            localWorkspacePath:
+                              legacyRemoteEntry.localWorkspacePath,
+                          }
                         : {}),
                       ...(legacyRemoteEntry.workspaceIdentity
-                        ? { workspaceIdentity: legacyRemoteEntry.workspaceIdentity }
+                        ? {
+                            workspaceIdentity:
+                              legacyRemoteEntry.workspaceIdentity,
+                          }
                         : {}),
-                      target: stripHistoricalRemoteResourcePackages(legacyRemoteEntry.target),
+                      target: stripHistoricalRemoteResourcePackages(
+                        legacyRemoteEntry.target,
+                      ),
                       lastOpenedAt: legacyRemoteEntry.lastOpenedAt,
-                      lastConnectionStatus: legacyRemoteEntry.lastConnectionStatus,
+                      lastConnectionStatus:
+                        legacyRemoteEntry.lastConnectionStatus,
                       ...(legacyRemoteEntry.lastConnectionError
-                        ? { lastConnectionError: legacyRemoteEntry.lastConnectionError }
+                        ? {
+                            lastConnectionError:
+                              legacyRemoteEntry.lastConnectionError,
+                          }
                         : {}),
                     },
                   ]
@@ -473,9 +506,10 @@ const appSettingsObjectSchema = z.object({
   httpProxyNoProxy: nonEmptyStringSchema.optional(),
   httpProxyCaCertPath: nonEmptyStringSchema.optional(),
   embeddedBrowserAllowInsecureCertificates: z.boolean().default(false),
-  embeddedBrowserViewportPreference: embeddedBrowserViewportPreferenceSchema.default(
-    DEFAULT_EMBEDDED_BROWSER_VIEWPORT_PREFERENCE,
-  ),
+  embeddedBrowserViewportPreference:
+    embeddedBrowserViewportPreferenceSchema.default(
+      DEFAULT_EMBEDDED_BROWSER_VIEWPORT_PREFERENCE,
+    ),
   // 输入框电脑操作入口改为默认不展示，设置项保留、默认关闭。
   // default 只对缺省字段生效，显式存过 false 的用户仍保持展示。
   computerUseComposerEntryHidden: z.boolean().default(true),
@@ -493,6 +527,8 @@ const appSettingsObjectSchema = z.object({
   zcodeGoUiAutoRecovery: z.boolean().default(true),
   /* 插件接管（/zcode-go 拉起）时是否退出官版 ZCode；缺省 true = 退出 */
   zcodeGoTakeoverCloseOfficial: z.boolean().default(true),
+  /* zcode-go：OPC 编排器——一键无界面派发全部就绪工作项；缺省 true = 启用 */
+  zcodeGoOpcAutoOrchestrate: z.boolean().default(true),
   desktopZoomLevel: desktopZoomLevelSchema.optional(),
   desktopWindowSize: desktopWindowSizeSchema.optional(),
   desktopChromiumHardwareAccelerationEnabled: z.boolean().default(true),
@@ -506,11 +542,13 @@ const appSettingsObjectSchema = z.object({
   askUserQuestionAutoResolutionEnabled: z.boolean().default(true),
   modelIoFullRetentionEnabled: z.boolean().default(false),
   dynamicWorkflowMode: dynamicWorkflowModeSettingSchema,
-  enabledBuiltinAgentCliProviders: enabledBuiltinAgentCliProvidersSchema.default([
-    ...ZCODE_ENABLED_AGENT_PROVIDERS,
-  ]),
+  enabledBuiltinAgentCliProviders:
+    enabledBuiltinAgentCliProvidersSchema.default([
+      ...ZCODE_ENABLED_AGENT_PROVIDERS,
+    ]),
   startPlanRecommendationDismissed: z.boolean().default(false),
-  providerFamilyConnectionSelections: providerFamilyConnectionSelectionSettingsSchema.default({}),
+  providerFamilyConnectionSelections:
+    providerFamilyConnectionSelectionSettingsSchema.default({}),
   providerFamilyDomain: providerFamilyDomainSchema.optional(),
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().default(false),
@@ -527,8 +565,10 @@ const appSettingsObjectSchema = z.object({
   autoDownloadAndInstallUpdates: z.boolean().default(false),
   skippedElectronUpdateVersions: skippedElectronUpdateVersionsSchema,
   settingsSyncFirstRunPromptHandled: z.boolean().optional(),
-  webRemoteControlExternalRelayDevice: webRemoteControlExternalRelayDeviceSchema.optional(),
-  webRemoteControlLastEnabledContext: webRemoteControlLastEnabledContextSchema.optional(),
+  webRemoteControlExternalRelayDevice:
+    webRemoteControlExternalRelayDeviceSchema.optional(),
+  webRemoteControlLastEnabledContext:
+    webRemoteControlLastEnabledContextSchema.optional(),
   zcodeEndpointOrigin: zcodeEndpointOriginSchema.optional(),
 });
 
@@ -540,7 +580,9 @@ export const appSettingsSchema = z.preprocess(
           migrateCloseToTrayOnWindowsDefault(
             migrateLegacyLocalePreference(
               sanitizeZCodeEndpointOrigin(
-                migrateLegacyWorkspaceSession(migrateLegacyBuiltinAgentCliProviders(value)),
+                migrateLegacyWorkspaceSession(
+                  migrateLegacyBuiltinAgentCliProviders(value),
+                ),
               ),
             ),
           ),
@@ -562,7 +604,8 @@ export const appSettingsPatchSchema = z.object({
   httpProxyNoProxy: nonEmptyStringSchema.optional(),
   httpProxyCaCertPath: nonEmptyStringSchema.optional(),
   embeddedBrowserAllowInsecureCertificates: z.boolean().optional(),
-  embeddedBrowserViewportPreference: embeddedBrowserViewportPreferenceSchema.optional(),
+  embeddedBrowserViewportPreference:
+    embeddedBrowserViewportPreferenceSchema.optional(),
   computerUseComposerEntryHidden: z.boolean().optional(),
   taskAutoArchiveEnabled: z.boolean().optional(),
   taskAutoArchiveOlderThanDays: z.number().int().positive().max(365).optional(),
@@ -573,6 +616,7 @@ export const appSettingsPatchSchema = z.object({
   zcodeGoMobileDrawerViewport: z.boolean().optional(),
   zcodeGoUiAutoRecovery: z.boolean().optional(),
   zcodeGoTakeoverCloseOfficial: z.boolean().optional(),
+  zcodeGoOpcAutoOrchestrate: z.boolean().optional(),
   closeToTrayOnWindowsMigrationInitialized: z.boolean().optional(),
   closeToTrayLinuxMigrationInitialized: z.boolean().optional(),
   desktopZoomLevel: desktopZoomLevelSchema.optional(),
@@ -588,11 +632,17 @@ export const appSettingsPatchSchema = z.object({
   askUserQuestionAutoResolutionEnabled: z.boolean().optional(),
   modelIoFullRetentionEnabled: z.boolean().optional(),
   // 空串是「删除选择、回到跟随」的哨兵：RPC 会吞掉 undefined，normalizeSettingsPatch 把它归一成删除。
-  dynamicWorkflowMode: z.union([z.enum(DYNAMIC_WORKFLOW_MODES), z.literal("")]).optional(),
-  enabledBuiltinAgentCliProviders: enabledBuiltinAgentCliProvidersSchema.optional(),
+  dynamicWorkflowMode: z
+    .union([z.enum(DYNAMIC_WORKFLOW_MODES), z.literal("")])
+    .optional(),
+  enabledBuiltinAgentCliProviders:
+    enabledBuiltinAgentCliProvidersSchema.optional(),
   startPlanRecommendationDismissed: z.boolean().optional(),
-  providerFamilyConnectionSelections: providerFamilyConnectionSelectionSettingsSchema.optional(),
-  providerFamilyDomain: z.union([providerFamilyDomainSchema, z.literal("")]).optional(),
+  providerFamilyConnectionSelections:
+    providerFamilyConnectionSelectionSettingsSchema.optional(),
+  providerFamilyDomain: z
+    .union([providerFamilyDomainSchema, z.literal("")])
+    .optional(),
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().optional(),
   nativeSearchEnhancementsEnabled: z.boolean().optional(),
@@ -627,7 +677,9 @@ export const appSettingsPatchSchema = z.object({
     .partialRecord(electronReleaseChannelSchema, nonEmptyStringSchema)
     .optional(),
   settingsSyncFirstRunPromptHandled: z.boolean().optional(),
-  webRemoteControlExternalRelayDevice: webRemoteControlExternalRelayDeviceSchema.optional(),
-  webRemoteControlLastEnabledContext: webRemoteControlLastEnabledContextSchema.optional(),
+  webRemoteControlExternalRelayDevice:
+    webRemoteControlExternalRelayDeviceSchema.optional(),
+  webRemoteControlLastEnabledContext:
+    webRemoteControlLastEnabledContextSchema.optional(),
   zcodeEndpointOrigin: zcodeEndpointOriginSchema.optional(),
 });

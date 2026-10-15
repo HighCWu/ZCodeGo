@@ -6,7 +6,7 @@
  * window CustomEvent("zcode-go:opc-open") 即可唤起（草稿驾驶舱/快捷键/菜单）。
  * 全部写路径走 opcStore.apply（IPC → main reducer → 广播），本组件零本地状态事实。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Building2 } from "lucide-react";
 import {
   Dialog,
@@ -43,6 +43,12 @@ import { OpcEvolutionView } from "./OpcEvolutionView.js";
 import { OpcOfficeMap } from "./OpcOfficeMap.js";
 import { insertOpcPrompt } from "./opcComposerBridge.js";
 import { downloadTextFile, readFileText } from "./opcFiles.js";
+import {
+  countOrchestratable,
+  dispatchReadyWorkItems,
+} from "./opcOrchestrator.js";
+import { useZCodeTaskService } from "@/hooks/useZCodeTaskService.js";
+import { useSettings } from "@/hooks/useSettingService.js";
 import {
   OpcReworkDialog,
   OpcWorkItemDialog,
@@ -81,6 +87,12 @@ export function ZcodeGoOpcPanelRoot({
   const workspacePath = useOpcStore((s) => s.workspacePath);
   const bodies = useOpcStore((s) => s.bodies);
   const inbox = useOpcStore((s) => s.inbox);
+  const { settings } = useSettings();
+  const taskService = useZCodeTaskService(
+    workspacePath ?? undefined,
+    undefined,
+    workspaceIdentity ?? undefined,
+  );
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("kanban");
   const [workItemDialog, setWorkItemDialog] =
@@ -216,6 +228,41 @@ export function ZcodeGoOpcPanelRoot({
     },
     [state, resolveSkillBody],
   );
+
+  const orchestratableCount = useMemo(
+    () => (state ? countOrchestratable(state) : 0),
+    [state],
+  );
+  const orchestrateEnabled = settings?.zcodeGoOpcAutoOrchestrate !== false;
+  const [orchestrating, setOrchestrating] = useState(false);
+  const handleOrchestrate = useCallback(() => {
+    if (!state || !workspacePath || !taskService || orchestrating) return;
+    setOrchestrating(true);
+    void dispatchReadyWorkItems({
+      state,
+      workspacePath,
+      workspaceIdentity: workspaceIdentity ?? undefined,
+      taskService,
+      resolveRoleBody,
+      resolveSkillBody,
+    })
+      .then((outcome) => {
+        if (outcome.mutations.length > 0) void apply(outcome.mutations);
+        logger.info(
+          `[zcode-go][opc] 编排完成：派发 ${outcome.dispatched.length} / 失败 ${outcome.failed.length}`,
+        );
+      })
+      .finally(() => setOrchestrating(false));
+  }, [
+    state,
+    workspacePath,
+    workspaceIdentity,
+    taskService,
+    resolveRoleBody,
+    resolveSkillBody,
+    apply,
+    orchestrating,
+  ]);
 
   const handleStatusChange = useCallback(
     (workItemId: string, status: OpcWorkItem["status"]) => {

@@ -8,7 +8,10 @@
  */
 import { useSettings } from "@/hooks/useSettingService.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
+import {
+  SettingsGroupCard,
+  SettingsRow,
+} from "@/settings/SettingsPageParts.js";
 import { Switch } from "@/components/ui/switch.js";
 
 type ZcodeGoSettingKey =
@@ -16,7 +19,8 @@ type ZcodeGoSettingKey =
   | "zcodeGoHoverForkDualSession"
   | "zcodeGoMobileDrawerViewport"
   | "zcodeGoUiAutoRecovery"
-  | "zcodeGoTakeoverCloseOfficial";
+  | "zcodeGoTakeoverCloseOfficial"
+  | "zcodeGoOpcAutoOrchestrate";
 
 export function ZcodeGoSettingsSection() {
   const { intl } = useZCodeIntl();
@@ -25,10 +29,14 @@ export function ZcodeGoSettingsSection() {
   // 显式键→值映射（AppSettings 无索引签名，避免泛型键访问）
   const values: Record<ZcodeGoSettingKey, boolean> = {
     zcodeGoP2pMobileBridge: settings?.zcodeGoP2pMobileBridge !== false,
-    zcodeGoHoverForkDualSession: settings?.zcodeGoHoverForkDualSession !== false,
-    zcodeGoMobileDrawerViewport: settings?.zcodeGoMobileDrawerViewport !== false,
+    zcodeGoHoverForkDualSession:
+      settings?.zcodeGoHoverForkDualSession !== false,
+    zcodeGoMobileDrawerViewport:
+      settings?.zcodeGoMobileDrawerViewport !== false,
     zcodeGoUiAutoRecovery: settings?.zcodeGoUiAutoRecovery !== false,
-    zcodeGoTakeoverCloseOfficial: settings?.zcodeGoTakeoverCloseOfficial !== false,
+    zcodeGoTakeoverCloseOfficial:
+      settings?.zcodeGoTakeoverCloseOfficial !== false,
+    zcodeGoOpcAutoOrchestrate: settings?.zcodeGoOpcAutoOrchestrate !== false,
   };
 
   const toggleRows: Array<{
@@ -60,6 +68,11 @@ export function ZcodeGoSettingsSection() {
       key: "zcodeGoTakeoverCloseOfficial",
       labelId: "settings.zcodeGo.takeoverCloseOfficial",
       descriptionId: "settings.zcodeGo.takeoverCloseOfficialDescription",
+    },
+    {
+      key: "zcodeGoOpcAutoOrchestrate",
+      labelId: "settings.zcodeGo.opcAutoOrchestrate",
+      descriptionId: "settings.zcodeGo.opcAutoOrchestrateDescription",
     },
   ];
 
