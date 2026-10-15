@@ -565,6 +565,17 @@ let si = await getState();
         receivedAt: new Date().toISOString(),
       }),
     );
+    // 终极对照：经 /proc/<appPid>/root 用 app 的挂载视角重读同一目录——
+    // 若 app 视角为空而脚本视角有文件，则两进程处于不同 mount namespace。
+    try {
+      const appPid = appProc.pid;
+      const viaProc = (await import("node:fs")).readdirSync(
+        `/proc/${appPid}/root${inboxDir}`,
+      );
+      console.log(`  [dump] app root 视角 readdir: ${viaProc.join(",")}`);
+    } catch (e) {
+      console.log(`  [dump] app root 视角读取失败: ${e}`);
+    }
     // main 进程 app.log 尾部：验证新 bundle（GetState inbox 诊断行）与
     // scanInbox 的 readdir 失败 warn 是否在场
     try {
