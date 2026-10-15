@@ -554,7 +554,7 @@ let si = await getState();
       ),
     );
     console.log(
-      `  [dump] ConsumeInbox 对照 ok=${probe.ok} err=${probe.error ?? "无"} 建项=${(probe.state?.workItems ?? []).some((w) => w.title === "入站对照探针")}`,
+      `  [dump] ConsumeInbox 对照 ok=${probe.ok} err=${probe.error ?? "无"} 建项=${(probe.state?.workItems ?? []).some((w) => w.title === "入站对照探针")} probe.inbox=${JSON.stringify(probe.inbox)}`,
     );
     // 对照已消费 1-convert.json，恢复现场
     writeFileSync(

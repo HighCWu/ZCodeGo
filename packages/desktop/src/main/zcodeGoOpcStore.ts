@@ -392,10 +392,16 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             );
             state = synced;
           }
+          const inbox = await scanInbox(workspaceRoot);
+          // E2E 诊断锚点（info 级）：GetState 的 inbox 为空但磁盘有文件时，
+          // 从这条日志即可区分「目录视图不一致」与「扫描过滤吞条目」。
+          logger.info(
+            `[zcode-go] OPC GetState inbox=${inbox.length} dir=${join(workspaceRoot, OPC_INBOX_DIR)}`,
+          );
           return {
             ok: true as const,
             state,
-            inbox: await scanInbox(workspaceRoot),
+            inbox,
             ...(await readBodies(workspaceRoot, state)),
           };
         } catch (error) {
