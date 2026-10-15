@@ -4,7 +4,8 @@
  * applyOpcPackFiles，本文件只做目录解析链与落盘。spec「模板包」节。
  */
 import { app } from "electron";
-import { existsSync, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -53,8 +54,15 @@ async function collectPackFiles(
     const relative = prefix.length > 0 ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
       await collectPackFiles(full, relative, files);
-    } else if (entry.isFile() && /\.md$/i.test(entry.name) && entry.name !== "pack.json") {
-      files.push({ relativePath: relative, content: await readFile(full, "utf8") });
+    } else if (
+      entry.isFile() &&
+      /\.md$/i.test(entry.name) &&
+      entry.name !== "pack.json"
+    ) {
+      files.push({
+        relativePath: relative,
+        content: await readFile(full, "utf8"),
+      });
     }
   }
 }
@@ -63,7 +71,10 @@ async function collectPackFiles(
 export async function syncOpcPacks(
   workspaceRoot: string,
   state: OpcCompanyState,
-  logger: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+  logger: {
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+  },
 ): Promise<OpcCompanyState> {
   const packsRoot = resolveOpcPacksRoot();
   if (!packsRoot) return state;
@@ -82,7 +93,11 @@ export async function syncOpcPacks(
       const parsed = JSON.parse(
         await readFile(join(packDir, "pack.json"), "utf8"),
       ) as OpcPackManifest;
-      if (!parsed?.id || typeof parsed.version !== "string" || parsed.version.length === 0) {
+      if (
+        !parsed?.id ||
+        typeof parsed.version !== "string" ||
+        parsed.version.length === 0
+      ) {
         continue;
       }
       manifest = parsed;
@@ -96,8 +111,14 @@ export async function syncOpcPacks(
       const outcome = applyOpcPackFiles(current, manifest, files, Date.now());
       current = outcome.state;
       // 待落盘正文：只写缺失文件（与幂等填充语义一致，绝不覆盖已存在内容）
-      const templatesDir = join(workspaceRoot, OPC_TEMPLATES_DIR, OPC_ROLES_TEMPLATES_SUBDIR);
-      for (const [templateId, markdown] of Object.entries(outcome.roleTemplateFiles)) {
+      const templatesDir = join(
+        workspaceRoot,
+        OPC_TEMPLATES_DIR,
+        OPC_ROLES_TEMPLATES_SUBDIR,
+      );
+      for (const [templateId, markdown] of Object.entries(
+        outcome.roleTemplateFiles,
+      )) {
         const target = join(templatesDir, `${templateId}.md`);
         if (existsSync(target)) continue;
         await mkdir(templatesDir, { recursive: true });

@@ -10,9 +10,11 @@
  * 读写不交错；多窗口写冲突由「后写覆盖整树 + 广播 reload」收敛（UI 无本地写路径）。
  */
 import { ipcMain, BrowserWindow } from "electron";
+// zcode-go：existsSync 只在 node:fs（fs/promises 无此导出）——错误来源会让
+// ESM 顶层命名导入在 main 启动时整模块崩溃（E2E 首跑实证）。
+import { existsSync } from "node:fs";
 import {
   appendFile,
-  existsSync,
   mkdir,
   readFile,
   readdir,
@@ -48,6 +50,7 @@ import {
   persistRoleTemplateBodies,
   persistSkillBodies,
   readBodies,
+  resolveSkillBodySource,
 } from "./zcodeGoOpcFiles.js";
 import { syncOpcPacks } from "./zcodeGoOpcPacks.js";
 
@@ -58,7 +61,10 @@ interface OpcStoreLogger {
 
 /** init 时注入的模块级 logger（packs 同步在 withState 内部深处要用）。 */
 let opcLogger: OpcStoreLogger | null = null;
-const silentOpcLogger: OpcStoreLogger = { info: () => undefined, warn: () => undefined };
+const silentOpcLogger: OpcStoreLogger = {
+  info: () => undefined,
+  warn: () => undefined,
+};
 
 /** 每 workspacePath 一条串行队列：同工作区的读写永不交错。 */
 const workspaceQueues = new Map<string, Promise<unknown>>();
@@ -123,6 +129,11 @@ async function initializeWorkspace(
   await mkdir(join(workspaceRoot, OPC_SKILLS_DIR), { recursive: true });
   await writeJsonAtomic(join(workspaceRoot, OPC_COMPANY_FILE), state);
   for (const draft of OPC_BUILTIN_SKILL_DRAFTS) {
+    // 每个技能的子目录必须显式创建：writeFile 不会建父目录（E2E 首跑实证
+    // ENOENT——skills 根目录存在不代表 <id>/ 子目录存在）
+    await mkdir(join(workspaceRoot, OPC_SKILLS_DIR, draft.id), {
+      recursive: true,
+    });
     await writeFile(
       join(workspaceRoot, OPC_SKILLS_DIR, draft.id, "SKILL.md"),
       renderOpcSkillFile({
@@ -139,7 +150,6 @@ async function initializeWorkspace(
   }
   return state;
 }
-
 
 /** 把状态派生的文件补写全（新建技能的 SKILL.md / 员工记忆 / 进化日志），company.json 最后写。 */
 async function persistDerivedFiles(
@@ -242,8 +252,17 @@ async function consumeInbox(
   inbox: OpcInboxItem[];
   error?: string;
 }> {
-  if (!fileName || fileName !== basename(fileName) || !fileName.endsWith(".json")) {
-    return { ok: false, state: null, inbox: [], error: "invalid inbox fileName" };
+  if (
+    !fileName ||
+    fileName !== basename(fileName) ||
+    !fileName.endsWith(".json")
+  ) {
+    return {
+      ok: false,
+      state: null,
+      inbox: [],
+      error: "invalid inbox fileName",
+    };
   }
   const inboxFile = join(opcRoot(workspacePath), OPC_INBOX_DIR, fileName);
   // inbox 文件不是状态事实，删除无需队列保护（避免嵌套 enqueue 死锁——
@@ -300,7 +319,11 @@ async function withState(
       const previous = await readCompanyState(workspaceRoot);
       let current = previous ?? (await initializeWorkspace(workspaceRoot));
       // 模板包幂等填充（spec「模板包」节）：戳未变时是两次小 JSON 读，零成本。
-      current = await syncOpcPacks(workspaceRoot, current, opcLogger ?? silentOpcLogger);
+      current = await syncOpcPacks(
+        workspaceRoot,
+        current,
+        opcLogger ?? silentOpcLogger,
+      );
       const next = await mutate(current, workspaceRoot);
       await persistDerivedFiles(workspaceRoot, previous, next);
       await writeJsonAtomic(join(workspaceRoot, OPC_COMPANY_FILE), next);
@@ -314,7 +337,6 @@ async function withState(
     }
   });
 }
-
 
 function broadcastStateChanged(
   logger: OpcStoreLogger,
@@ -336,7 +358,6 @@ function broadcastStateChanged(
 // IPC 注册（index.ts 门控点 = import + initZcodeGoOpcStore 一行调用）
 // ---------------------------------------------------------------------------
 
-
 export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
   opcLogger = logger;
   ipcMain.handle(
@@ -351,7 +372,10 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           const synced = await syncOpcPacks(workspaceRoot, state, logger);
           if (synced !== state) {
             await persistDerivedFiles(workspaceRoot, state, synced);
-            await writeJsonAtomic(join(workspaceRoot, OPC_COMPANY_FILE), synced);
+            await writeJsonAtomic(
+              join(workspaceRoot, OPC_COMPANY_FILE),
+              synced,
+            );
             state = synced;
           }
           return {
@@ -530,7 +554,12 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           assigneeId?: string | null;
         } | null;
       },
-    ) => consumeInbox(payload.workspacePath, payload.fileName, payload.convert ?? null),
+    ) =>
+      consumeInbox(
+        payload.workspacePath,
+        payload.fileName,
+        payload.convert ?? null,
+      ),
   );
 
   logger.info("[zcode-go] OPC 公司状态存储就绪（IPC 已注册）");
