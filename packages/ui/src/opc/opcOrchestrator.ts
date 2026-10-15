@@ -9,9 +9,11 @@
 import type { IZCodeTaskService } from "@zcode/services";
 import {
   buildOpcDelegationPrompt,
+  buildOpcToolDenylist,
   isOpcWorkItemRunnable,
   type OpcCompanyState,
   type OpcMutation,
+  type OpcPermissionLevel,
   type OpcWorkItem,
 } from "@zcode/shared";
 
@@ -36,7 +38,7 @@ function buildDelegationPromptFor(
   state: OpcCompanyState,
   workItem: OpcWorkItem,
   deps: Pick<OpcOrchestratorDeps, "resolveRoleBody" | "resolveSkillBody">,
-): string | null {
+): { prompt: string; permissionLevel: OpcPermissionLevel | undefined } | null {
   const employee = state.employees.find(
     (item) => item.id === workItem.assigneeId,
   );
@@ -55,7 +57,7 @@ function buildDelegationPromptFor(
       (item): item is { id: string; name: string; body: string } =>
         item !== null,
     );
-  return buildOpcDelegationPrompt({
+  const delegationPrompt = buildOpcDelegationPrompt({
     companyName: state.company.name,
     employee,
     roleBody,
@@ -70,6 +72,10 @@ function buildDelegationPromptFor(
     reworkNotes: workItem.reworkNotes,
     permissionLevel: employee.permissionLevel,
   });
+  return {
+    prompt: delegationPrompt,
+    permissionLevel: employee.permissionLevel,
+  };
 }
 
 /**
@@ -99,14 +105,15 @@ export async function dispatchReadyWorkItems(
     mutations: [],
   };
   for (const workItem of dispatchable.slice(0, cap)) {
-    const prompt = buildDelegationPromptFor(state, workItem, deps);
-    if (!prompt) {
+    const delegation = buildDelegationPromptFor(state, workItem, deps);
+    if (!delegation) {
       outcome.failed.push({
         workItemId: workItem.id,
         error: "员工缺失或无可用上下文",
       });
       continue;
     }
+    const { prompt, permissionLevel } = delegation;
     try {
       const created = await taskService.createTask({
         workspacePath,
@@ -119,6 +126,9 @@ export async function dispatchReadyWorkItems(
         taskId: created.taskId,
         traceId: `${workItem.id}` as never,
         content: prompt,
+        // 会话级硬约束：按员工权限级别隐藏写入/执行类工具（无界面会话由我们
+        // 创建，参数即真约束；手动 composer 路径仍为委派 prompt 级边界）。
+        toolDenylist: buildOpcToolDenylist(permissionLevel),
       });
       outcome.dispatched.push({
         workItemId: workItem.id,
