@@ -124,7 +124,7 @@ export async function dispatchReadyWorkItems(
       });
       await taskService.sendPrompt({
         taskId: created.taskId,
-        traceId: `${workItem.id}` as never,
+        traceId: workItem.id,
         content: prompt,
         // 会话级硬约束：按员工权限级别隐藏写入/执行类工具（无界面会话由我们
         // 创建，参数即真约束；手动 composer 路径仍为委派 prompt 级边界）。
@@ -138,6 +138,12 @@ export async function dispatchReadyWorkItems(
         kind: "workitem.status",
         workItemId: workItem.id,
         status: "in_progress",
+      });
+      // 派发留痕：taskId 写回工作项，任务列表可从看板双向追溯
+      outcome.mutations.push({
+        kind: "workitem.update",
+        workItemId: workItem.id,
+        patch: { sessionId: created.taskId },
       });
     } catch (error) {
       outcome.failed.push({

@@ -55,7 +55,10 @@ export function readTelegramChannelConfig(): TelegramChannelConfig | null {
       allowFrom: Array.isArray(telegram.allowFrom)
         ? (telegram.allowFrom as Array<number | string>)
         : [],
-      apiBase: typeof telegram.apiBase === "string" ? telegram.apiBase : DEFAULT_API_BASE,
+      apiBase:
+        typeof telegram.apiBase === "string"
+          ? telegram.apiBase
+          : DEFAULT_API_BASE,
     };
   } catch {
     return null;
@@ -69,7 +72,9 @@ export interface TelegramUpdate {
 }
 
 /** 解析 getUpdates 响应（宽松：非 200/坏 JSON 返回 null 由调用方保 offset）。 */
-export function parseTelegramUpdatesBody(body: string): TelegramUpdate[] | null {
+export function parseTelegramUpdatesBody(
+  body: string,
+): TelegramUpdate[] | null {
   try {
     const parsed = JSON.parse(body) as { ok?: unknown; result?: unknown };
     if (parsed.ok !== true || !Array.isArray(parsed.result)) return null;
@@ -99,7 +104,9 @@ export function selectAllowedTexts(
 
 export function readTelegramOffset(): number {
   try {
-    const parsed = JSON.parse(readFileSync(CHANNELS_STATE_FILE, "utf8")) as { offset?: unknown };
+    const parsed = JSON.parse(readFileSync(CHANNELS_STATE_FILE, "utf8")) as {
+      offset?: unknown;
+    };
     return typeof parsed.offset === "number" ? parsed.offset : 0;
   } catch {
     return 0;
@@ -108,8 +115,14 @@ export function readTelegramOffset(): number {
 
 export function writeTelegramOffset(offset: number): void {
   try {
-    mkdirSync(CHANNELS_STATE_FILE.replace(/[/\\][^/\\]+$/, ""), { recursive: true });
-    writeFileSync(CHANNELS_STATE_FILE, JSON.stringify({ offset }, null, 1), "utf8");
+    mkdirSync(CHANNELS_STATE_FILE.replace(/[/\\][^/\\]+$/, ""), {
+      recursive: true,
+    });
+    writeFileSync(
+      CHANNELS_STATE_FILE,
+      JSON.stringify({ offset }, null, 1),
+      "utf8",
+    );
   } catch {
     /* 尽力而为 */
   }
@@ -124,7 +137,9 @@ export interface TelegramPollDeps {
 }
 
 /** 单次长轮询：拉取 → 白名单过滤 → 投递 inbox → 推进 offset。 */
-export async function pollTelegramOnce(deps: TelegramPollDeps): Promise<number | null> {
+export async function pollTelegramOnce(
+  deps: TelegramPollDeps,
+): Promise<number | null> {
   const { config, fetchImpl = fetch, onInbound, onError } = deps;
   const offset = readTelegramOffset();
   let response: Response;
@@ -133,7 +148,9 @@ export async function pollTelegramOnce(deps: TelegramPollDeps): Promise<number |
       `${config.apiBase ?? DEFAULT_API_BASE}/bot${config.botToken}/getUpdates?offset=${offset}&timeout=0&allowed_updates=${encodeURIComponent(JSON.stringify(["message", "edited_message"]))}`,
     );
   } catch (error) {
-    onError?.(`Telegram getUpdates 失败: ${error instanceof Error ? error.message : String(error)}`);
+    onError?.(
+      `Telegram getUpdates 失败: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return null;
   }
   if (!response.ok) {
@@ -167,7 +184,11 @@ export async function pollTelegramOnce(deps: TelegramPollDeps): Promise<number |
       }),
     );
     if (!item) continue;
-    writeFileSync(join(inboxDir, fileName), JSON.stringify(item, null, 1), "utf8");
+    writeFileSync(
+      join(inboxDir, fileName),
+      JSON.stringify(item, null, 1),
+      "utf8",
+    );
     onInbound(item);
     delivered += 1;
   }
@@ -199,3 +220,24 @@ export function startTelegramChannelPolling(
   return () => clearInterval(timer);
 }
 
+/**
+ * index.ts 的启动门控入口（零配置 = 立即返回，零足迹）。
+ * 返回的停止函数当前无人消费：app 进程退出时定时器随之消亡；
+ * 若未来需要运行中停用，把返回值接进设置开关即可。
+ */
+export function initZcodeGoOpcChannels(logger: {
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+}): void {
+  const stop = startTelegramChannelPolling({
+    onInbound: () => {
+      /* 入站文件落盘即可：面板下次 GetState 扫描时可见（无面板打开时零打扰） */
+    },
+    onError: (message) => logger.warn(`[zcode-go] OPC 渠道桥: ${message}`),
+    onStarted: () =>
+      logger.info("[zcode-go] OPC Telegram 渠道桥已启动（长轮询 → 入站队列）"),
+  });
+  if (stop) {
+    logger.info("[zcode-go] OPC 渠道桥配置生效（bot token 已配置）");
+  }
+}

@@ -279,7 +279,12 @@ export type OpcMutation =
       patch: Partial<
         Pick<
           OpcWorkItem,
-          "title" | "detail" | "assigneeId" | "priority" | "dependsOn"
+          | "title"
+          | "detail"
+          | "assigneeId"
+          | "priority"
+          | "dependsOn"
+          | "sessionId"
         >
       >;
     }
