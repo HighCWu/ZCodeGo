@@ -146,6 +146,12 @@ talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」
    或 **忽略**（删文件）。安全约束：消费只接受纯文件名（拒绝路径分隔符），
    目录与状态写入仍归 main 单写者。插件 `/opc add <标题>` 是第一接入方
    （会话消息即投递，零 token）。
+   - **Telegram 渠道桥（第一真实渠道 worker）**：`zcodeGoOpcChannels.ts`（新文件，
+     desktop main 常驻伴生）——仅当 `~/.zcode-go/config.json` 配置
+     `channels.telegram.{botToken, workspacePath, allowFrom[], apiBase?}` 才启动
+     10s 长轮询；消息经白名单过滤（**deny-by-default**，allowFrom 空 = 全拒）后
+     投递入站队列（offset 持久化，重启不重放）；面板照常审批转工作项。
+     官方 bots 基建（services/bots）路由 bot 会话，与本桥独立不冲突。
 10. **Office 像素质感**：桌位卡对执行中员工做像素风微动画（bob），像素级
     精灵（Phaser/贴图）仍为可选彩蛋。
 11. **编排器（Self-Run 自动派发，desktop-continuous）**：看板「🚀 一键编排」
