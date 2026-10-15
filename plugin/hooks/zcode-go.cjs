@@ -215,6 +215,62 @@ function discoverOfficial() {
   }
   return info;
 }
+function runOpcCommand(argsText, cwd) {
+  const sub = argsText.trim().toLowerCase();
+  const companyPath = (0, import_node_path.join)(cwd, ".opc", "company.json");
+  if (sub === "help") {
+    emit({
+      continue: false,
+      stopReason: `\u{1F4CA} /opc \u2014 OPC \u516C\u53F8\u72B6\u6001\u6458\u8981\uFF08\u53EA\u8BFB\uFF09
+\u7528\u6CD5\uFF1A/opc [help]
+\u6570\u636E\u6E90\uFF1A${companyPath}\uFF08\u5DE5\u4F5C\u533A\u9996\u6B21\u6253\u5F00 OPC \u9762\u677F\u65F6\u751F\u6210\uFF09`
+    });
+    return;
+  }
+  let info = null;
+  try {
+    const parsed = JSON.parse((0, import_node_fs.readFileSync)(companyPath, "utf8"));
+    if (typeof parsed === "object" && parsed !== null) info = parsed;
+  } catch {
+  }
+  const company = info?.company ?? {};
+  const employees = Array.isArray(info?.employees) ? info.employees : [];
+  const workItems = Array.isArray(info?.workItems) ? info.workItems : [];
+  const skills = Array.isArray(info?.skills) ? info.skills : [];
+  if (!info || !Array.isArray(info.employees)) {
+    emit({
+      continue: false,
+      stopReason: `\u{1F4CA} \u5F53\u524D\u76EE\u5F55\u672A\u53D1\u73B0 OPC \u516C\u53F8\uFF1A${companyPath}
+\uFF08\u5728 ZCode Go \u684C\u9762\u6253\u5F00 OPC \u6A21\u5F0F/\u9762\u677F\u5373\u81EA\u52A8\u521D\u59CB\u5316\uFF09`
+    });
+    return;
+  }
+  const statusOrder = ["backlog", "ready", "in_progress", "review", "done"];
+  const statusCounts = /* @__PURE__ */ new Map();
+  for (const item of workItems) {
+    const status = String(item.status ?? "backlog");
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
+  const active = employees.filter((employee) => employee.status === "active");
+  const escalations = workItems.filter((item) => item.escalatedAt);
+  const evolution = Array.isArray(info.evolution) ? info.evolution : [];
+  const lastEvent = evolution[evolution.length - 1];
+  const lines = [
+    `\u{1F4CA} OPC \u516C\u53F8\uFF1A${String(company.name ?? "?")}`,
+    `\u5458\u5DE5 ${active.length}/${employees.length} \u4EBA\uFF08\u5728\u804C/\u7D2F\u8BA1\uFF09 \xB7 \u6280\u80FD ${skills.length} \u9879`,
+    `\u770B\u677F\uFF1A${statusOrder.map((status) => `${status} ${statusCounts.get(status) ?? 0}`).join(" \xB7 ")}`
+  ];
+  if (escalations.length > 0) {
+    lines.push(`\u2B06 \u5F85\u6240\u6709\u8005\u5904\u7406 ${escalations.length} \u9879\uFF1A`);
+    for (const item of escalations.slice(0, 5)) {
+      lines.push(`   - ${String(item.title ?? "?")}${item.escalationNote ? `\uFF08${String(item.escalationNote)}\uFF09` : ""}`);
+    }
+  }
+  if (lastEvent && typeof lastEvent.summary === "string") {
+    lines.push(`\u6700\u8FD1\u8FDB\u5316\u4E8B\u4EF6\uFF1A${lastEvent.summary}`);
+  }
+  emit({ continue: false, stopReason: lines.join("\n") });
+}
 function emit(output) {
   process.stdout.write(JSON.stringify(output));
 }
@@ -237,6 +293,13 @@ function runHook() {
     }
     const prompt = String(event.prompt ?? "").trim();
     const low = prompt.toLowerCase();
+    const opcRaw = /^\/opc\b/.test(low);
+    const opcExpanded = low.includes("run custom command /opc");
+    if (opcRaw || opcExpanded) {
+      const opcArgs = opcExpanded ? prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "" : prompt.split(/\s+/)[1] ?? "";
+      runOpcCommand(opcArgs, String(event.cwd ?? process.cwd()));
+      return;
+    }
     const rawForm = /^\/zcode[_-]go\b/.test(low);
     const expanded = low.includes("run custom command /zcode-go");
     if (!rawForm && !expanded) return;

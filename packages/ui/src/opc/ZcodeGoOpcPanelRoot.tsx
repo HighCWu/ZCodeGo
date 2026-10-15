@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 公司面板是五标签 + 全部管理动作的编排收口（同 SessionPane/插件宿主惯例），拆散会破坏内聚。 */
 /**
  * zcode-go OPC 公司面板（全屏 overlay，五标签：看板/组织/人才市场/技能/进化）。
  *

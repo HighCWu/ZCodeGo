@@ -40,6 +40,8 @@
 
 其他命令：`/zcode-go status`（探测与开关状态）、`/zcode-go off|on`（停用/启用）。
 
+另有 **`/opc`**：打印当前工作区的 OPC 公司摘要（在职员工/看板计数/待处理升级/最近进化事件）——hook 直接读 `<工作区>/.opc/company.json`，只读、零 token；数据由 ZCode Go 桌面（specs/opc-mode.md）维护。
+
 ## 底层运行时与额度
 
 ZCode Go 桌面 spawn 底层原生运行时的方式与官方打包态完全相同，且**优先使用本插件探测到的官方运行时**（`~/.zcode-go/official.json`，由 hook 在官方进程树内自动发现）——模型请求由官方运行时内部签名，150% 额度无损。

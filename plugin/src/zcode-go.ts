@@ -252,6 +252,75 @@ export function discoverOfficial(): Record<string, unknown> | null {
   return info;
 }
 
+// ── /opc 只读命令：工作区公司状态摘要 ───────────────────────────────────
+//
+// 由插件 hook 直接读 <cwd>/.opc/company.json 并打印摘要，不消耗模型 token。
+// 刻意只读：公司状态的唯一写路径在 ZCode Go 桌面 main（specs/opc-mode.md），
+// hook 进程绝不做任何写入，避免双写者。
+
+function runOpcCommand(argsText: string, cwd: string): void {
+  const sub = argsText.trim().toLowerCase();
+  const companyPath = join(cwd, ".opc", "company.json");
+  if (sub === "help") {
+    emit({
+      continue: false,
+      stopReason:
+        `📊 /opc — OPC 公司状态摘要（只读）\n` +
+        `用法：/opc [help]\n数据源：${companyPath}（工作区首次打开 OPC 面板时生成）`,
+    });
+    return;
+  }
+  let info: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(companyPath, "utf8"));
+    if (typeof parsed === "object" && parsed !== null) info = parsed as Record<string, unknown>;
+  } catch {
+    /* 未初始化/不可读 */
+  }
+  const company = (info?.company ?? {}) as Record<string, unknown>;
+  const employees = Array.isArray(info?.employees)
+    ? (info!.employees as Array<Record<string, unknown>>)
+    : [];
+  const workItems = Array.isArray(info?.workItems)
+    ? (info!.workItems as Array<Record<string, unknown>>)
+    : [];
+  const skills = Array.isArray(info?.skills) ? (info!.skills as unknown[]) : [];
+  if (!info || !Array.isArray(info.employees)) {
+    emit({
+      continue: false,
+      stopReason: `📊 当前目录未发现 OPC 公司：${companyPath}\n（在 ZCode Go 桌面打开 OPC 模式/面板即自动初始化）`,
+    });
+    return;
+  }
+  const statusOrder = ["backlog", "ready", "in_progress", "review", "done"] as const;
+  const statusCounts = new Map<string, number>();
+  for (const item of workItems) {
+    const status = String(item.status ?? "backlog");
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
+  const active = employees.filter((employee) => employee.status === "active");
+  const escalations = workItems.filter((item) => item.escalatedAt);
+  const evolution = Array.isArray(info.evolution)
+    ? (info.evolution as Array<Record<string, unknown>>)
+    : [];
+  const lastEvent = evolution[evolution.length - 1];
+  const lines = [
+    `📊 OPC 公司：${String(company.name ?? "?")}`,
+    `员工 ${active.length}/${employees.length} 人（在职/累计） · 技能 ${skills.length} 项`,
+    `看板：${statusOrder.map((status) => `${status} ${statusCounts.get(status) ?? 0}`).join(" · ")}`,
+  ];
+  if (escalations.length > 0) {
+    lines.push(`⬆ 待所有者处理 ${escalations.length} 项：`);
+    for (const item of escalations.slice(0, 5)) {
+      lines.push(`   - ${String(item.title ?? "?")}${item.escalationNote ? `（${String(item.escalationNote)}）` : ""}`);
+    }
+  }
+  if (lastEvent && typeof lastEvent.summary === "string") {
+    lines.push(`最近进化事件：${lastEvent.summary}`);
+  }
+  emit({ continue: false, stopReason: lines.join("\n") });
+}
+
 // ── hook 模式 ────────────────────────────────────────────────────────────
 
 function emit(output: Record<string, unknown>): void {
@@ -279,6 +348,17 @@ function runHook(): void {
     }
     const prompt = String(event.prompt ?? "").trim();
     const low = prompt.toLowerCase();
+    // /opc 只读命令：原始斜杠输入与运行时展开包装两种到达形态（同 /zcode-go）
+    const opcRaw = /^\/opc\b/.test(low);
+    const opcExpanded = low.includes("run custom command /opc");
+    if (opcRaw || opcExpanded) {
+      const opcArgs =
+        (opcExpanded
+          ? (prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "")
+          : (prompt.split(/\s+/)[1] ?? ""));
+      runOpcCommand(opcArgs, String(event.cwd ?? process.cwd()));
+      return;
+    }
     // 两种到达形态：
     //   原始斜杠输入（桌面提交）："/zcode-go [status|off|on]"
     //   运行时命令展开包装（协议路径先把自定义命令展开再进 hook）：
