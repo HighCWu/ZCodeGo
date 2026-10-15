@@ -565,6 +565,17 @@ let si = await getState();
         receivedAt: new Date().toISOString(),
       }),
     );
+    // main 进程 app.log 尾部：验证新 bundle（GetState inbox 诊断行）与
+    // scanInbox 的 readdir 失败 warn 是否在场
+    try {
+      const tail = readFileSync(appLog, "utf8").split("\n").filter(Boolean);
+      const opcLines = tail.filter((line) => line.includes("[zcode-go] OPC"));
+      console.log(
+        `  [dump] app.log 尾部 OPC 行（${opcLines.length} 条，全部）:\n${opcLines.slice(-8).join("\n")}`,
+      );
+    } catch (e) {
+      console.log(`  [dump] app.log 读取失败: ${e}`);
+    }
   }
 }
 assert(
