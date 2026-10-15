@@ -16,6 +16,8 @@ export interface OpcOrgViewProps {
   onHire: () => void;
   onOpenGenerate: () => void;
   onOpenPresets: () => void;
+  onExportCompany: () => void;
+  onImportCompany: (file: File) => void;
   onRetrospective: (employee: OpcEmployee) => void;
   onUpdateEmployee: (
     employeeId: string,
@@ -30,6 +32,8 @@ export function OpcOrgView({
   onHire,
   onOpenGenerate,
   onOpenPresets,
+  onExportCompany,
+  onImportCompany,
   onRetrospective,
   onUpdateEmployee,
   onDepart,
@@ -61,6 +65,29 @@ export function OpcOrgView({
           <Button size="sm" variant="outline" onClick={onOpenGenerate}>
             {intl.formatMessage({ id: "opc.org.generate" })}
           </Button>
+          <Button size="sm" variant="outline" onClick={onExportCompany}>
+            {intl.formatMessage({ id: "opc.org.exportCompany" })}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              document.getElementById("opc-import-company")?.click()
+            }
+          >
+            {intl.formatMessage({ id: "opc.org.importCompany" })}
+          </Button>
+          <input
+            id="opc-import-company"
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onImportCompany(file);
+              event.target.value = "";
+            }}
+          />
           <Button size="sm" onClick={onHire}>
             <UserPlus className="size-4" />
             {intl.formatMessage({ id: "opc.org.hire" })}

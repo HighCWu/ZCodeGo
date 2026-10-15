@@ -184,4 +184,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.hire.reuse": "复用「{name}」上岗",
   "opc.employee.statusPaused": "暂停中",
   "opc.employee.statusDeparted": "已离职",
+  // zcode-go：OPC 公司包文案
+  "opc.org.exportCompany": "导出公司",
+  "opc.org.importCompany": "导入公司",
+  "opc.skills.export": "导出",
 };

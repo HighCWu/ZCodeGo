@@ -40,6 +40,7 @@ import {
 // zcode-go：OPC 文件助手与模板包同步（本文件超行后拆出）
 import {
   listMarkdownFiles,
+  persistRoleTemplateBodies,
   persistSkillBodies,
   readBodies,
 } from "./zcodeGoOpcFiles.js";
@@ -294,6 +295,7 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             promotedSkillIds.push(...applied.promotedSkillIds);
           }
           await persistSkillBodies(workspaceRoot, payload.mutations);
+          await persistRoleTemplateBodies(workspaceRoot, payload.mutations);
           return current;
         },
       );

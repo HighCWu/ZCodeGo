@@ -24,9 +24,12 @@ import {
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOpcStore } from "@/store/opcStore.js";
 import {
+  buildOpcCompanyPackage,
   buildOpcDelegationPrompt,
   buildOpcIntegrationPrompt,
+  buildOpcCompanyImportMutations,
   isOpcWorkItemRunnable,
+  parseOpcCompanyPackage,
   type OpcRoleTemplateDraft,
   type OpcWorkItem,
 } from "@zcode/shared";
@@ -37,6 +40,7 @@ import { OpcTalentMarket } from "./OpcTalentMarket.js";
 import { OpcSkillsView } from "./OpcSkillsView.js";
 import { OpcEvolutionView } from "./OpcEvolutionView.js";
 import { insertOpcPrompt } from "./opcComposerBridge.js";
+import { downloadTextFile, readFileText } from "./opcFiles.js";
 import {
   OpcReworkDialog,
   OpcWorkItemDialog,
@@ -71,6 +75,7 @@ export function ZcodeGoOpcPanelRoot({
   const resolveRoleBody = useOpcStore((s) => s.resolveRoleBody);
   const resolveSkillBody = useOpcStore((s) => s.resolveSkillBody);
   const workspacePath = useOpcStore((s) => s.workspacePath);
+  const bodies = useOpcStore((s) => s.bodies);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("kanban");
   const [workItemDialog, setWorkItemDialog] =
@@ -91,6 +96,47 @@ export function ZcodeGoOpcPanelRoot({
     window.addEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
     return () => window.removeEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
   }, []);
+
+  /** 导出公司包（状态 + 技能/模板正文 → JSON 下载）。 */
+  const handleExportCompany = useCallback(() => {
+    if (!state) return;
+    const pkg = buildOpcCompanyPackage({
+      state,
+      skillBodies: bodies.skillBodies,
+      roleTemplateBodies: bodies.roleTemplateBodies,
+    });
+    const date = new Date().toISOString().slice(0, 10);
+    downloadTextFile(
+      `opc-company-${state.company.name}-${date}.json`.replace(/\s+/g, "-"),
+      JSON.stringify(pkg, null, 1),
+    );
+  }, [state, bodies]);
+
+  /** 导入公司包（merge-fill：只创建缺失项）。 */
+  const handleImportCompany = useCallback(
+    async (file: File) => {
+      const pkg = parseOpcCompanyPackage(await readFileText(file));
+      if (!pkg) {
+        logger.warn("[zcode-go][opc] 公司包导入失败：格式无效");
+        return;
+      }
+      if (!state) return;
+      // 目标 = 当前工作区状态（merge-fill，只创建缺失项）；pkg.state 是来源。
+      const outcome = buildOpcCompanyImportMutations(state, pkg, Date.now());
+      void apply(outcome.mutations);
+    },
+    [apply, state],
+  );
+
+  /** 技能导出（SKILL.md 下载）。 */
+  const handleExportSkill = useCallback(
+    (skillId: string) => {
+      const skill = state?.skills.find((item) => item.id === skillId);
+      const body = resolveSkillBody(skillId) ?? skill?.description ?? "";
+      downloadTextFile(`${skillId}.SKILL.md`, body);
+    },
+    [state, resolveSkillBody],
+  );
 
   const handleStatusChange = useCallback(
     (workItemId: string, status: OpcWorkItem["status"]) => {
@@ -334,6 +380,8 @@ export function ZcodeGoOpcPanelRoot({
                 onHire={() => setCustomHireOpen(true)}
                 onOpenGenerate={() => setOrgGenerateOpen(true)}
                 onOpenPresets={() => setOrgPresetOpen(true)}
+                onExportCompany={handleExportCompany}
+                onImportCompany={(file) => void handleImportCompany(file)}
                 onRetrospective={(employee) =>
                   setRetroDialog({ employeeId: employee.id })
                 }
@@ -356,6 +404,7 @@ export function ZcodeGoOpcPanelRoot({
               <OpcSkillsView
                 state={state}
                 onUpgrade={(skillId) => setUpgradeDialog({ skillId })}
+                onExportSkill={handleExportSkill}
                 onToggleAttach={(employeeId, skillId, attach) => {
                   void apply([
                     {

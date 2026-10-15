@@ -14,6 +14,23 @@ import {
 
 const MAX_SKILL_BODIES = 4;
 
+/** 完成标记：agent 验收自查通过后在回复末尾单独一行输出（委派 prompt 注入约定）。 */
+export function buildOpcDoneMarker(workItemId: string): string {
+  return `<!-- zcode-go:opc-done ${workItemId} -->`;
+}
+
+/** 从文本中提取完成标记的工作项 id（重复/多个标记都收集）。 */
+export function extractOpcDoneMarkerIds(text: string): string[] {
+  const ids: string[] = [];
+  const pattern = /<!--\s*zcode-go:opc-done\s+([\w:-]+)\s*-->/g;
+  let match = pattern.exec(text);
+  while (match !== null) {
+    if (match[1]) ids.push(match[1]);
+    match = pattern.exec(text);
+  }
+  return ids;
+}
+
 export function buildOpcDelegationPrompt(
   input: OpcDelegationPromptInput,
 ): string {
@@ -81,6 +98,7 @@ export function buildOpcDelegationPrompt(
     "- 以角色说明书的方法论完成任务，交付物直接给出（文档/代码/方案等）。",
     "- 结束前自查验收标准逐条是否满足，并在回复末尾给出「完成情况核对清单」。",
     "- 若发现超出你权限的事项，明确列出并升级给所有者决策，不要自行扩大范围。",
+    `- 完成判定：仅当上述验收标准全部满足时，在回复的最后一行单独输出标记 ${buildOpcDoneMarker(workItem.id)}；未完全满足则不要输出该标记，改为列出缺口清单。该标记会驱动看板自动把本项转入待验收。`,
   );
   return sections.join("\n");
 }

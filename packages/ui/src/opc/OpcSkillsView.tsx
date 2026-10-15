@@ -13,6 +13,7 @@ import type { OpcCompanyState } from "@zcode/shared";
 export interface OpcSkillsViewProps {
   state: OpcCompanyState;
   onUpgrade: (skillId: string) => void;
+  onExportSkill: (skillId: string) => void;
   onToggleAttach: (
     employeeId: string,
     skillId: string,

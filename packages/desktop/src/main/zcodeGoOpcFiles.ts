@@ -9,6 +9,7 @@ import {
   OPC_ROLES_TEMPLATES_SUBDIR,
   OPC_SKILLS_DIR,
   OPC_TEMPLATES_DIR,
+  parseOpcRoleTemplate,
   parseOpcSkillMarkdown,
   type OpcCompanyState,
   type OpcMutation,
@@ -118,4 +119,22 @@ export async function readBodies(
     }
   }
   return { roleTemplateBodies, skillBodies };
+}
+
+/**
+ * 角色模板正文落盘：template.importRole 携带的 markdown 写入
+ * templates/roles/<id>.md（公司包导入与目录导入共用；正文即模板事实源）。
+ */
+export async function persistRoleTemplateBodies(
+  workspaceRoot: string,
+  mutations: OpcMutation[],
+): Promise<void> {
+  for (const mutation of mutations) {
+    if (mutation.kind !== "template.importRole") continue;
+    const parsed = parseOpcRoleTemplate(mutation.markdown);
+    if (!parsed) continue;
+    const templatesDir = join(workspaceRoot, OPC_TEMPLATES_DIR, OPC_ROLES_TEMPLATES_SUBDIR);
+    await mkdir(templatesDir, { recursive: true });
+    await writeFile(join(templatesDir, `${parsed.id}.md`), mutation.markdown, "utf8");
+  }
 }

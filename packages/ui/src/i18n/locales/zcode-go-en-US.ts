@@ -184,4 +184,8 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.hire.reuse": "Reactivate \"{name}\"",
   "opc.employee.statusPaused": "paused",
   "opc.employee.statusDeparted": "departed",
+  // zcode-go: OPC company package messages
+  "opc.org.exportCompany": "Export company",
+  "opc.org.importCompany": "Import company",
+  "opc.skills.export": "Export",
 };

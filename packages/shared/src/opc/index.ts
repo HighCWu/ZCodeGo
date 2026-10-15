@@ -10,6 +10,7 @@ export * from "./opc-reducer.js";
 export * from "./opc-prompts.js";
 export * from "./opc-packs.js";
 export * from "./opc-org.js";
+export * from "./opc-company-package.js";
 export { OPC_BUILTIN_ROLE_TEMPLATES } from "./opc-builtin-roles.js";
 export type { OpcBuiltinRoleTemplate } from "./opc-builtin-roles.js";
 export { OPC_BUILTIN_SKILLS } from "./opc-builtin-skills.js";

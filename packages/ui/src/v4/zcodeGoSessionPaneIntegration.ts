@@ -6,13 +6,19 @@ import { useCallback, useEffect, useRef } from "react";
 import type {
   CommandAck,
   CommandType,
+  ConversationRow,
   ConversationRowTarget,
   ConversationSnapshot,
 } from "@zcode/shared/zcode-protocol-v4";
+import { extractOpcDoneMarkerIds } from "@zcode/shared";
+import { useOpcStore } from "@/store/opcStore.js";
 
 type Logger = {
   warn: (...args: unknown[]) => void;
-  lifecycle: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
+  lifecycle: {
+    info: (...args: unknown[]) => void;
+    warn: (...args: unknown[]) => void;
+  };
 };
 
 type DispatchCommand = (
@@ -53,12 +59,18 @@ export function useZcodeGoHoverForkHandler({
               zcode?: {
                 zcodeGoSilentFork?: (payload: {
                   sessionId: string;
-                }) => Promise<{ ok: boolean; forkSessionId?: string; error?: string }>;
+                }) => Promise<{
+                  ok: boolean;
+                  forkSessionId?: string;
+                  error?: string;
+                }>;
               };
             }
           ).zcode?.zcodeGoSilentFork?.({ sessionId });
           if (!result?.ok) {
-            logger.warn(`[v4-pane] hover fork 未执行: ${result?.error ?? "unknown"}`);
+            logger.warn(
+              `[v4-pane] hover fork 未执行: ${result?.error ?? "unknown"}`,
+            );
           }
         } catch (error) {
           logger.warn(
@@ -96,7 +108,12 @@ export function useZcodeGoGoalCommandHandlers({
       for (let attempt = 0; attempt < 10; attempt += 1) {
         let ack: CommandAck;
         try {
-          ack = await dispatchCommand(type, {}, sessionId, snapshotRef.current?.revision);
+          ack = await dispatchCommand(
+            type,
+            {},
+            sessionId,
+            snapshotRef.current?.revision,
+          );
         } catch (error) {
           logger.lifecycle.warn(`[v4-pane] ${type} 发送失败: ${String(error)}`);
           return;
@@ -114,11 +131,15 @@ export function useZcodeGoGoalCommandHandlers({
           goalStatus: snapshotRef.current?.goal?.status ?? "",
         });
         if (ack.status !== "accepted" && ack.status !== "noop") {
-          logger.warn(`[v4-pane] ${type} 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
+          logger.warn(
+            `[v4-pane] ${type} 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`,
+          );
         }
         return;
       }
-      logger.warn(`[v4-pane] ${type} 连续 stale 重试耗尽（流式 revision 推进不歇）`);
+      logger.warn(
+        `[v4-pane] ${type} 连续 stale 重试耗尽（流式 revision 推进不歇）`,
+      );
     },
     [dispatchCommand, sessionId],
   );
@@ -140,10 +161,14 @@ export function useZcodeGoGoalCommandHandlers({
       )?.foregroundExecutionId;
       void dispatchCommand(
         "stop",
-        foregroundExecutionId ? { expectedForegroundExecutionId: foregroundExecutionId } : {},
+        foregroundExecutionId
+          ? { expectedForegroundExecutionId: foregroundExecutionId }
+          : {},
         sessionId,
       ).catch((error) => {
-        logger.lifecycle.warn(`[v4-pane] pause(stop 路径) 失败: ${String(error)}`);
+        logger.lifecycle.warn(
+          `[v4-pane] pause(stop 路径) 失败: ${String(error)}`,
+        );
       });
     }
     // 暂停意图经 pauseGoal 命令路径自动登记（host 侧 hook），无需额外 RPC。
@@ -164,7 +189,11 @@ export function useZcodeGoSessionRedirectSnapshot({
   lease,
 }: {
   sessionId: string | null;
-  lease: { store: { connect: (options?: { forceSnapshot?: boolean }) => Promise<unknown> } } | null;
+  lease: {
+    store: {
+      connect: (options?: { forceSnapshot?: boolean }) => Promise<unknown>;
+    };
+  } | null;
 }): void {
   useEffect(() => {
     if (!sessionId || !lease) return;
@@ -183,4 +212,48 @@ export function useZcodeGoSessionRedirectSnapshot({
     });
     return () => off?.();
   }, [sessionId, lease]);
+}
+
+const OPC_DONE_SCAN_WINDOW = 30;
+
+/**
+ * OPC 委派完成自动检测（Self-Run 闭环最后一段）：委派 prompt 要求 agent 在
+ * 验收全部通过时于回复末行输出 `<!-- zcode-go:opc-done <workItemId> -->` 标记；
+ * 本 hook 扫描会话尾部的 assistantText 行，命中即把对应工作项推进到 review
+ * （人工验收门，不自动 done）。去重键 = sessionId:workItemId:reworkNotes 数——
+ * 返工一次计数 +1，同一条旧标记不会被再次触发；只扫尾部 30 行控开销。
+ */
+export function useZcodeGoOpcDoneWatcher({
+  sessionId,
+  rows,
+}: {
+  sessionId: string | null;
+  rows: readonly ConversationRow[];
+}): void {
+  const processedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!sessionId || rows.length === 0) return;
+    const { state: company, apply } = useOpcStore.getState();
+    if (!company) return;
+    const foundIds = new Set<string>();
+    for (const row of rows.slice(-OPC_DONE_SCAN_WINDOW)) {
+      if (row.kind !== "assistantText") continue;
+      for (const workItemId of extractOpcDoneMarkerIds(row.text)) {
+        foundIds.add(workItemId);
+      }
+    }
+    if (foundIds.size === 0) return;
+    for (const workItemId of foundIds) {
+      const item = company.workItems.find(
+        (workItem) => workItem.id === workItemId,
+      );
+      if (!item) continue;
+      // 仅执行/就绪态可被完成标记推进；review/done 保持人工掌控。
+      if (item.status !== "in_progress" && item.status !== "ready") continue;
+      const dedupeKey = `${sessionId}:${workItemId}:${item.reworkNotes?.length ?? 0}`;
+      if (processedRef.current.has(dedupeKey)) continue;
+      processedRef.current.add(dedupeKey);
+      void apply([{ kind: "workitem.status", workItemId, status: "review" }]);
+    }
+  }, [sessionId, rows]);
 }
