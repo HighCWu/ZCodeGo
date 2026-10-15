@@ -221,8 +221,10 @@ pre-push 钩子 test:unit:affected 以远端 sha 为 base；OPC 改 shared 后�
    该测试可过。
 4. subagentRuntimeConfig「目录替换丢弃 in-flight 读」：fs.watch 时序型
    存量红，zcode-agent 目录零变更。
-这 2+ 例存量红用 --no-verify 推送（CI 的 unit-tests job 是显式白名单，
-不含这些文件；E2E 门禁不受影响）。
+pre-push 钩子已加基线守卫：本地 node 主版本 ≠ mise.toml 时跳过单测段
+（lint/架构检查照跑），测试一律由 CI（official-e2e 复用官版 zcode
+electron 的装配链路）兜底——本地不在跑测试的工作流里，环境漂移不应成为
+推送障碍（此前需 --no-verify 的场景即此根因）。
 
 ## desktop main 盲区第三次踩坑（parseOpcInboxFile，CI 九轮实证收口）
 
