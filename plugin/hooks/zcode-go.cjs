@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 编译产物：单文件收口是有意为之（同源码约定），拆散会破坏内聚。 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;

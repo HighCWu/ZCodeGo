@@ -20,6 +20,11 @@ await build({
   minify: false,
   legalComments: "none",
   logLevel: "warning",
+  // esbuild 会剥掉源码头部的 oxlint-disable 注释（该注释是仓库对单文件收口
+  // 产物的豁免约定，见 e6936da7），必须用 banner 注回产物，否则全量 lint 误报。
+  banner: {
+    js: "/* oxlint-disable eslint(max-lines) -- 编译产物：单文件收口是有意为之（同源码约定），拆散会破坏内聚。 */",
+  },
 });
 renameSync(
   join(repoRoot, "plugin", "hooks", "zcode-go.bundle.cjs"),
