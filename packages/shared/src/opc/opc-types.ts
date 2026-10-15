@@ -182,6 +182,8 @@ export interface OpcCompanyState {
   skills: OpcSkillMeta[];
   roleTemplates: OpcRoleTemplateMeta[];
   evolution: OpcEvolutionEvent[];
+  /** 已同步的模板包版本戳（packId → commit sha）；可选字段，旧状态文件无需迁移。 */
+  packImports?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

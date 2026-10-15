@@ -14,7 +14,6 @@ import {
   existsSync,
   mkdir,
   readFile,
-  readdir,
   rename,
   writeFile,
 } from "node:fs/promises";
@@ -31,20 +30,29 @@ import {
   OPC_SKILLS_DIR,
   OPC_TEMPLATES_DIR,
   parseOpcRoleTemplate,
-  parseOpcSkillMarkdown,
   PlatformChannels,
   renderOpcEmployeeMemory,
   renderOpcSkillFile,
   type OpcCompanyState,
   type OpcEvolutionEvent,
   type OpcMutation,
-  type OpcSkillMeta,
 } from "@zcode/shared";
+// zcode-go：OPC 文件助手与模板包同步（本文件超行后拆出）
+import {
+  listMarkdownFiles,
+  persistSkillBodies,
+  readBodies,
+} from "./zcodeGoOpcFiles.js";
+import { syncOpcPacks } from "./zcodeGoOpcPacks.js";
 
 interface OpcStoreLogger {
   info: (...args: unknown[]) => void;
   warn: (...args: unknown[]) => void;
 }
+
+/** init 时注入的模块级 logger（packs 同步在 withState 内部深处要用）。 */
+let opcLogger: OpcStoreLogger | null = null;
+const silentOpcLogger: OpcStoreLogger = { info: () => undefined, warn: () => undefined };
 
 /** 每 workspacePath 一条串行队列：同工作区的读写永不交错。 */
 const workspaceQueues = new Map<string, Promise<unknown>>();
@@ -126,35 +134,6 @@ async function initializeWorkspace(
   return state;
 }
 
-/** 技能正文来源：晋升技能按指纹渲染 playbook 正文；其余用内置包或占位。 */
-function resolveSkillBodySource(meta: OpcSkillMeta): string {
-  if (meta.origin === "promoted") {
-    const statement = meta.name.replace(/^Playbook：/, "");
-    return [
-      `# ${meta.name}`,
-      "",
-      "> 本 playbook 由复盘经验自动晋升生成（来源员工档案见 .opc/memory/）。",
-      "",
-      "## 适用场景",
-      "",
-      `- ${meta.description}`,
-      "",
-      "## 核心经验",
-      "",
-      `- ${statement}`,
-      "",
-      "## 执行约定",
-      "",
-      "- 在同类任务开始前主动应用本经验；",
-      "- 若经验与新环境冲突，以当前任务验收标准优先，并在复盘时提出修订。",
-      "",
-    ].join("\n");
-  }
-  const builtin = OPC_BUILTIN_SKILL_DRAFTS.find(
-    (draft) => draft.id === meta.id,
-  );
-  return builtin?.body ?? `# ${meta.name}\n\n${meta.description}\n`;
-}
 
 /** 把状态派生的文件补写全（新建技能的 SKILL.md / 员工记忆 / 进化日志），company.json 最后写。 */
 async function persistDerivedFiles(
@@ -224,7 +203,9 @@ async function withState(
   return enqueue(workspacePath, async () => {
     try {
       const previous = await readCompanyState(workspaceRoot);
-      const current = previous ?? (await initializeWorkspace(workspaceRoot));
+      let current = previous ?? (await initializeWorkspace(workspaceRoot));
+      // 模板包幂等填充（spec「模板包」节）：戳未变时是两次小 JSON 读，零成本。
+      current = await syncOpcPacks(workspaceRoot, current, opcLogger ?? silentOpcLogger);
       const next = await mutate(current, workspaceRoot);
       await persistDerivedFiles(workspaceRoot, previous, next);
       await writeJsonAtomic(join(workspaceRoot, OPC_COMPANY_FILE), next);
@@ -239,43 +220,6 @@ async function withState(
   });
 }
 
-// ---------------------------------------------------------------------------
-// 目录扫描（导入用）
-// ---------------------------------------------------------------------------
-
-async function listMarkdownFiles(sourcePath: string): Promise<string[]> {
-  const abs = resolve(sourcePath);
-  const entries = await readdir(abs, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const full = join(abs, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listMarkdownFiles(full)));
-    } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
-      files.push(full);
-    }
-  }
-  return files;
-}
-
-/**
- * 技能正文落盘：skill.import / skill.upgrade 携带的新正文写入 skills/<id>/SKILL.md
- * （版本覆盖语义：文件即正文，company.json 只存元数据）。缺失正文时保留现状。
- */
-async function persistSkillBodies(
-  workspaceRoot: string,
-  mutations: OpcMutation[],
-): Promise<void> {
-  for (const mutation of mutations) {
-    if (mutation.kind !== "skill.import" && mutation.kind !== "skill.upgrade")
-      continue;
-    const skillId = mutation.skillId;
-    if (!skillId) continue;
-    const skillDir = join(workspaceRoot, OPC_SKILLS_DIR, skillId);
-    await mkdir(skillDir, { recursive: true });
-    await writeFile(join(skillDir, "SKILL.md"), mutation.body, "utf8");
-  }
-}
 
 function broadcastStateChanged(
   logger: OpcStoreLogger,
@@ -297,47 +241,9 @@ function broadcastStateChanged(
 // IPC 注册（index.ts 门控点 = import + initZcodeGoOpcStore 一行调用）
 // ---------------------------------------------------------------------------
 
-/** 读取 prompt 构造所需的正文映射（导入角色模板 + 技能正文）。 */
-async function readBodies(
-  workspaceRoot: string,
-  state: OpcCompanyState,
-): Promise<{
-  roleTemplateBodies: Record<string, string>;
-  skillBodies: Record<string, string>;
-}> {
-  const roleTemplateBodies: Record<string, string> = {};
-  for (const template of state.roleTemplates) {
-    try {
-      roleTemplateBodies[template.id] = await readFile(
-        join(
-          workspaceRoot,
-          OPC_TEMPLATES_DIR,
-          OPC_ROLES_TEMPLATES_SUBDIR,
-          `${template.id}.md`,
-        ),
-        "utf8",
-      );
-    } catch {
-      /* 正文缺失时 UI 回退内置包或描述 */
-    }
-  }
-  const skillBodies: Record<string, string> = {};
-  for (const skill of state.skills) {
-    try {
-      const raw = await readFile(
-        join(workspaceRoot, OPC_SKILLS_DIR, skill.id, "SKILL.md"),
-        "utf8",
-      );
-      const parsed = parseOpcSkillMarkdown(raw, { fallbackName: skill.name });
-      skillBodies[skill.id] = parsed?.body ?? raw;
-    } catch {
-      /* 正文缺失时 UI 回退描述 */
-    }
-  }
-  return { roleTemplateBodies, skillBodies };
-}
 
 export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
+  opcLogger = logger;
   ipcMain.handle(
     PlatformChannels.ZcodeGoOpcGetState,
     async (_event, payload: { workspacePath: string }) =>
@@ -345,7 +251,14 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
         const workspaceRoot = opcRoot(payload.workspacePath);
         try {
           const existing = await readCompanyState(workspaceRoot);
-          const state = existing ?? (await initializeWorkspace(workspaceRoot));
+          let state = existing ?? (await initializeWorkspace(workspaceRoot));
+          // GetState 也做模板包幂等同步（首次打开 OPC 面板即填充，无需先有写操作）
+          const synced = await syncOpcPacks(workspaceRoot, state, logger);
+          if (synced !== state) {
+            await persistDerivedFiles(workspaceRoot, state, synced);
+            await writeJsonAtomic(join(workspaceRoot, OPC_COMPANY_FILE), synced);
+            state = synced;
+          }
           return {
             ok: true as const,
             state,

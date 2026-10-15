@@ -32,6 +32,16 @@
 | packages/ui/src/v4/SessionPane.tsx | 115+/31- | **23+/44- → 本轮 +21/-4** | OPC：草稿空态门控分支（isOpcMode 三元替换）+ 建议提示条件加 `!isOpcMode`（门控分支类） |
 | packages/ui/src/App.tsx | 104+/1- | **10+/1- → 本轮 +4** | OPC：+1 import 行 + `<ZcodeGoOpcPanelMount />` 渲染行（纯插入） |
 | packages/shared/src/onboardingRecord.ts | — | **2+/1-** | OPC：interfaceMode 枚举加 `"opc"`（类型不可避免类） |
+| packages/desktop/electron-builder.config.js | — | **6+** | OPC 模板包：extraResources 存在性门控条目（build/opc-packs 存在才进包，纯插入带锚） |
+| package.json（根） | — | **2+** | OPC：`opc:fetch-packs` / `opc:fetch-packs:desktop` 两个脚本行（JSON 无锚不可避免，同 services/package.json 先例） |
+| .gitignore | — | **3+** | OPC 模板包构建产物排除（纯插入带锚） |
+
+OPC 模板包（specs/opc-mode.md「模板包」节）：dev/打包期从用户 fork
+（HighCWu/OpenOPC、HighCWu/claude-skills）经 `pnpm opc:fetch-packs[:desktop]`
+拉取 codeload tarball，过滤落盘为带 pack.json 版本戳的模板包；打包由
+electron-builder 存在性门控带进 resources/opc-packs；运行时 desktop main
+（zcodeGoOpcPacks.ts）按 company.json `packImports` 戳做幂等填充（只创建缺失项，
+用户改动/晋升产物永不被覆盖，纯逻辑在 shared opc-packs.ts）。本仓库零内容入库。
 
 OPC 模式（specs/opc-mode.md）本轮新增上游足迹即上表 10 行；承载新文件：
 `packages/shared/src/opc/`（契约+纯逻辑+内置模板包）、`packages/desktop/src/main/zcodeGoOpcStore.ts`

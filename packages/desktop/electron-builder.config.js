@@ -769,6 +769,12 @@ export default {
       from: "build/icon_windows.png",
       to: "icon_windows.png",
     },
+    // zcode-go：OPC 模板包存在性门控——`pnpm opc:fetch-packs:desktop` 拉取后
+    // build/opc-packs 才存在（已 gitignore，本仓库零内容入库）；打进 resources/opc-packs
+    // 后主进程在 OPC 首次初始化工作区时做幂等填充（spec specs/opc-mode.md「模板包」节）。
+    ...(existsSync("build/opc-packs")
+      ? [{ from: "build/opc-packs", to: "opc-packs" }]
+      : []),
     ...(targetPlatform.os === "win32"
       ? [
           {

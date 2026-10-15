@@ -54,6 +54,32 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    frontmatter）与 claude-skills 目录（递归发现 `SKILL.md`）。导入即解析入
    company.json / skills/，重复 id 以「版本覆盖」处理（正文与元数据更新，changelog 追加）。
 
+## 模板包（packs）：dev/打包期注入，开箱即用
+
+内置 24 角色 + 16 技能只是精编底座；两个上游仓库的全量内容（OpenOPC 97 角色
+talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」机制注入，
+本 git 仓库零内容入库：
+
+1. **来源（用户 fork）**：默认 `HighCWu/OpenOPC` 与 `HighCWu/claude-skills`
+   （env `OPC_PACK_OPENOPC_REPO` / `OPC_PACK_CLAUDE_SKILLS_REPO` 可覆盖）。
+2. **拉取脚本**：`pnpm opc:fetch-packs`（落 `~/.zcode-go/opc-packs/<pack>/`，
+   用户级缓存）与 `pnpm opc:fetch-packs:desktop`（落
+   `packages/desktop/build/opc-packs/`，供打包，`.gitignore` 排除）。
+   下载 codeload tarball（HEAD），按内容过滤——OpenOPC 取
+   `.opc/prompts/talent/**` 与 `.opc/skills/**/SKILL.md`，claude-skills 取全部
+   `**/SKILL.md`——并写 `pack.json` 版本戳（repo/ref/commit/fetchedAt）。
+   幂等：版本戳相同则跳过，`--force` 强制重拉。
+3. **打包注入**：electron-builder extraResources 增加存在性门控条目
+   （`build/opc-packs` 存在才进包，到 `resources/opc-packs`），不打包时零足迹。
+4. **运行时解析链**（desktop main）：`process.resourcesPath/opc-packs`（打包态）
+   → env `ZCODE_GO_OPC_PACKS_DIR` → `<appPath>/build/opc-packs`（dev）→
+   `~/.zcode-go/opc-packs`。取第一个存在的目录集合。
+5. **同步语义（幂等填充）**：工作区状态初始化/读写时惰性同步——按 pack 版本戳
+   （company.json 新增可选字段 `packImports[packId]`）判断，未同步过则解析包内
+   文件并**只创建缺失项**（技能/角色按 id 去重：已存在的一律跳过，不覆盖用户
+   改动、不递增版本、不刷 changelog），随后盖版本戳。纯逻辑在 shared
+   `applyOpcPackFiles`（输入虚拟文件集，可测），main 只做目录读取与落盘。
+
 ## 所有权与边界
 
 - **事实源（唯一所有者）**：desktop main 进程 `zcodeGoOpcStore.ts`。全部文件 IO 在 main，
