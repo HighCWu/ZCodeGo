@@ -521,10 +521,35 @@ writeFileSync(
 );
 let si = await getState();
 // 按 title 断言而非总数：Telegram worker 的首轮拉取可能已把 mock 消息投进
-// 同一队列（渠道中立 ingest 的合法并发，CI 三平台实证总数竞态）。
+// 同一队列（渠道中立 ingest 的合法并发）。跨进程文件可见性加短轮询兜底；
+// 5s 仍不可见则 dump 双侧现场（脚本 readdir vs GetState 响应）一锤定音。
+{
+  let seen = false;
+  for (let i = 0; i < 10 && !seen; i += 1) {
+    seen = ["入站转正", "忽略我"].every((t) =>
+      (si.inbox ?? []).some((item) => item.title === t),
+    );
+    if (!seen) {
+      await sleep(500);
+      si = await getState();
+    }
+  }
+  if (!seen) {
+    const dropSide = existsSync(inboxDir)
+      ? (await import("node:fs")).readdirSync(inboxDir).join(",")
+      : "(目录不存在)";
+    console.log(`  [dump] 脚本侧 inbox 目录: ${inboxDir} → ${dropSide}`);
+    console.log(
+      `  [dump] GetState 响应 ok=${si.ok} inbox=${JSON.stringify(si.inbox)} err=${si.err ?? si.error ?? "无"}`,
+    );
+    console.log(
+      `  [dump] IPC 传参 workspacePath=${WORKSPACE} opcRoot=${join(WORKSPACE, ".opc")}`,
+    );
+  }
+}
 assert(
   ["入站转正", "忽略我"].every((t) =>
-    (si.inbox ?? []).some((i) => i.title === t),
+    (si.inbox ?? []).some((item) => item.title === t),
   ),
   "入站扫描可见 drop 的 2 条",
 );
