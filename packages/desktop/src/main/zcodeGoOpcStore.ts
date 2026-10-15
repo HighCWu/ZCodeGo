@@ -66,6 +66,11 @@ const silentOpcLogger: OpcStoreLogger = {
   warn: () => undefined,
 };
 
+/** 模块级 warn 便捷入口（scanInbox 等无 logger 参数的路径）。 */
+function opcLoggerWarn(message: string, error: unknown): void {
+  (opcLogger ?? silentOpcLogger).warn(message, error);
+}
+
 /** 每 workspacePath 一条串行队列：同工作区的读写永不交错。 */
 const workspaceQueues = new Map<string, Promise<unknown>>();
 
@@ -217,12 +222,21 @@ async function scanInbox(workspaceRoot: string): Promise<OpcInboxItem[]> {
   let entries;
   try {
     entries = await readdir(inboxDir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    // 目录不存在是常态（无入站渠道）；其他错误（权限等）必须留痕——
+    // 静默吞掉会让「入站队列永远为空」无从排查（E2E CI 实证场景）。
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") {
+      opcLoggerWarn(`[zcode-go] OPC 入站目录扫描失败 dir=${inboxDir}`, error);
+    }
     return [];
   }
   const items: OpcInboxItem[] = [];
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    // d_type 兼容：DT_UNKNOWN 的文件系统上 isFile() 为 false，按扩展名兜底
+    const looksLikeJsonFile =
+      entry.isFile() || (!entry.isDirectory() && entry.name.endsWith(".json"));
+    if (!looksLikeJsonFile) continue;
     try {
       const item = parseOpcInboxFile(
         entry.name,
