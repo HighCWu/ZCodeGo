@@ -633,6 +633,12 @@ assert(telegramHits > 0, "mock API 收到 getUpdates");
 // ── 清理 ──────────────────────────────────────────────────────────────────
 mockApi.close();
 appProc.kill();
-rmSync(ws, { recursive: true, force: true });
+// 等进程真正退出再删沙箱：kill 是异步信号，立即 rmSync 会在 app 还握着
+// 句柄/还在写 telegram-*.json 时撞 ENOTEMPTY（CI Linux 实证）。
+await Promise.race([
+  new Promise((resolve) => appProc.once("exit", resolve)),
+  sleep(5000).then(() => appProc.kill("SIGKILL")),
+]);
+rmSync(ws, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
 console.log("✅ OPC E2E 全部断言通过");
 process.exit(0);

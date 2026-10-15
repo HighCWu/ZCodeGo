@@ -119,6 +119,17 @@ export function ZcodeGoOpcPanelRoot({
     return () => window.removeEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
   }, []);
 
+  // 非 opc 模式下 mount 预热被门控（E2E 启动开销归零），面板经 CustomEvent
+  // 唤起时在此兜底 initialize——幂等，重复调用短路。
+  const initialize = useOpcStore((s) => s.initialize);
+  const workspacePathFromStore = useOpcStore((s) => s.workspacePath);
+  useEffect(() => {
+    if (!open || !workspacePathFromStore) return;
+    void initialize(workspacePathFromStore).catch(() => {
+      /* 初始化失败由面板内错误态呈现 */
+    });
+  }, [open, initialize, workspacePathFromStore]);
+
   /** 导出公司包（状态 + 技能/模板正文 → JSON 下载）。 */
   const handleExportCompany = useCallback(() => {
     if (!state) return;
