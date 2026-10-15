@@ -246,44 +246,45 @@ async function consumeInbox(
     return { ok: false, state: null, inbox: [], error: "invalid inbox fileName" };
   }
   const inboxFile = join(opcRoot(workspacePath), OPC_INBOX_DIR, fileName);
-  return enqueue(workspacePath, async () => {
-    try {
-      await rm(inboxFile, { force: true });
-    } catch {
-      /* 文件不存在即已被消费 */
-    }
-    if (convert) {
-      const result = await withState(workspacePath, async (state) => {
-        const applied = applyOpcMutation(
-          state,
-          {
-            kind: "workitem.create",
-            title: convert.title,
-            detail: convert.detail,
-            priority: convert.priority,
-            assigneeId: convert.assigneeId ?? null,
-          },
-          Date.now(),
-        );
-        return applied.state;
-      });
-      const inbox = await scanInbox(opcRoot(workspacePath));
-      if (result.ok && result.state) {
-        broadcastStateChanged(opcLogger ?? silentOpcLogger, workspacePath);
-      }
-      return {
-        ok: result.ok,
-        state: result.state,
-        inbox,
-        ...(result.error ? { error: result.error } : {}),
-      };
-    }
+  // inbox 文件不是状态事实，删除无需队列保护（避免嵌套 enqueue 死锁——
+  // consumeInbox 曾在队列任务内再次调用 withState，串行链自等永久挂起）。
+  try {
+    await rm(inboxFile, { force: true });
+  } catch {
+    /* 文件不存在即已被消费 */
+  }
+  if (!convert) {
+    const workspaceRoot = opcRoot(workspacePath);
     return {
       ok: true,
-      state: await readCompanyState(opcRoot(workspacePath)),
-      inbox: await scanInbox(opcRoot(workspacePath)),
+      state: await readCompanyState(workspaceRoot),
+      inbox: await scanInbox(workspaceRoot),
     };
+  }
+  const result = await withState(workspacePath, async (state) => {
+    const applied = applyOpcMutation(
+      state,
+      {
+        kind: "workitem.create",
+        title: convert.title,
+        detail: convert.detail,
+        priority: convert.priority,
+        assigneeId: convert.assigneeId ?? null,
+      },
+      Date.now(),
+    );
+    return applied.state;
   });
+  const inbox = await scanInbox(opcRoot(workspacePath));
+  if (result.ok && result.state) {
+    broadcastStateChanged(opcLogger ?? silentOpcLogger, workspacePath);
+  }
+  return {
+    ok: result.ok,
+    state: result.state,
+    inbox,
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
 async function withState(
