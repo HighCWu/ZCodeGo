@@ -182,3 +182,22 @@ render 三处小插入；文案在 zcode-go-{locale}.ts spread 文件。
 - 文案进 i18n/locales/zcode-go-{locale}.ts；样式进 zcode-go.css；
   通道键进 shared 侧独立对象后 spread（当前 channels.ts 为历史形态——我们
   对它的侵入本就是纯新增行，保留即可，不必回改）。
+
+## OPC E2E（CI-only 定版）
+
+OPC 全栈闭环 E2E（scripts/e2e/opc-e2e.mjs）挂在 official-e2e 假 Provider
+步骤的循环里（第七条，与六条既有 E2E 同一编排），**只在 GitHub Actions
+跑，不在本地执行**——本地反复起 Electron 实例被用户明确叫停。CI 复用：
+官方锚点构建 → ensure-official-electron 装配 → ZCODE_GO_E2E_APP_BIN/
+ZCODE_GO_E2E_DISPLAY 约定 → Xvfb+openbox。脚本自足（Telegram mock API
+随机端口、模板包写沙箱 ~/.zcode-go/opc-packs，零网络依赖）；启动前同步
+仓库 out/main+out/preload → 装配产物（desktop main 不在 typecheck 覆盖，
+bundle 保鲜是唯一防线）。paths 触发含 packages/shared/src/**（OPC 主体
+逻辑在 shared；缺它则改 shared 不触发任何 E2E）。
+
+教训——pkill 宽模式自杀：`pkill -f "<字面量>"` 会匹配**自己命令行里含
+该字面量的父 shell**（bash -c 'pkill -f "..."'' 的 cmdline 就带匹配串，
+pkill 不排除父进程，只排除自身）——曾用 `pkill -f /proc/self/exe` 清理
+残留时杀掉自己的整条命令链。脚本内安全：spawn pkill 不经 shell、node
+父进程 cmdline 无匹配串。人工清理残留进程一律走 `/proc/<pid>/exe` +
+cmdline 双过滤后按 pid 杀（bash 的 exe 是 bash，过滤条件不可能命中自己）。

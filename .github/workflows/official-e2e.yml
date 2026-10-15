@@ -7,7 +7,7 @@ name: official-e2e
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, rsi]
     paths:
       - "plugin/**"
       - "packages/desktop/src/**"
