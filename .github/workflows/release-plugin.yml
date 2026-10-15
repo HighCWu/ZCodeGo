@@ -1,11 +1,12 @@
 # zcode-go 插件发布链（url-zip 分发）。
 #
-# 市场安装走「发布 zip」而非仓库目录（root marketplace.json 的 source 指向本
-# 工作流产出的 release 资产）：安装那一刻 OPC 模板包已随包落地——本仓库零内容
-# 入库（packs 由 scripts/opc/fetch-opc-packs.mjs 从用户 fork 拉取后注入 staging）。
-#
-# 产物：滚动 release（tag=plugin-latest）上的 zcode-go-plugin.zip，
-# 单一顶层目录 zcode-go/（官方安装器 stripRoot 剥壳后即插件根）。
+# 官方安装器对市场条目 url 来源的分发（bundle Jdt 实证）：必须 type:"zip" 才走
+# zip 安装器，且 sha256 必填、下载后强校验；无 type 会被当作 git URL 克隆。
+# 因此本工作流除了出 zip，还要把 marketplace.json 改写为
+#   { source:"url", type:"zip", url:<固定 tag 的资产>, sha256:<本次产物摘要> }
+# 并推送回仓库——市场条目与 release 一一对应，用户「刷新市场 → 更新插件」即得新版。
+# （滚动 latest + 静态 sha256 互斥，不可行；仓库零内容入库：packs 由
+# scripts/opc/fetch-opc-packs.mjs 从用户 fork 拉取后注入 staging。）
 name: release-plugin
 
 on:
@@ -44,7 +45,10 @@ jobs:
 
       # packs 从用户 fork 拉取（HighCWu/OpenOPC、HighCWu/claude-skills，可被
       # OPC_PACK_*_REPO 覆盖）；写入 plugin/opc-packs/（已 gitignore，仅进 zip）。
+      # GH_TOKEN 让 gh api 用认证通道取 commit sha（匿名 api.github.com 共享限流）。
       - name: 拉取 OPC 模板包
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/opc/fetch-opc-packs.mjs --out plugin/opc-packs
 
       - name: 构建插件 cjs
@@ -84,23 +88,61 @@ jobs:
           (cd "$STAGING" && zip -qr "$RUNNER_TEMP/zcode-go-plugin.zip" zcode-go)
           mkdir -p dist
           cp "$RUNNER_TEMP/zcode-go-plugin.zip" dist/zcode-go-plugin.zip
-          unzip -l dist/zcode-go-plugin.zip | head -12
+          # 结构断言（不用 head 截断管道——pipefail 下 SIGPIPE 会误判失败）
+          unzip -l "$RUNNER_TEMP/zcode-go-plugin.zip" > "$RUNNER_TEMP/zip-listing.txt"
+          grep -q "zcode-go/.zcode-plugin/plugin.json" "$RUNNER_TEMP/zip-listing.txt"
+          echo "模板包 md 条目数：$(grep -c 'opc-packs/.*\.md' "$RUNNER_TEMP/zip-listing.txt")"
           echo "ZIP_PATH=$RUNNER_TEMP/zcode-go-plugin.zip" >> "$GITHUB_ENV"
+          sha256sum "$ZIP_PATH" | awk '{print "ZIP_SHA256=" $1}' >> "$GITHUB_ENV"
 
-      - name: 发布/更新滚动 release（tag=plugin-latest）
+      - name: 发布固定 tag 的 release（plugin-v<版本>）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view plugin-latest >/dev/null 2>&1; then
-            gh release delete-asset plugin-latest zcode-go-plugin.zip -y || true
+          TAG="plugin-v$PLUGIN_VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete-asset "$TAG" zcode-go-plugin.zip -y || true
+            gh release upload "$TAG" "$ZIP_PATH" --clobber
           else
-            gh release create plugin-latest --title "zcode-go plugin (rolling latest)" \
-              --notes "插件市场安装包（含 OPC 模板包）。滚动更新：每次发布覆盖本 release。" \
-              --latest
+            gh release create "$TAG" "$ZIP_PATH" \
+              --title "zcode-go plugin v$PLUGIN_VERSION" \
+              --notes "插件市场安装包（含 OPC 模板包）。marketplace.json 已由本工作流同步指向本资产。"
           fi
-          gh release upload plugin-latest "$ZIP_PATH" --clobber
-          gh release view plugin-latest --json assets -q '.assets[].name'
+
+      # zip 的 sha256 每次发布都变（安装器强校验），市场清单必须与资产一一对应：
+      # 改写 marketplace.json 后推送回仓库，用户「刷新市场 → 更新插件」即得新版。
+      - name: 同步 marketplace.json（url-zip + sha256）并推送
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ASSET_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/plugin-v$PLUGIN_VERSION/zcode-go-plugin.zip"
+          node -e '
+            const fs = require("node:fs");
+            const url = process.argv[1];
+            const sha256 = process.argv[2];
+            const path = "marketplace.json";
+            const catalog = JSON.parse(fs.readFileSync(path, "utf8"));
+            catalog.plugins = catalog.plugins.map((entry) =>
+              entry.name === "zcode-go"
+                ? { ...entry, source: { source: "url", type: "zip", url, sha256 } }
+                : entry,
+            );
+            fs.writeFileSync(path, `${JSON.stringify(catalog, null, 2)}\n`);
+            console.log(`[release-plugin] marketplace.json → ${url} sha256=${sha256.slice(0, 12)}…`);
+          ' "$ASSET_URL" "$ZIP_SHA256"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add marketplace.json
+          git commit -m "chore(release): marketplace.json 指向插件 zip v$PLUGIN_VERSION"
+          # tag 触发时 checkout 在游离点：提交的父提交即 tag 所指的主分支提交，
+          # 推回 main 为快进；期间若有并发提交则失败（可重跑，不影响已上传资产）
+          if [[ "$GITHUB_REF" == refs/heads/* ]]; then
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          else
+            git push origin "HEAD:main"
+          fi
 
       - name: 上传构建产物（留档）
         uses: actions/upload-artifact@v4

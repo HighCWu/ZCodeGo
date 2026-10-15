@@ -528,26 +528,50 @@ function listPackDirs(root: string): string[] {
   }
 }
 
-/** 插件内置包 → 用户缓存镜像（版本戳相同跳过；不同整目录替换）。 */
+/** 插件内置包 → 用户缓存镜像。
+ * 替换判据用 pack.json.fetchedAt（ISO 时间）而非版本戳：版本戳是 commit sha
+ * 不可比较——静态分析发现的降级场景（本机残留的旧 CI 包覆盖用户更新鲜的
+ * 缓存）必须按时间单调，旧包永不覆盖新缓存。 */
 function mirrorPluginPacks(say: (message: string) => void): number {
   const sources = listPackDirs(join(pluginRoot(), "opc-packs"));
   let mirrored = 0;
   for (const source of sources) {
     const id = basename(source);
     const destination = join(OPC_PACKS_DIR, id);
-    const version = readPackVersion(source);
-    if (version !== null && version === readPackVersion(destination)) continue;
+    const sourceTime = readPackTime(source);
+    const destinationTime = readPackTime(destination);
+    // 目标已存在且不旧于来源 → 跳过（防降级）；缺时间戳的坏包按「需替换」处理
+    if (
+      destinationTime !== null &&
+      sourceTime !== null &&
+      destinationTime.getTime() >= sourceTime.getTime()
+    ) {
+      continue;
+    }
     try {
       mkdirSync(OPC_PACKS_DIR, { recursive: true });
       rmSync(destination, { recursive: true, force: true });
       cpSync(source, destination, { recursive: true });
       mirrored += 1;
-      say(`镜像模板包 ${id}@${version} → ${destination}`);
+      say(`镜像模板包 ${id} → ${destination}`);
     } catch (error) {
       say(`镜像模板包 ${id} 失败: ${String(error)}`);
     }
   }
   return mirrored;
+}
+
+function readPackTime(packDir: string): Date | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(packDir, "pack.json"), "utf8")) as {
+      fetchedAt?: unknown;
+    };
+    if (typeof parsed?.fetchedAt !== "string") return null;
+    const time = new Date(parsed.fetchedAt);
+    return Number.isNaN(time.getTime()) ? null : time;
+  } catch {
+    return null;
+  }
 }
 
 /** dev 惰性拉取：用户缓存无任何包且本机有仓库 → 后台跑 fetch 脚本（不等待）。 */
@@ -576,7 +600,13 @@ function lazyFetchPacks(say: (message: string) => void): boolean {
 function syncOpcPacks(verbose: boolean): void {
   const say = (message: string): void => {
     log(message);
-    if (verbose) process.stdout.write(`${message}\n`);
+    if (!verbose) return;
+    // 手动管道（如 | head）关闭后写入会 EPIPE：命令本身已成功，静默退出而非崩溃
+    try {
+      process.stdout.write(`${message}\n`);
+    } catch {
+      /* 管道关闭 */
+    }
   };
   const mirrored = mirrorPluginPacks(say);
   const fetched = lazyFetchPacks(say);

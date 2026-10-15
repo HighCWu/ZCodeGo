@@ -19,8 +19,11 @@
 
 市场安装走 **url-zip 发布链**：`.github/workflows/release-plugin.yml` 从用户 fork 拉取 OPC 模板包
 （`scripts/opc/fetch-opc-packs.mjs`），注入 `plugin/opc-packs/`（已 gitignore）后打成
-`zcode-go-plugin.zip` 发布到滚动 release（tag `plugin-latest`）；根 `marketplace.json` 的
-source 指向该 zip——**安装那一刻模板包已随包落地**，官方机制无安装期脚本也不需要。
+`zcode-go-plugin.zip` 发布到**固定 tag 的 release**（`plugin-v<版本>`），并把根
+`marketplace.json` 的条目改写为 `{source:"url", type:"zip", url, sha256}` 后推送——官方安装器
+对 url 来源强制要求 `type:"zip"` + `sha256` 且下载后校验（bundle 实证），zip 资产每次发布
+都会变，所以市场清单必须由发布流程逐版本更新；**安装那一刻模板包已随包落地**，
+官方机制无安装期脚本也不需要。
 
 接管（`/zcode-go`）与手动 `node hooks/zcode-go.cjs packs` 都会把插件内置包镜像到
 `~/.zcode-go/opc-packs/`（pack.json 版本戳相同则跳过）；本地开发目录无内置包时，自动

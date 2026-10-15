@@ -436,19 +436,32 @@ function mirrorPluginPacks(say) {
   for (const source of sources) {
     const id = (0, import_node_path.basename)(source);
     const destination = (0, import_node_path.join)(OPC_PACKS_DIR, id);
-    const version = readPackVersion(source);
-    if (version !== null && version === readPackVersion(destination)) continue;
+    const sourceTime = readPackTime(source);
+    const destinationTime = readPackTime(destination);
+    if (destinationTime !== null && sourceTime !== null && destinationTime.getTime() >= sourceTime.getTime()) {
+      continue;
+    }
     try {
       (0, import_node_fs.mkdirSync)(OPC_PACKS_DIR, { recursive: true });
       (0, import_node_fs.rmSync)(destination, { recursive: true, force: true });
       (0, import_node_fs.cpSync)(source, destination, { recursive: true });
       mirrored += 1;
-      say(`\u955C\u50CF\u6A21\u677F\u5305 ${id}@${version} \u2192 ${destination}`);
+      say(`\u955C\u50CF\u6A21\u677F\u5305 ${id} \u2192 ${destination}`);
     } catch (error) {
       say(`\u955C\u50CF\u6A21\u677F\u5305 ${id} \u5931\u8D25: ${String(error)}`);
     }
   }
   return mirrored;
+}
+function readPackTime(packDir) {
+  try {
+    const parsed = JSON.parse((0, import_node_fs.readFileSync)((0, import_node_path.join)(packDir, "pack.json"), "utf8"));
+    if (typeof parsed?.fetchedAt !== "string") return null;
+    const time = new Date(parsed.fetchedAt);
+    return Number.isNaN(time.getTime()) ? null : time;
+  } catch {
+    return null;
+  }
 }
 function lazyFetchPacks(say) {
   if (listPackDirs(OPC_PACKS_DIR).length > 0) return false;
@@ -474,8 +487,12 @@ function lazyFetchPacks(say) {
 function syncOpcPacks(verbose) {
   const say = (message) => {
     log(message);
-    if (verbose) process.stdout.write(`${message}
+    if (!verbose) return;
+    try {
+      process.stdout.write(`${message}
 `);
+    } catch {
+    }
   };
   const mirrored = mirrorPluginPacks(say);
   const fetched = lazyFetchPacks(say);
