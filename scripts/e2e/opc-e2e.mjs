@@ -545,6 +545,26 @@ let si = await getState();
     console.log(
       `  [dump] IPC 传参 workspacePath=${WORKSPACE} opcRoot=${join(WORKSPACE, ".opc")}`,
     );
+    // 决定性对照：convert 分支会真实 readFile 目标文件——ok=true 说明 main
+    // 看得到文件（scanInbox 读取链有鬼）；ok=false+ENOENT 说明 main 视角
+    // 根本没有该文件（路径/视图层问题）。
+    const probe = JSON.parse(
+      await ev(
+        `window.zcode.zcodeGoOpcConsumeInbox({ workspacePath: ${JSON.stringify(WORKSPACE)}, fileName: "1-convert.json", convert: { title: "入站对照探针", priority: "low" } }).then(r => JSON.stringify(r))`,
+      ),
+    );
+    console.log(
+      `  [dump] ConsumeInbox 对照 ok=${probe.ok} err=${probe.error ?? "无"} 建项=${(probe.state?.workItems ?? []).some((w) => w.title === "入站对照探针")}`,
+    );
+    // 对照已消费 1-convert.json，恢复现场
+    writeFileSync(
+      join(inboxDir, "1-convert.json"),
+      JSON.stringify({
+        title: "入站转正",
+        source: "e2e",
+        receivedAt: new Date().toISOString(),
+      }),
+    );
   }
 }
 assert(
