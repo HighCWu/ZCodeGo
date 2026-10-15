@@ -55,6 +55,13 @@ export function OpcHireDialog({
   const [seniority, setSeniority] =
     useState<OpcCustomEmployeeDraft["seniority"]>("senior");
   const emptySlots = state.roleSlots.filter((slot) => slot.employeeId === null);
+  // 复用建议（Self-Built）：同模板的暂停/离职员工可恢复上岗而非重复招聘
+  const reusable = state.employees.find(
+    (employee) =>
+      employee.templateId === template.id &&
+      employee.status !== "active" &&
+      !employee.isFallback,
+  );
   const [roleId, setRoleId] = useState<string>(emptySlots[0]?.id ?? "none");
 
   const draft: OpcCustomEmployeeDraft = {
@@ -132,6 +139,49 @@ export function OpcHireDialog({
             </div>
           </div>
         </div>
+        {reusable ? (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-ui-xs">
+            <p className="text-foreground-subtle">
+              {intl.formatMessage(
+                { id: "opc.hire.reuseHint" },
+                {
+                  name: reusable.name,
+                  status: intl.formatMessage({
+                    id:
+                      reusable.status === "paused"
+                        ? "opc.org.pause"
+                        : "opc.org.depart",
+                  }),
+                },
+              )}
+            </p>
+            <Button
+              size="xs"
+              variant="secondary"
+              className="mt-1.5"
+              onClick={() => {
+                onSubmit([
+                  {
+                    kind: "employee.update",
+                    employeeId: reusable.id,
+                    patch: {
+                      status: "active",
+                      name: draft.name,
+                      seniority: draft.seniority,
+                      roleId: roleId === "none" ? null : roleId,
+                    },
+                  },
+                ]);
+                onClose();
+              }}
+            >
+              {intl.formatMessage(
+                { id: "opc.hire.reuse" },
+                { name: reusable.name },
+              )}
+            </Button>
+          </div>
+        ) : null}
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose}>
             {intl.formatMessage({ id: "opc.common.cancel" })}

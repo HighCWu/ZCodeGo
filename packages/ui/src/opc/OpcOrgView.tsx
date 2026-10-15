@@ -14,6 +14,8 @@ export interface OpcOrgViewProps {
   state: OpcCompanyState;
   onAddRoleSlot: (title: string) => void;
   onHire: () => void;
+  onOpenGenerate: () => void;
+  onOpenPresets: () => void;
   onRetrospective: (employee: OpcEmployee) => void;
   onUpdateEmployee: (
     employeeId: string,
@@ -26,6 +28,8 @@ export function OpcOrgView({
   state,
   onAddRoleSlot,
   onHire,
+  onOpenGenerate,
+  onOpenPresets,
   onRetrospective,
   onUpdateEmployee,
   onDepart,
@@ -50,10 +54,18 @@ export function OpcOrgView({
         <p className="text-ui-sm text-foreground-subtle">
           {intl.formatMessage({ id: "opc.org.hint" })}
         </p>
-        <Button size="sm" onClick={onHire}>
-          <UserPlus className="size-4" />
-          {intl.formatMessage({ id: "opc.org.hire" })}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="outline" onClick={onOpenPresets}>
+            {intl.formatMessage({ id: "opc.org.presets" })}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onOpenGenerate}>
+            {intl.formatMessage({ id: "opc.org.generate" })}
+          </Button>
+          <Button size="sm" onClick={onHire}>
+            <UserPlus className="size-4" />
+            {intl.formatMessage({ id: "opc.org.hire" })}
+          </Button>
+        </div>
       </div>
       {state.roleSlots.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">

@@ -52,6 +52,7 @@ import {
   type OpcRetroDialogState,
   type OpcUpgradeDialogState,
 } from "./opcEvolutionDialogs.js";
+import { OpcOrgGenerateDialog, OpcOrgPresetDialog } from "./opcOrgDialogs.js";
 import { logger } from "@/logger.js";
 
 export const OPC_OPEN_PANEL_EVENT = "zcode-go:opc-open";
@@ -79,6 +80,8 @@ export function ZcodeGoOpcPanelRoot({
     null,
   );
   const [reworkDialog, setReworkDialog] = useState<OpcWorkItem | null>(null);
+  const [orgGenerateOpen, setOrgGenerateOpen] = useState(false);
+  const [orgPresetOpen, setOrgPresetOpen] = useState(false);
   const [upgradeDialog, setUpgradeDialog] =
     useState<OpcUpgradeDialogState | null>(null);
 
@@ -328,6 +331,8 @@ export function ZcodeGoOpcPanelRoot({
                 state={state}
                 onAddRoleSlot={handleAddRoleSlot}
                 onHire={() => setCustomHireOpen(true)}
+                onOpenGenerate={() => setOrgGenerateOpen(true)}
+                onOpenPresets={() => setOrgPresetOpen(true)}
                 onRetrospective={(employee) =>
                   setRetroDialog({ employeeId: employee.id })
                 }
@@ -369,6 +374,15 @@ export function ZcodeGoOpcPanelRoot({
           </Tabs>
         </DialogContent>
       </Dialog>
+      {orgGenerateOpen ? (
+        <OpcOrgGenerateDialog
+          onClose={() => setOrgGenerateOpen(false)}
+          workspaceIdentity={workspaceIdentity}
+        />
+      ) : null}
+      {orgPresetOpen ? (
+        <OpcOrgPresetDialog onClose={() => setOrgPresetOpen(false)} />
+      ) : null}
       {reworkDialog ? (
         <OpcReworkDialog
           workItem={reworkDialog}

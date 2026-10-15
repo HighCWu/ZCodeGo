@@ -7,6 +7,9 @@
  * 解析；分类覆盖 OpenOPC 九大垂直领域（研发/研究/金融/销售/营销/内容/行业助手/
  * 财税/教育）。招聘时由 UI 解出五字段传给 reducer。
  */
+import { parseOpcRoleTemplate } from "./opc-template-format.js";
+import type { OpcRoleTemplateDraft } from "./opc-types.js";
+
 export interface OpcBuiltinRoleTemplate {
   name: string;
   markdown: string;
@@ -594,3 +597,18 @@ export const OPC_BUILTIN_ROLE_TEMPLATES: OpcBuiltinRoleTemplate[] = [
     ["技术体检报告", "技术战略与路线图", "重大决策记录（ADR）"],
   ),
 ];
+
+/** 内置角色模板解析产物（模块加载期解析一次；五字段来自各模板 frontmatter）。 */
+export const OPC_BUILTIN_ROLE_DRAFTS: OpcRoleTemplateDraft[] =
+  OPC_BUILTIN_ROLE_TEMPLATES.map((template) => {
+    const draft = parseOpcRoleTemplate(template.markdown);
+    if (!draft)
+      throw new Error(`[zcode-go] 内置角色模板解析失败：${template.name}`);
+    return draft;
+  });
+
+export function findOpcBuiltinRoleDraft(
+  id: string,
+): OpcRoleTemplateDraft | null {
+  return OPC_BUILTIN_ROLE_DRAFTS.find((draft) => draft.id === id) ?? null;
+}
