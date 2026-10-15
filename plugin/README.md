@@ -13,7 +13,19 @@
 
 **方式二（本地开发）：plugins.dirs 直挂**
 
-在 `~/.zcode/cli/config.json` 的 `plugins.dirs` 加入本仓库 `plugin/` 目录，重启官方即发现（改动即时生效，无需重装）。
+在 `~/.zcode/cli/config.json` 的 `plugins.dirs` 加入本仓库 `plugin/` 目录，重启官方即发现（改动即时生效，无需重装）。本地开发不走发布 zip：OPC 模板包由 `packs` 子命令惰性拉取（见下）。
+
+## 分发与 OPC 模板包
+
+市场安装走 **url-zip 发布链**：`.github/workflows/release-plugin.yml` 从用户 fork 拉取 OPC 模板包
+（`scripts/opc/fetch-opc-packs.mjs`），注入 `plugin/opc-packs/`（已 gitignore）后打成
+`zcode-go-plugin.zip` 发布到滚动 release（tag `plugin-latest`）；根 `marketplace.json` 的
+source 指向该 zip——**安装那一刻模板包已随包落地**，官方机制无安装期脚本也不需要。
+
+接管（`/zcode-go`）与手动 `node hooks/zcode-go.cjs packs` 都会把插件内置包镜像到
+`~/.zcode-go/opc-packs/`（pack.json 版本戳相同则跳过）；本地开发目录无内置包时，自动
+后台惰性拉取仓库的 fetch 脚本（fire-and-forget，网络失败静默降级为内置 24 角色 + 16 技能）。
+**更新插件 = 重跑 release-plugin 工作流**（zip 内 packs 版本戳变化会被镜像逻辑识别替换）。
 
 ## 使用
 

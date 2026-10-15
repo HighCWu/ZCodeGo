@@ -42,6 +42,11 @@ OPC 模板包（specs/opc-mode.md「模板包」节）：dev/打包期从用户 
 electron-builder 存在性门控带进 resources/opc-packs；运行时 desktop main
 （zcodeGoOpcPacks.ts）按 company.json `packImports` 戳做幂等填充（只创建缺失项，
 用户改动/晋升产物永不被覆盖，纯逻辑在 shared opc-packs.ts）。本仓库零内容入库。
+**插件 url-zip 发行链**：官方安装器拒绝 `.gitmodules` 仓库（无安装期脚本可依赖），
+市场分发改为 release zip——`.github/workflows/release-plugin.yml` 拉 packs 注入
+`plugin/opc-packs/`（gitignore）打 zip 发到滚动 release `plugin-latest`，根
+marketplace.json source 指向该 zip；插件 cjs 的 takeover/`packs` 子命令把内置包
+镜像到 `~/.zcode-go/opc-packs`（版本戳幂等），dev 直挂仓库则后台惰性拉取 fetch 脚本。
 
 OPC 模式（specs/opc-mode.md）本轮新增上游足迹即上表 10 行；承载新文件：
 `packages/shared/src/opc/`（契约+纯逻辑+内置模板包）、`packages/desktop/src/main/zcodeGoOpcStore.ts`

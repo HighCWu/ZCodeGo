@@ -79,6 +79,15 @@ talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」
    文件并**只创建缺失项**（技能/角色按 id 去重：已存在的一律跳过，不覆盖用户
    改动、不递增版本、不刷 changelog），随后盖版本戳。纯逻辑在 shared
    `applyOpcPackFiles`（输入虚拟文件集，可测），main 只做目录读取与落盘。
+6. **插件 url-zip 发行链**：官方插件安装器拒绝 `.gitmodules` 仓库且无安装期脚本，
+   市场分发改为 release zip——`.github/workflows/release-plugin.yml` 拉取 packs 注入
+   `plugin/opc-packs/`（gitignore，零入库）打 zip 发布到滚动 release（tag
+   `plugin-latest`），根 marketplace.json source 指向该 zip。插件 cjs 的 takeover /
+   `packs` 子命令把插件内置包**镜像**到 `~/.zcode-go/opc-packs`（pack.json 版本戳
+   相同跳过、不同整目录替换）。
+7. **本地开发惰性拉取**：直挂仓库的插件目录无 packs，`packs` 子命令/接管时检测
+   用户缓存为空且本仓库可得 → 后台 detached 跑 fetch 脚本（fire-and-forget，
+   失败静默降级为内置模板），毫秒级返回不阻塞接管。
 
 ## 所有权与边界
 

@@ -11,9 +11,9 @@
  *   status    —— 打印官方安装探测与接管状态（排障用）
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 // 官方把 hook 的任何 stderr 输出都按「Hook error」展示（用户会在每次
 // /zcode-go 下方看到 ZCode 报错信息横幅）。本进程用 node:sqlite 清理空会话，
@@ -406,6 +406,9 @@ function resolveLauncher(): string | null {
 
 function runTakeover(): void {
   mkdirSync(STATE_DIR, { recursive: true });
+  // 模板包先行（镜像同步毫秒级；dev 惰性拉取为后台任务）——桌面起来后首次
+  // 打开 OPC 面板即可用。绝不阻塞后续拉起流程（任何异常都已内部吞掉）。
+  syncOpcPacks(false);
   const running = desktopRunning();
   if (running) {
     writeFileSync(SHOW_FILE, "", "utf8");
@@ -469,6 +472,120 @@ function runTakeover(): void {
   // 的根因）。改由定时器分支显式退出，最长驻留 90s。
 }
 
+// ── OPC 模板包：镜像插件内置包 + dev 惰性拉取 ────────────────────────────
+//
+// 模板包（specs/opc-mode.md「模板包」节）的两条供给路径在本文件汇合：
+//   1. url-zip 发行链：CI 把 packs 注入 plugin/opc-packs/ 随插件 zip 分发，
+//      安装即有——接管/手动时镜像到 ~/.zcode-go/opc-packs（版本戳不同才替换）；
+//   2. 本地开发（plugins.dirs 直挂仓库）：插件目录无 packs（已 gitignore），
+//      回退为本仓库 scripts/opc/fetch-opc-packs.mjs 后台惰性拉取（fire-and-forget，
+//      网络失败静默，不阻塞接管）。
+
+const OPC_PACKS_DIR = join(STATE_DIR, "opc-packs");
+const OPC_FETCH_SCRIPT = join("scripts", "opc", "fetch-opc-packs.mjs");
+
+function pluginRoot(): string {
+  return dirname(__dirname); // <plugin>/hooks → <plugin>
+}
+
+function readPackVersion(packDir: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(packDir, "pack.json"), "utf8")) as {
+      version?: unknown;
+    };
+    return typeof parsed?.version === "string" && parsed.version.length > 0 ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+function repoRootGuess(): string | null {
+  // dev 安装（plugins.dirs 直挂 <repo>/plugin）→ 仓库根可由 __dirname 回溯
+  const candidate = resolve(pluginRoot(), "..");
+  if (existsSync(join(candidate, OPC_FETCH_SCRIPT))) return candidate;
+  // 市场安装副本：sync-plugin.mjs 写入的仓库路径标记（与 resolveLauncher 同源）
+  for (const marker of [
+    join(pluginRoot(), "zcode-go-home"),
+    join(dirname(pluginRoot()), "scripts", "zcode-go-home"),
+  ]) {
+    try {
+      const home = readFileSync(marker, "utf8").trim();
+      if (home && existsSync(join(home, OPC_FETCH_SCRIPT))) return home;
+    } catch {
+      /* 下一候选 */
+    }
+  }
+  return null;
+}
+
+function listPackDirs(root: string): string[] {
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && readPackVersion(join(root, entry.name)) !== null)
+      .map((entry) => join(root, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+/** 插件内置包 → 用户缓存镜像（版本戳相同跳过；不同整目录替换）。 */
+function mirrorPluginPacks(say: (message: string) => void): number {
+  const sources = listPackDirs(join(pluginRoot(), "opc-packs"));
+  let mirrored = 0;
+  for (const source of sources) {
+    const id = basename(source);
+    const destination = join(OPC_PACKS_DIR, id);
+    const version = readPackVersion(source);
+    if (version !== null && version === readPackVersion(destination)) continue;
+    try {
+      mkdirSync(OPC_PACKS_DIR, { recursive: true });
+      rmSync(destination, { recursive: true, force: true });
+      cpSync(source, destination, { recursive: true });
+      mirrored += 1;
+      say(`镜像模板包 ${id}@${version} → ${destination}`);
+    } catch (error) {
+      say(`镜像模板包 ${id} 失败: ${String(error)}`);
+    }
+  }
+  return mirrored;
+}
+
+/** dev 惰性拉取：用户缓存无任何包且本机有仓库 → 后台跑 fetch 脚本（不等待）。 */
+function lazyFetchPacks(say: (message: string) => void): boolean {
+  if (listPackDirs(OPC_PACKS_DIR).length > 0) return false;
+  const repo = repoRootGuess();
+  if (!repo) return false;
+  try {
+    const script = join(repo, OPC_FETCH_SCRIPT);
+    const child = spawn(process.execPath, [script], {
+      detached: true,
+      stdio: "ignore",
+      cwd: repo,
+      // 官方进程树带 ELECTRON_RUN_AS_NODE=1，恰好把官方 Electron 当 Node 执行本脚本
+      env: { ...process.env },
+    });
+    child.unref();
+    say(`后台惰性拉取模板包: ${script}`);
+    return true;
+  } catch (error) {
+    say(`惰性拉取启动失败: ${String(error)}`);
+    return false;
+  }
+}
+
+function syncOpcPacks(verbose: boolean): void {
+  const say = (message: string): void => {
+    log(message);
+    if (verbose) process.stdout.write(`${message}\n`);
+  };
+  const mirrored = mirrorPluginPacks(say);
+  const fetched = lazyFetchPacks(say);
+  const ready = listPackDirs(OPC_PACKS_DIR);
+  say(
+    `OPC 模板包：镜像 ${mirrored} 个${fetched ? "，已触发后台惰性拉取" : ""}；可用 ${ready.length} 个（${OPC_PACKS_DIR}）`,
+  );
+}
+
 // ── 入口 ────────────────────────────────────────────────────────────────
 
 const mode = process.argv[2] ?? "hook";
@@ -479,8 +596,12 @@ if (mode === "takeover") {
   process.stdout.write(
     `bin=${info.bin ?? "?"}\nruntimeBundle=${info.runtimeBundle ?? "?"}\n` +
       `takeover=${existsSync(DISABLE_FILE) ? "disabled" : "enabled"}\n` +
-      `desktop.pid=${desktopRunning() ?? "-"}\n`,
+      `desktop.pid=${desktopRunning() ?? "-"}\n` +
+      `opc-packs=${listPackDirs(OPC_PACKS_DIR).length}（${OPC_PACKS_DIR}）\n`,
   );
+} else if (mode === "packs") {
+  // 手动入口：node zcode-go.cjs packs——镜像插件内置包 / 触发 dev 惰性拉取
+  syncOpcPacks(true);
 } else {
   runHook();
 }

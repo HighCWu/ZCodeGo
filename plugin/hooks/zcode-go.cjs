@@ -1,4 +1,3 @@
-/* oxlint-disable eslint(max-lines) -- zcode-go 机制/E2E/插件宿主文件：单文件收口是有意为之（同 SessionPane 惯例），拆散会破坏内聚。 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -343,6 +342,7 @@ function resolveLauncher() {
 }
 function runTakeover() {
   (0, import_node_fs.mkdirSync)(STATE_DIR, { recursive: true });
+  syncOpcPacks(false);
   const running = desktopRunning();
   if (running) {
     (0, import_node_fs.writeFileSync)(SHOW_FILE, "", "utf8");
@@ -395,6 +395,95 @@ function runTakeover() {
     }
   }, 1e3);
 }
+var OPC_PACKS_DIR = (0, import_node_path.join)(STATE_DIR, "opc-packs");
+var OPC_FETCH_SCRIPT = (0, import_node_path.join)("scripts", "opc", "fetch-opc-packs.mjs");
+function pluginRoot() {
+  return (0, import_node_path.dirname)(__dirname);
+}
+function readPackVersion(packDir) {
+  try {
+    const parsed = JSON.parse((0, import_node_fs.readFileSync)((0, import_node_path.join)(packDir, "pack.json"), "utf8"));
+    return typeof parsed?.version === "string" && parsed.version.length > 0 ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+function repoRootGuess() {
+  const candidate = (0, import_node_path.resolve)(pluginRoot(), "..");
+  if ((0, import_node_fs.existsSync)((0, import_node_path.join)(candidate, OPC_FETCH_SCRIPT))) return candidate;
+  for (const marker of [
+    (0, import_node_path.join)(pluginRoot(), "zcode-go-home"),
+    (0, import_node_path.join)((0, import_node_path.dirname)(pluginRoot()), "scripts", "zcode-go-home")
+  ]) {
+    try {
+      const home = (0, import_node_fs.readFileSync)(marker, "utf8").trim();
+      if (home && (0, import_node_fs.existsSync)((0, import_node_path.join)(home, OPC_FETCH_SCRIPT))) return home;
+    } catch {
+    }
+  }
+  return null;
+}
+function listPackDirs(root) {
+  try {
+    return (0, import_node_fs.readdirSync)(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && readPackVersion((0, import_node_path.join)(root, entry.name)) !== null).map((entry) => (0, import_node_path.join)(root, entry.name));
+  } catch {
+    return [];
+  }
+}
+function mirrorPluginPacks(say) {
+  const sources = listPackDirs((0, import_node_path.join)(pluginRoot(), "opc-packs"));
+  let mirrored = 0;
+  for (const source of sources) {
+    const id = (0, import_node_path.basename)(source);
+    const destination = (0, import_node_path.join)(OPC_PACKS_DIR, id);
+    const version = readPackVersion(source);
+    if (version !== null && version === readPackVersion(destination)) continue;
+    try {
+      (0, import_node_fs.mkdirSync)(OPC_PACKS_DIR, { recursive: true });
+      (0, import_node_fs.rmSync)(destination, { recursive: true, force: true });
+      (0, import_node_fs.cpSync)(source, destination, { recursive: true });
+      mirrored += 1;
+      say(`\u955C\u50CF\u6A21\u677F\u5305 ${id}@${version} \u2192 ${destination}`);
+    } catch (error) {
+      say(`\u955C\u50CF\u6A21\u677F\u5305 ${id} \u5931\u8D25: ${String(error)}`);
+    }
+  }
+  return mirrored;
+}
+function lazyFetchPacks(say) {
+  if (listPackDirs(OPC_PACKS_DIR).length > 0) return false;
+  const repo = repoRootGuess();
+  if (!repo) return false;
+  try {
+    const script = (0, import_node_path.join)(repo, OPC_FETCH_SCRIPT);
+    const child = (0, import_node_child_process.spawn)(process.execPath, [script], {
+      detached: true,
+      stdio: "ignore",
+      cwd: repo,
+      // 官方进程树带 ELECTRON_RUN_AS_NODE=1，恰好把官方 Electron 当 Node 执行本脚本
+      env: { ...process.env }
+    });
+    child.unref();
+    say(`\u540E\u53F0\u60F0\u6027\u62C9\u53D6\u6A21\u677F\u5305: ${script}`);
+    return true;
+  } catch (error) {
+    say(`\u60F0\u6027\u62C9\u53D6\u542F\u52A8\u5931\u8D25: ${String(error)}`);
+    return false;
+  }
+}
+function syncOpcPacks(verbose) {
+  const say = (message) => {
+    log(message);
+    if (verbose) process.stdout.write(`${message}
+`);
+  };
+  const mirrored = mirrorPluginPacks(say);
+  const fetched = lazyFetchPacks(say);
+  const ready = listPackDirs(OPC_PACKS_DIR);
+  say(
+    `OPC \u6A21\u677F\u5305\uFF1A\u955C\u50CF ${mirrored} \u4E2A${fetched ? "\uFF0C\u5DF2\u89E6\u53D1\u540E\u53F0\u60F0\u6027\u62C9\u53D6" : ""}\uFF1B\u53EF\u7528 ${ready.length} \u4E2A\uFF08${OPC_PACKS_DIR}\uFF09`
+  );
+}
 var mode = process.argv[2] ?? "hook";
 if (mode === "takeover") {
   runTakeover();
@@ -405,8 +494,11 @@ if (mode === "takeover") {
 runtimeBundle=${info.runtimeBundle ?? "?"}
 takeover=${(0, import_node_fs.existsSync)(DISABLE_FILE) ? "disabled" : "enabled"}
 desktop.pid=${desktopRunning() ?? "-"}
+opc-packs=${listPackDirs(OPC_PACKS_DIR).length}\uFF08${OPC_PACKS_DIR}\uFF09
 `
   );
+} else if (mode === "packs") {
+  syncOpcPacks(true);
 } else {
   runHook();
 }

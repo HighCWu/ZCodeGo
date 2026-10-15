@@ -1,0 +1,110 @@
+# zcode-go 插件发布链（url-zip 分发）。
+#
+# 市场安装走「发布 zip」而非仓库目录（root marketplace.json 的 source 指向本
+# 工作流产出的 release 资产）：安装那一刻 OPC 模板包已随包落地——本仓库零内容
+# 入库（packs 由 scripts/opc/fetch-opc-packs.mjs 从用户 fork 拉取后注入 staging）。
+#
+# 产物：滚动 release（tag=plugin-latest）上的 zcode-go-plugin.zip，
+# 单一顶层目录 zcode-go/（官方安装器 stripRoot 剥壳后即插件根）。
+name: release-plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "插件版本号（留空则用 package.json 版本 + run number）"
+        required: false
+        type: string
+  push:
+    tags:
+      - "plugin-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-plugin
+  cancel-in-progress: false
+
+jobs:
+  release-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装依赖（plugin cjs 构建需要 esbuild）
+        run: pnpm install --frozen-lockfile
+
+      # packs 从用户 fork 拉取（HighCWu/OpenOPC、HighCWu/claude-skills，可被
+      # OPC_PACK_*_REPO 覆盖）；写入 plugin/opc-packs/（已 gitignore，仅进 zip）。
+      - name: 拉取 OPC 模板包
+        run: node scripts/opc/fetch-opc-packs.mjs --out plugin/opc-packs
+
+      - name: 构建插件 cjs
+        run: node plugin/build.mjs
+
+      - name: 计算版本号
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "PLUGIN_VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/plugin-v* ]]; then
+            echo "PLUGIN_VERSION=${GITHUB_REF#refs/tags/plugin-v}" >> "$GITHUB_ENV"
+          else
+            PKG=$(node -e "console.log(require('./package.json').version)")
+            echo "PLUGIN_VERSION=${PKG}-zcode-go.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
+      - name: 组装 zip（staging 改写版本号；单顶层目录供 stripRoot 剥壳）
+        run: |
+          set -euo pipefail
+          STAGING="$RUNNER_TEMP/plugin-staging"
+          mkdir -p "$STAGING/zcode-go"
+          # 发布物精简：manifest + hooks（cjs/json/bootstrap）+ commands + README + packs
+          cp -r plugin/.zcode-plugin plugin/commands plugin/hooks plugin/README.md "$STAGING/zcode-go/"
+          if [ -d plugin/opc-packs ]; then cp -r plugin/opc-packs "$STAGING/zcode-go/opc-packs"; fi
+          node -e '
+            const fs = require("node:fs");
+            const pluginRoot = process.argv[1];
+            const version = process.argv[2];
+            const target = `${pluginRoot}/.zcode-plugin/plugin.json`;
+            const json = JSON.parse(fs.readFileSync(target, "utf8"));
+            json.version = version;
+            fs.writeFileSync(target, `${JSON.stringify(json, null, 2)}\n`);
+            console.log(`[release-plugin] 版本 ${version}`);
+          ' "$STAGING/zcode-go" "$PLUGIN_VERSION"
+          # 不得包含符号链接（官方安装器拒绝 zip symlink 条目）
+          if find "$STAGING" -type l | grep -q .; then echo "staging 含符号链接"; exit 1; fi
+          (cd "$STAGING" && zip -qr "$RUNNER_TEMP/zcode-go-plugin.zip" zcode-go)
+          mkdir -p dist
+          cp "$RUNNER_TEMP/zcode-go-plugin.zip" dist/zcode-go-plugin.zip
+          unzip -l dist/zcode-go-plugin.zip | head -12
+          echo "ZIP_PATH=$RUNNER_TEMP/zcode-go-plugin.zip" >> "$GITHUB_ENV"
+
+      - name: 发布/更新滚动 release（tag=plugin-latest）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view plugin-latest >/dev/null 2>&1; then
+            gh release delete-asset plugin-latest zcode-go-plugin.zip -y || true
+          else
+            gh release create plugin-latest --title "zcode-go plugin (rolling latest)" \
+              --notes "插件市场安装包（含 OPC 模板包）。滚动更新：每次发布覆盖本 release。" \
+              --latest
+          fi
+          gh release upload plugin-latest "$ZIP_PATH" --clobber
+          gh release view plugin-latest --json assets -q '.assets[].name'
+
+      - name: 上传构建产物（留档）
+        uses: actions/upload-artifact@v4
+        with:
+          name: zcode-go-plugin-${{ env.PLUGIN_VERSION }}
+          path: ${{ env.ZIP_PATH }}
+          if-no-files-found: error
