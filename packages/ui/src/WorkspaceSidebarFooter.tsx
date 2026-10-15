@@ -384,6 +384,10 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
                   <DropdownMenuRadioItem value="office">
                     {intl.formatMessage({ id: "settings.interfaceMode.office" })}
                   </DropdownMenuRadioItem>
+                  {/* zcode-go：OPC 公司模式（AI 原生公司界面，见 specs/opc-mode.md） */}
+                  <DropdownMenuRadioItem value="opc">
+                    {intl.formatMessage({ id: "settings.interfaceMode.opc" })}
+                  </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>

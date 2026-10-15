@@ -1,0 +1,354 @@
+/**
+ * zcode-go OPC 公司面板（全屏 overlay，五标签：看板/组织/人才市场/技能/进化）。
+ *
+ * 打开方式：App 挂载 useZcodeGoOpcPanel 后，任意组件派发
+ * window CustomEvent("zcode-go:opc-open") 即可唤起（草稿驾驶舱/快捷键/菜单）。
+ * 全部写路径走 opcStore.apply（IPC → main reducer → 广播），本组件零本地状态事实。
+ */
+import { useCallback, useEffect, useState } from "react";
+import { Building2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog.js";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useOpcStore } from "@/store/opcStore.js";
+import {
+  buildOpcDelegationPrompt,
+  type OpcRoleTemplateDraft,
+  type OpcWorkItem,
+} from "@zcode/shared";
+import { OpcStatChip } from "./opcDisplay.js";
+import { OpcKanbanBoard } from "./OpcKanbanBoard.js";
+import { OpcOrgView } from "./OpcOrgView.js";
+import { OpcTalentMarket } from "./OpcTalentMarket.js";
+import { OpcSkillsView } from "./OpcSkillsView.js";
+import { OpcEvolutionView } from "./OpcEvolutionView.js";
+import { insertOpcPrompt } from "./opcComposerBridge.js";
+import {
+  OpcWorkItemDialog,
+  type OpcWorkItemDialogState,
+} from "./opcDialogs.js";
+import {
+  OpcCustomHireDialog,
+  OpcHireDialog,
+  type OpcHireDialogState,
+} from "./opcHireDialogs.js";
+import {
+  OpcRetroDialog,
+  OpcUpgradeDialog,
+  type OpcRetroDialogState,
+  type OpcUpgradeDialogState,
+} from "./opcEvolutionDialogs.js";
+import { logger } from "@/logger.js";
+
+export const OPC_OPEN_PANEL_EVENT = "zcode-go:opc-open";
+
+type PanelTab = "kanban" | "org" | "market" | "skills" | "evolution";
+
+export function ZcodeGoOpcPanelRoot({
+  workspaceIdentity,
+}: {
+  workspaceIdentity?: string | null;
+}) {
+  const { intl } = useZCodeIntl();
+  const state = useOpcStore((s) => s.state);
+  const apply = useOpcStore((s) => s.apply);
+  const resolveRoleBody = useOpcStore((s) => s.resolveRoleBody);
+  const resolveSkillBody = useOpcStore((s) => s.resolveSkillBody);
+  const workspacePath = useOpcStore((s) => s.workspacePath);
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<PanelTab>("kanban");
+  const [workItemDialog, setWorkItemDialog] =
+    useState<OpcWorkItemDialogState | null>(null);
+  const [hireDialog, setHireDialog] = useState<OpcHireDialogState | null>(null);
+  const [customHireOpen, setCustomHireOpen] = useState(false);
+  const [retroDialog, setRetroDialog] = useState<OpcRetroDialogState | null>(
+    null,
+  );
+  const [upgradeDialog, setUpgradeDialog] =
+    useState<OpcUpgradeDialogState | null>(null);
+
+  useEffect(() => {
+    const handleOpen = () => setOpen(true);
+    window.addEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
+    return () => window.removeEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
+  }, []);
+
+  const handleStatusChange = useCallback(
+    (workItemId: string, status: OpcWorkItem["status"]) => {
+      void apply([{ kind: "workitem.status", workItemId, status }]);
+    },
+    [apply],
+  );
+
+  const handleDeleteWorkItem = useCallback(
+    (workItemId: string) => {
+      void apply([{ kind: "workitem.delete", workItemId }]);
+    },
+    [apply],
+  );
+
+  /** 委派：角色正文 + 挂接技能 + 最近经验 → 委派 prompt → composer（用户确认发送）。 */
+  const handleDelegate = useCallback(
+    (workItem: OpcWorkItem) => {
+      if (!state || !workspacePath) return;
+      const employee = state.employees.find(
+        (item) => item.id === workItem.assigneeId,
+      );
+      if (!employee) return;
+      const roleBody =
+        employee.templateId === "custom"
+          ? null
+          : resolveRoleBody(employee.templateId);
+      const skillBodies = employee.skillRefs
+        .map((skillId) => {
+          const meta = state.skills.find((skill) => skill.id === skillId);
+          const body = resolveSkillBody(skillId);
+          return meta && body ? { id: skillId, name: meta.name, body } : null;
+        })
+        .filter(
+          (item): item is { id: string; name: string; body: string } =>
+            item !== null,
+        );
+      const recentLessons = state.lessons
+        .filter((lesson) => lesson.employeeId === employee.id)
+        .slice(-10)
+        .map((lesson) => lesson.statement);
+      const prompt = buildOpcDelegationPrompt({
+        companyName: state.company.name,
+        employee,
+        roleBody,
+        workItem,
+        skillBodies,
+        skillNamesRemaining: [],
+        recentLessons,
+        memoryFilePath: `.opc/memory/${employee.id}.md`,
+      });
+      const inserted = insertOpcPrompt({
+        workspacePath,
+        workspaceIdentity: workspaceIdentity ?? undefined,
+        text: prompt,
+      });
+      if (inserted) setOpen(false);
+    },
+    [
+      state,
+      workspacePath,
+      workspaceIdentity,
+      resolveRoleBody,
+      resolveSkillBody,
+      apply,
+    ],
+  );
+
+  const handleHireTemplate = useCallback(
+    (draft: OpcRoleTemplateDraft, origin: "builtin" | "imported") => {
+      setHireDialog({ template: draft, origin });
+    },
+    [],
+  );
+
+  const handleImportRoleFolder = useCallback(async (sourcePath: string) => {
+    const result = await useOpcStore.getState().importRoleTemplates(sourcePath);
+    logger.debug("[zcode-go][opc] 角色模板导入完成", result);
+  }, []);
+
+  const handleImportSkillFolder = useCallback(async (sourcePath: string) => {
+    const result = await useOpcStore.getState().importSkillFolder(sourcePath);
+    logger.debug("[zcode-go][opc] 技能导入完成", result);
+  }, []);
+
+  const handleAddRoleSlot = useCallback(
+    (title: string) => {
+      void apply([{ kind: "role-slot.create", title }]);
+    },
+    [apply],
+  );
+
+  if (!state) return null;
+
+  const doneCount = state.workItems.filter(
+    (item) => item.status === "done",
+  ).length;
+  const activeCount = state.workItems.filter(
+    (item) => item.status === "in_progress" || item.status === "review",
+  ).length;
+  const promotedCount = state.skills.filter(
+    (skill) => skill.origin === "promoted",
+  ).length;
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex h-[85vh] max-w-5xl flex-col gap-3 overflow-hidden">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="size-4" />
+              {state.company.name}
+              <span className="text-ui-xs font-normal text-foreground-faint">
+                OPC
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              {intl.formatMessage({ id: "opc.panel.subtitle" })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <OpcStatChip
+              value={state.employees.length}
+              labelId="opc.stat.employees"
+            />
+            <OpcStatChip
+              value={state.workItems.length}
+              labelId="opc.stat.workItems"
+            />
+            <OpcStatChip value={activeCount} labelId="opc.stat.active" />
+            <OpcStatChip value={doneCount} labelId="opc.stat.done" />
+            <OpcStatChip
+              value={state.skills.length}
+              labelId="opc.stat.skills"
+            />
+            <OpcStatChip value={promotedCount} labelId="opc.stat.promoted" />
+          </div>
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setTab(value as PanelTab)}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <TabsList className="shrink-0">
+              <TabsTrigger value="kanban">
+                {intl.formatMessage({ id: "opc.tab.kanban" })}
+              </TabsTrigger>
+              <TabsTrigger value="org">
+                {intl.formatMessage({ id: "opc.tab.org" })}
+              </TabsTrigger>
+              <TabsTrigger value="market">
+                {intl.formatMessage({ id: "opc.tab.market" })}
+              </TabsTrigger>
+              <TabsTrigger value="skills">
+                {intl.formatMessage({ id: "opc.tab.skills" })}
+              </TabsTrigger>
+              <TabsTrigger value="evolution">
+                {intl.formatMessage({ id: "opc.tab.evolution" })}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="kanban" className="min-h-0 flex-1">
+              <OpcKanbanBoard
+                state={state}
+                onCreateWorkItem={() =>
+                  setWorkItemDialog({ mode: "create", workItem: null })
+                }
+                onEditWorkItem={(workItem) =>
+                  setWorkItemDialog({ mode: "edit", workItem })
+                }
+                onStatusChange={handleStatusChange}
+                onDeleteWorkItem={handleDeleteWorkItem}
+                onDelegate={handleDelegate}
+              />
+            </TabsContent>
+            <TabsContent value="org" className="min-h-0 flex-1">
+              <OpcOrgView
+                state={state}
+                onAddRoleSlot={handleAddRoleSlot}
+                onHire={() => setCustomHireOpen(true)}
+                onRetrospective={(employee) =>
+                  setRetroDialog({ employeeId: employee.id })
+                }
+                onUpdateEmployee={(employeeId, patch) => {
+                  void apply([{ kind: "employee.update", employeeId, patch }]);
+                }}
+                onDepart={(employeeId) => {
+                  void apply([{ kind: "employee.depart", employeeId }]);
+                }}
+              />
+            </TabsContent>
+            <TabsContent value="market" className="min-h-0 flex-1">
+              <OpcTalentMarket
+                state={state}
+                onHireTemplate={handleHireTemplate}
+                onImportFolder={handleImportRoleFolder}
+              />
+            </TabsContent>
+            <TabsContent value="skills" className="min-h-0 flex-1">
+              <OpcSkillsView
+                state={state}
+                onUpgrade={(skillId) => setUpgradeDialog({ skillId })}
+                onToggleAttach={(employeeId, skillId, attach) => {
+                  void apply([
+                    {
+                      kind: "employee.assignSkill",
+                      employeeId,
+                      skillId,
+                      attach,
+                    },
+                  ]);
+                }}
+                onImportFolder={handleImportSkillFolder}
+              />
+            </TabsContent>
+            <TabsContent value="evolution" className="min-h-0 flex-1">
+              <OpcEvolutionView state={state} />
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+      {workItemDialog ? (
+        <OpcWorkItemDialog
+          state={state}
+          initial={workItemDialog}
+          onClose={() => setWorkItemDialog(null)}
+          onSubmit={(mutations) => {
+            void apply(mutations);
+            setWorkItemDialog(null);
+          }}
+        />
+      ) : null}
+      {hireDialog ? (
+        <OpcHireDialog
+          state={state}
+          template={hireDialog.template}
+          onClose={() => setHireDialog(null)}
+          onSubmit={(mutations) => {
+            void apply(mutations);
+            setHireDialog(null);
+          }}
+        />
+      ) : null}
+      {customHireOpen ? (
+        <OpcCustomHireDialog
+          onClose={() => setCustomHireOpen(false)}
+          onSubmit={(mutations) => {
+            void apply(mutations);
+            setCustomHireOpen(false);
+          }}
+        />
+      ) : null}
+      {retroDialog ? (
+        <OpcRetroDialog
+          state={state}
+          initialEmployeeId={retroDialog.employeeId}
+          onClose={() => setRetroDialog(null)}
+          workspaceIdentity={workspaceIdentity}
+        />
+      ) : null}
+      {upgradeDialog ? (
+        <OpcUpgradeDialog
+          state={state}
+          skillId={upgradeDialog.skillId}
+          onClose={() => setUpgradeDialog(null)}
+          workspaceIdentity={workspaceIdentity}
+        />
+      ) : null}
+    </>
+  );
+}

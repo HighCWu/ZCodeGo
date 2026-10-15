@@ -58,6 +58,8 @@ import {
   useZcodeGoWindowTaskListSync,
 } from "@/zcodeGoWindowIntegration.js";
 import { useZcodeGoUiAutoRecoverySync } from "@/zcodeGoUiAutoRecovery.js";
+// zcode-go：OPC 公司面板挂载（OPC 模式全局入口；见 specs/opc-mode.md）
+import { ZcodeGoOpcPanelMount } from "@/opc/ZcodeGoOpcPanelMount.js";
 import { useAppChromeState } from "@/app-shell/useAppChromeState.js";
 import { useWorkspaceSessionReload } from "@/app-shell/useWorkspaceSessionReload.js";
 import { useWorkspaceShellLifecycle } from "@/app-shell/useWorkspaceShellLifecycle.js";
@@ -1202,6 +1204,8 @@ export function App({
       {/* Bugfix: 反馈是应用级能力，必须固定走本机 base host；SSH session 连接中或断开时，
           workspace-scoped services 会切成断连代理，不能让反馈提交跟随远程 session 失效。 */}
       <FeedbackHost feedbackService={baseFeedbackService} platform={platform} />
+      {/* zcode-go：OPC 公司面板（全局 overlay，CustomEvent 唤起；OPC 模式驾驶舱的写入口）。 */}
+      <ZcodeGoOpcPanelMount workspacePath={workspaceAbsPath} workspaceIdentity={workspaceIdentity} />
       <PluginUiWorkspaceProvider onOpenSidePane={handleOpenPluginUi}>
         <WorkspaceShellLayout
           services={services}

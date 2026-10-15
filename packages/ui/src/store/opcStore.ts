@@ -1,0 +1,314 @@
+/**
+ * zcode-go OPC 公司状态（渲染进程投影缓存）。
+ *
+ * 事实源在 desktop main（<workspace>/.opc/company.json）；本 store 只是投影：
+ * 一切变更走 apply() → IPC ZcodeGoOpcApply → main reducer → 返回整树覆盖；
+ * main 广播 ZcodeGoOpcStateChanged 时整体 refresh，不做局部 merge（避免双写路径）。
+ * 键约定：workspaceIdentity?.trim() || workspacePath（与全局身份键一致）。
+ */
+import { create } from "zustand";
+import {
+  findOpcBuiltinRoleDraft,
+  type OpcCompanyState,
+  type OpcEvolutionEvent,
+  type OpcMutation,
+} from "@zcode/shared";
+import { logger } from "@/logger.js";
+
+export interface OpcBodies {
+  roleTemplateBodies: Record<string, string>;
+  skillBodies: Record<string, string>;
+}
+
+interface OpcApplyOutcome {
+  ok: boolean;
+  events: OpcEvolutionEvent[];
+  promotedSkillIds: string[];
+}
+
+interface ZcodeGoOpcBridge {
+  zcodeGoOpcGetState?: (payload: {
+    workspacePath: string;
+  }) => Promise<{
+    ok: boolean;
+    state: OpcCompanyState | null;
+    roleTemplateBodies?: Record<string, string>;
+    skillBodies?: Record<string, string>;
+    error?: string;
+  }>;
+  zcodeGoOpcApply?: (payload: {
+    workspacePath: string;
+    mutations: OpcMutation[];
+  }) => Promise<{
+    ok: boolean;
+    state: OpcCompanyState | null;
+    events: OpcEvolutionEvent[];
+    promotedSkillIds: string[];
+    roleTemplateBodies?: Record<string, string>;
+    skillBodies?: Record<string, string>;
+    error?: string;
+  }>;
+  zcodeGoOpcImportRoleTemplates?: (payload: {
+    workspacePath: string;
+    sourcePath: string;
+  }) => Promise<{
+    ok: boolean;
+    imported: number;
+    state: OpcCompanyState | null;
+    roleTemplateBodies?: Record<string, string>;
+    skillBodies?: Record<string, string>;
+    error?: string;
+  }>;
+  zcodeGoOpcImportSkillFolder?: (payload: {
+    workspacePath: string;
+    sourcePath: string;
+  }) => Promise<{
+    ok: boolean;
+    imported: number;
+    state: OpcCompanyState | null;
+    roleTemplateBodies?: Record<string, string>;
+    skillBodies?: Record<string, string>;
+    error?: string;
+  }>;
+  onZcodeGoOpcStateChanged?: (
+    handler: (payload: { workspacePath: string }) => void,
+  ) => () => void;
+}
+
+function getOpcBridge(): ZcodeGoOpcBridge | null {
+  const bridge = (
+    window as {
+      zcode?: ZcodeGoOpcBridge;
+    }
+  ).zcode;
+  if (!bridge?.zcodeGoOpcGetState) return null;
+  return bridge;
+}
+
+/** 角色正文查找：导入模板正文优先；内置模板回退内置包（正文已去 frontmatter）。 */
+function resolveRoleTemplateBody(
+  templateId: string,
+  bodies: OpcBodies,
+): string | null {
+  const imported = bodies.roleTemplateBodies[templateId];
+  if (imported) return imported;
+  return findOpcBuiltinRoleDraft(templateId)?.body ?? null;
+}
+
+export interface OpcStoreState {
+  workspaceKey: string | null;
+  workspacePath: string | null;
+  state: OpcCompanyState | null;
+  bodies: OpcBodies;
+  loading: boolean;
+  error: string | null;
+  /** 最近一次 apply 触发的晋升（UI toast 用，消费后 clearRecentPromotions）。 */
+  recentPromotedSkillIds: string[];
+  initialize: (
+    workspacePath: string,
+    workspaceIdentity?: string,
+  ) => Promise<void>;
+  refresh: () => Promise<void>;
+  apply: (mutations: OpcMutation[]) => Promise<OpcApplyOutcome>;
+  /** 从磁盘目录导入角色模板（OpenOPC talent 五字段格式）。 */
+  importRoleTemplates: (
+    sourcePath: string,
+  ) => Promise<{ ok: boolean; imported: number }>;
+  /** 从磁盘目录导入技能（claude-skills SKILL.md 格式，递归）。 */
+  importSkillFolder: (
+    sourcePath: string,
+  ) => Promise<{ ok: boolean; imported: number }>;
+  clearRecentPromotions: () => void;
+  /** 供组件按员工模板 id 解角色正文（内置回退逻辑集中在这里）。 */
+  resolveRoleBody: (templateId: string) => string | null;
+  resolveSkillBody: (skillId: string) => string | null;
+}
+
+let opcUnsubscribe: (() => void) | null = null;
+let opcInFlight: Promise<void> | null = null;
+
+export const useOpcStore = create<OpcStoreState>()((set, get) => ({
+  workspaceKey: null,
+  workspacePath: null,
+  state: null,
+  bodies: { roleTemplateBodies: {}, skillBodies: {} },
+  loading: false,
+  error: null,
+  recentPromotedSkillIds: [],
+
+  initialize: async (workspacePath, workspaceIdentity) => {
+    const bridge = getOpcBridge();
+    const workspaceKey = workspaceIdentity?.trim() || workspacePath;
+    if (!bridge) {
+      set({ error: "ipc-unavailable", workspaceKey, workspacePath });
+      return;
+    }
+    if (get().workspaceKey === workspaceKey && (get().state || get().loading))
+      return;
+    if (opcInFlight) return opcInFlight;
+    set({ loading: true, error: null });
+    opcInFlight = (async () => {
+      try {
+        const result = await bridge.zcodeGoOpcGetState!({ workspacePath });
+        if (!result.ok || !result.state) {
+          set({
+            loading: false,
+            error: result.error ?? "opc-state-unavailable",
+            state: null,
+            workspaceKey,
+            workspacePath,
+            bodies: { roleTemplateBodies: {}, skillBodies: {} },
+          });
+          return;
+        }
+        set({
+          loading: false,
+          error: null,
+          state: result.state,
+          bodies: {
+            roleTemplateBodies: result.roleTemplateBodies ?? {},
+            skillBodies: result.skillBodies ?? {},
+          },
+          workspaceKey,
+          workspacePath,
+        });
+        // 状态变化订阅只挂一次；按 workspacePath 过滤，跨工作区广播不误刷。
+        if (!opcUnsubscribe) {
+          opcUnsubscribe =
+            bridge.onZcodeGoOpcStateChanged?.((payload) => {
+              const current = get();
+              if (
+                current.workspacePath &&
+                payload.workspacePath === current.workspacePath
+              ) {
+                void current.refresh();
+              }
+            }) ?? null;
+        }
+      } catch (error) {
+        logger.warn("[zcode-go][opc] 读取公司状态失败", error);
+        set({
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        opcInFlight = null;
+      }
+    })();
+    return opcInFlight;
+  },
+
+  refresh: async () => {
+    const { workspacePath, workspaceKey } = get();
+    const bridge = getOpcBridge();
+    if (!bridge || !workspacePath || !workspaceKey) return;
+    try {
+      const result = await bridge.zcodeGoOpcGetState!({ workspacePath });
+      if (result.ok && result.state) {
+        set({
+          state: result.state,
+          bodies: {
+            roleTemplateBodies: result.roleTemplateBodies ?? {},
+            skillBodies: result.skillBodies ?? {},
+          },
+          error: null,
+        });
+      }
+    } catch (error) {
+      logger.warn("[zcode-go][opc] 刷新公司状态失败", error);
+    }
+  },
+
+  apply: async (mutations) => {
+    const { workspacePath } = get();
+    const bridge = getOpcBridge();
+    if (!bridge || !workspacePath || mutations.length === 0) {
+      return { ok: false, events: [], promotedSkillIds: [] };
+    }
+    try {
+      const result = await bridge.zcodeGoOpcApply!({
+        workspacePath,
+        mutations,
+      });
+      if (result.ok && result.state) {
+        set({
+          state: result.state,
+          bodies: {
+            roleTemplateBodies: result.roleTemplateBodies ?? {},
+            skillBodies: result.skillBodies ?? {},
+          },
+          error: null,
+          recentPromotedSkillIds: result.promotedSkillIds,
+        });
+      }
+      return {
+        ok: result.ok,
+        events: result.events ?? [],
+        promotedSkillIds: result.promotedSkillIds ?? [],
+      };
+    } catch (error) {
+      logger.warn("[zcode-go][opc] 应用变更失败", error);
+      return { ok: false, events: [], promotedSkillIds: [] };
+    }
+  },
+
+  clearRecentPromotions: () => set({ recentPromotedSkillIds: [] }),
+
+  importRoleTemplates: async (sourcePath) => {
+    const bridge = getOpcBridge();
+    const { workspacePath } = get();
+    if (!bridge?.zcodeGoOpcImportRoleTemplates || !workspacePath) {
+      return { ok: false, imported: 0 };
+    }
+    try {
+      const result = await bridge.zcodeGoOpcImportRoleTemplates({
+        workspacePath,
+        sourcePath,
+      });
+      if (result.ok && result.state) {
+        set({
+          state: result.state,
+          bodies: {
+            roleTemplateBodies: result.roleTemplateBodies ?? {},
+            skillBodies: result.skillBodies ?? {},
+          },
+        });
+      }
+      return { ok: result.ok, imported: result.imported };
+    } catch (error) {
+      logger.warn("[zcode-go][opc] 导入角色模板失败", error);
+      return { ok: false, imported: 0 };
+    }
+  },
+
+  importSkillFolder: async (sourcePath) => {
+    const bridge = getOpcBridge();
+    const { workspacePath } = get();
+    if (!bridge?.zcodeGoOpcImportSkillFolder || !workspacePath) {
+      return { ok: false, imported: 0 };
+    }
+    try {
+      const result = await bridge.zcodeGoOpcImportSkillFolder({
+        workspacePath,
+        sourcePath,
+      });
+      if (result.ok && result.state) {
+        set({
+          state: result.state,
+          bodies: {
+            roleTemplateBodies: result.roleTemplateBodies ?? {},
+            skillBodies: result.skillBodies ?? {},
+          },
+        });
+      }
+      return { ok: result.ok, imported: result.imported };
+    } catch (error) {
+      logger.warn("[zcode-go][opc] 导入技能目录失败", error);
+      return { ok: false, imported: 0 };
+    }
+  },
+
+  resolveRoleBody: (templateId) =>
+    resolveRoleTemplateBody(templateId, get().bodies),
+  resolveSkillBody: (skillId) => get().bodies.skillBodies[skillId] ?? null,
+}));

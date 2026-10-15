@@ -188,6 +188,8 @@ import {
   isZCodeGoTakeoverEnabled,
 } from "./zcodeGoTakeover.js";
 import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
+// zcode-go：OPC 模式公司状态存储（IPC 注册在 main，唯一事实源；见 specs/opc-mode.md）
+import { initZcodeGoOpcStore } from "./zcodeGoOpcStore.js";
 import {
   registerForkFullHistoryFromParent,
   runContinuousForkFullHistoryBackfill,
@@ -2787,6 +2789,8 @@ app.whenReady().then(async () => {
   registerDesktopStabilityMonitors(logger, crashCapturePaths);
   // zcode-go：渲染进程崩溃自动重载（官方只上报遥测不恢复，崩溃后主窗口白屏）。
   initZcodeGoRendererRecovery(logger);
+  // zcode-go：OPC 模式公司状态存储（<workspace>/.opc/ 读写与广播，纯 IPC 门控）。
+  initZcodeGoOpcStore(logger);
   registerDesktopResourceTelemetry(logger);
   // 主窗口 renderer 的 60 秒 heap 样本入口；随 App 生命周期常驻，只注册一次。
   registerRendererHeapSampleIpc();

@@ -99,5 +99,34 @@ export function installZcodeGoPreloadEntries({ ipcRenderer }: { ipcRenderer: Ele
     workspacePath: string;
     workspaceIdentity?: string;
   } | null> => ipcRenderer.invoke(PlatformChannels.ZcodeGoTakeSessionInitial),
+  /** zcode-go：OPC 模式——读取工作区公司状态（缺失时 main 初始化默认公司）。 */
+  zcodeGoOpcGetState: (
+    payload: { workspacePath: string },
+  ): Promise<{ ok: boolean; state: unknown; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcGetState, payload),
+  /** zcode-go：OPC 模式——应用 mutation 批（唯一写路径；成功后广播全窗口）。 */
+  zcodeGoOpcApply: (
+    payload: { workspacePath: string; mutations: unknown[] },
+  ): Promise<{ ok: boolean; state: unknown; events: unknown[]; promotedSkillIds: string[]; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcApply, payload),
+  /** zcode-go：OPC 模式——导入角色模板目录（OpenOPC talent 五字段格式）。 */
+  zcodeGoOpcImportRoleTemplates: (
+    payload: { workspacePath: string; sourcePath: string },
+  ): Promise<{ ok: boolean; imported: number; state: unknown; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcImportRoleTemplates, payload),
+  /** zcode-go：OPC 模式——导入技能目录（claude-skills SKILL.md 格式，递归）。 */
+  zcodeGoOpcImportSkillFolder: (
+    payload: { workspacePath: string; sourcePath: string },
+  ): Promise<{ ok: boolean; imported: number; state: unknown; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcImportSkillFolder, payload),
+  /** zcode-go：OPC 模式——公司状态变化事件；返回退订函数。 */
+  onZcodeGoOpcStateChanged: (
+    handler: (payload: { workspacePath: string }) => void,
+  ): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { workspacePath: string }) =>
+      handler(payload);
+    ipcRenderer.on(PlatformChannels.ZcodeGoOpcStateChanged, listener);
+    return () => ipcRenderer.removeListener(PlatformChannels.ZcodeGoOpcStateChanged, listener);
+  },
   };
 }

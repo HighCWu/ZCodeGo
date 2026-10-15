@@ -364,3 +364,5 @@ export {
   isRequestSecurityFailure,
 } from "./request-security-edition/policy.js";
 export * from "./request-security-edition/verification-policy.js";
+// zcode-go：OPC 模式（AI 原生公司）共享契约与纯逻辑（类型/解析器/状态机/进化引擎/prompt）
+export * from "./opc/index.js";

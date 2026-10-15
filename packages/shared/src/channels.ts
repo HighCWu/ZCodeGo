@@ -18,6 +18,11 @@ import type {
   WebRemoteControlWorkspaceTarget,
 } from "./web-remote-control.js";
 import type { AppSettings, Locale } from "./protocol.js";
+import type {
+  OpcCompanyState,
+  OpcEvolutionEvent,
+  OpcMutation,
+} from "./opc/opc-types.js";
 import type { StorageCleanRequest, StorageCleanResult, StorageUsageSnapshot } from "./storage.js";
 import type {
   ArmsCustomEventPayload,
@@ -505,6 +510,17 @@ export const PlatformChannels = {
   ZcodeGoMobileBridgeSetSignalingOrigin: "zcode:zcode-go-mobile-bridge-set-signaling-origin",
   /** Main → Renderer：移动端远程控制状态变化（配对 URL / 连接状态） */
   ZcodeGoMobileBridgeStatusChanged: "zcode:zcode-go-mobile-bridge-status-changed",
+  // zcode-go：OPC 模式（AI 原生公司）通道——读取/应用/导入/广播
+  /** Renderer → Main：读取工作区 OPC 公司状态（缺失时初始化默认公司） */
+  ZcodeGoOpcGetState: "zcode:zcode-go-opc-get-state",
+  /** Renderer → Main：应用 OPC mutation 批（唯一写路径；成功后广播） */
+  ZcodeGoOpcApply: "zcode:zcode-go-opc-apply",
+  /** Renderer → Main：从磁盘目录导入角色模板（OpenOPC talent 五字段格式，目录或单 md） */
+  ZcodeGoOpcImportRoleTemplates: "zcode:zcode-go-opc-import-role-templates",
+  /** Renderer → Main：从磁盘目录导入技能（claude-skills SKILL.md 格式，递归发现） */
+  ZcodeGoOpcImportSkillFolder: "zcode:zcode-go-opc-import-skill-folder",
+  /** Main → Renderer：OPC 公司状态变化（任意窗口写入后广播，接收方整树 reload） */
+  ZcodeGoOpcStateChanged: "zcode:zcode-go-opc-state-changed",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -1396,6 +1412,55 @@ export interface PlatformChannelMap {
   [PlatformChannels.ZcodeGoMobileBridgeSetSignalingOrigin]: {
     request: { origin: string | null };
     response: { ok: boolean; error?: string; effective?: string };
+  };
+  // zcode-go：OPC 模式通道载荷（状态契约见 ./opc/opc-types.ts）
+  [PlatformChannels.ZcodeGoOpcGetState]: {
+    request: { workspacePath: string };
+    response: {
+      ok: boolean;
+      state: OpcCompanyState | null;
+      /** 导入角色模板正文（templates/roles/<id>.md），prompt 构造用。 */
+      roleTemplateBodies?: Record<string, string>;
+      /** 技能正文（skills/<id>/SKILL.md），prompt 构造用。 */
+      skillBodies?: Record<string, string>;
+      /** state 为 null 时的诊断信息（目录不可写等）。 */
+      error?: string;
+    };
+  };
+  [PlatformChannels.ZcodeGoOpcApply]: {
+    request: { workspacePath: string; mutations: OpcMutation[] };
+    response: {
+      ok: boolean;
+      state: OpcCompanyState | null;
+      roleTemplateBodies?: Record<string, string>;
+      skillBodies?: Record<string, string>;
+      events: OpcEvolutionEvent[];
+      promotedSkillIds: string[];
+      error?: string;
+    };
+  };
+  [PlatformChannels.ZcodeGoOpcImportRoleTemplates]: {
+    request: { workspacePath: string; sourcePath: string };
+    response: {
+      ok: boolean;
+      imported: number;
+      state: OpcCompanyState | null;
+      error?: string;
+    };
+  };
+  [PlatformChannels.ZcodeGoOpcImportSkillFolder]: {
+    request: { workspacePath: string; sourcePath: string };
+    response: {
+      ok: boolean;
+      imported: number;
+      state: OpcCompanyState | null;
+      error?: string;
+    };
+  };
+  [PlatformChannels.ZcodeGoOpcStateChanged]: {
+    /** 事件（main → renderer）：载荷为空，接收方按 workspacePath 主动 GetState。 */
+    request: void;
+    response: { workspacePath: string };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

@@ -6,6 +6,10 @@ import { getLocalTtftObserver } from "@/v4/telemetry/localTtftObserver.js";
 import { BotGroupDeliveryProvider } from "@/v4/BotGroupDeliveryAction.js";
 /* oxlint-disable eslint(max-lines) -- SessionPane 是单 pane 竖切的命令编排收口（订阅/发送/停止/fork/edit/retry/queue/slash 全集），与旧 ChatView 同粒度；HEAD 已超限（693 行计数），拆散命令组会打散 dispatchCommand/snapshotRef 的闭包纪律。 */
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
+// zcode-go：OPC 公司模式 hook（草稿驾驶舱门控）
+import { useIsOpcMode } from "@/hooks/useInterfaceMode.js";
+// zcode-go：OPC 草稿驾驶舱（OPC 模式下替代问候空态；实现见 opc/ 新文件）
+import { ZcodeGoOpcDraftHome } from "@/opc/ZcodeGoOpcDraftHome.js";
 import {
   useCallback,
   useEffect,
@@ -4606,6 +4610,8 @@ export function SessionPane({
     return () => setSelectionSideChatBlocked(sessionId, false);
   }, [blockingInteractionId, selectionSideChat, sessionId]);
   const isOfficeMode = useIsOfficeMode();
+  // zcode-go：OPC 公司模式（草稿态以公司驾驶舱替代问候空态，见 specs/opc-mode.md）。
+  const isOpcMode = useIsOpcMode();
   const statusPanelModel = useMemo(
     () =>
       buildConversationStatusPanelModel({
@@ -5352,7 +5358,10 @@ export function SessionPane({
       ) : null}
       {composerNode}
       {/* 办公模式显示主动任务推荐；编程模式保留原有小型场景入口。 */}
-      {isDraft && (!isOfficeMode || sharedSettings?.proactiveSuggestionsEnabled === true) ? (
+      {/* zcode-go：OPC 模式不渲染推荐提示（行动入口在公司驾驶舱/面板内）。 */}
+      {isDraft &&
+      !isOpcMode &&
+      (!isOfficeMode || sharedSettings?.proactiveSuggestionsEnabled === true) ? (
         <ConversationDraftSuggestedPromptsContainer
           className={isOfficeMode ? "mt-4" : "mt-6"}
           proactive={isOfficeMode}
@@ -5639,9 +5648,17 @@ export function SessionPane({
                   emptyState={
                     isDraft ? (
                       <div data-testid={TID_CHAT_EMPTY} className="w-full">
-                        <ConversationDraftEmptyState
-                          compactForRemoteControl={compactForRemoteControl}
-                        />
+                        {/* zcode-go：OPC 模式以公司驾驶舱替代问候空态（非 OPC 路径保持上游原样）。 */}
+                        {isOpcMode ? (
+                          <ZcodeGoOpcDraftHome
+                            workspacePath={workspacePath}
+                            workspaceIdentity={workspaceIdentity}
+                          />
+                        ) : (
+                          <ConversationDraftEmptyState
+                            compactForRemoteControl={compactForRemoteControl}
+                          />
+                        )}
                       </div>
                     ) : null
                   }

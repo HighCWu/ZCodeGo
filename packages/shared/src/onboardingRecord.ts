@@ -13,7 +13,8 @@ import { z } from "zod";
 /** occupation 用非空字符串而非枚举：职业列表会演进，旧记录不能因枚举收窄而校验失败。 */
 export const onboardingOccupationSchema = z.string().min(1).nullable();
 
-export const onboardingInterfaceModeSchema = z.enum(["coding", "office"]).nullable();
+// zcode-go：枚举增加 opc（OPC 公司模式；枚举扩展向后兼容，旧记录不受影响）
+export const onboardingInterfaceModeSchema = z.enum(["coding", "office", "opc"]).nullable();
 
 export const onboardingRecordEntrySchema = z.object({
   userId: z.string().min(1).nullable(),

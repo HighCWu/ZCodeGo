@@ -23,6 +23,24 @@
 | packages/desktop/src/main/index.ts | 533+ | **442+** | fork 事务执行器迁 zcodeGoSilentForkTransaction.ts；门控点 = deps 常量 + 两处调用行 |
 | packages/desktop/src/preload/index.ts | 92+ | **2+** | import + `...installZcodeGoPreloadEntries({ ipcRenderer }),` 一行 spread。**注意：preload 不在 `pnpm run typecheck` 覆盖内（tsc 盲区）**——改 preload 后必须 `npx tsup` 重建 + e2e 实测（CI 实证：漏 import 的 preload 在 typecheck 全绿下仍炸空白页） |
 | packages/ui/src/ErrorBoundary.tsx | 102+ | ~**63+** | 常量/额度逻辑迁 zcodeGoUiAutoRecovery.ts；两个边界类内的侵入保持纯新增插桩 |
+| packages/ui/src/lib/interfaceMode.ts | — | **3+/1-** | OPC：类型联合 + normalize 加 opc 直通（类型不可避免类） |
+| packages/ui/src/store/index.ts | — | **2+/1-** | OPC：跨窗口广播 guard 条件加 `"opc"`（门控分支类） |
+| packages/ui/src/WorkspaceSidebarFooter.tsx | — | **4+** | OPC：模式菜单 +1 RadioItem（纯插入） |
+| packages/ui/src/settingsPageHelpers.tsx | — | **4+** | OPC：设置页 +1 SelectItem（纯插入） |
+| packages/ui/src/onboarding/occupationOptions.ts | — | **3+** | OPC：modeOptionIcons +1 行图标（纯插入） |
+| packages/ui/src/onboarding/OnboardingModeSelector.tsx | — | **2+/1-** | OPC：模式数组字面量 +`"opc"`（1 行改写） |
+| packages/ui/src/v4/SessionPane.tsx | 115+/31- | **23+/44- → 本轮 +21/-4** | OPC：草稿空态门控分支（isOpcMode 三元替换）+ 建议提示条件加 `!isOpcMode`（门控分支类） |
+| packages/ui/src/App.tsx | 104+/1- | **10+/1- → 本轮 +4** | OPC：+1 import 行 + `<ZcodeGoOpcPanelMount />` 渲染行（纯插入） |
+| packages/shared/src/onboardingRecord.ts | — | **2+/1-** | OPC：interfaceMode 枚举加 `"opc"`（类型不可避免类） |
+
+OPC 模式（specs/opc-mode.md）本轮新增上游足迹即上表 10 行；承载新文件：
+`packages/shared/src/opc/`（契约+纯逻辑+内置模板包）、`packages/desktop/src/main/zcodeGoOpcStore.ts`
+（唯一事实源 + IPC）、`packages/ui/src/opc/`（面板五视图/对话框/驾驶舱/挂载）与
+`packages/ui/src/store/opcStore.ts`（投影缓存）。通道键与载荷映射在 channels.ts 纯新增
+（OPC 段带 zcode-go 锚）；preload 增补在 zcodeGoEntries.ts（自有文件）。
+**OPC 的 bundle 验证教训**：esbuild 对非 ASCII 日志字面量转义为大写十六进制
+（`OPC \u516C\u53F8…`），grep 中文原文必假阴性——用 ASCII 前缀（如 `zcode-go] OPC`）
+或通道字符串（`zcode:zcode-go-opc-*`）验模块体。
 
 新文件承载（上游不存在，零冲突）：zcodeGoMobileBridgeSection.tsx、
 zcodeGoWindowIntegration.ts、zcodeGoSessionPaneIntegration.ts、

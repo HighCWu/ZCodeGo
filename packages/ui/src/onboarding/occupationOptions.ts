@@ -11,6 +11,7 @@ import {
   Rocket,
   Scale,
   Ellipsis,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +36,8 @@ export type OccupationValue = (typeof occupations)[number];
 export const modeOptionIcons = {
   coding: Code2,
   office: PanelsTopLeft,
+  // zcode-go：OPC 公司模式（AI 原生公司界面）
+  opc: Building2,
 } as const;
 
 const occupationIcons = [

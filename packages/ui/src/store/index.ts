@@ -477,7 +477,8 @@ export function createZCodeStore(
         state.setLocale(msg.payload);
       } else if (
         field === "interfaceMode" &&
-        (msg.payload === "office" || msg.payload === "coding")
+        // zcode-go：广播 guard 增加 opc（OPC 公司模式跨窗口同步）。
+        (msg.payload === "office" || msg.payload === "coding" || msg.payload === "opc")
       ) {
         state.setInterfaceMode(normalizeInterfaceMode(msg.payload));
       } else if (field === "uiFontSizePx" && typeof msg.payload === "number") {

@@ -357,6 +357,10 @@ export function GeneralSectionContent({
                 <SelectItem value="office">
                   {intl.formatMessage({ id: "settings.interfaceMode.office" })}
                 </SelectItem>
+                {/* zcode-go：OPC 公司模式（AI 原生公司界面，见 specs/opc-mode.md） */}
+                <SelectItem value="opc">
+                  {intl.formatMessage({ id: "settings.interfaceMode.opc" })}
+                </SelectItem>
               </SelectContent>
             </Select>
           }
