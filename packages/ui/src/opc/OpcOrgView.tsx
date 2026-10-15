@@ -169,6 +169,12 @@ export function OpcOrgView({
                     {employee.roleId
                       ? ` · ${slotTitleByRoleId.get(employee.roleId) ?? ""}`
                       : ""}
+                    {employee.permissionLevel &&
+                    employee.permissionLevel !== "workspace-write"
+                      ? ` · ${intl.formatMessage({
+                          id: `opc.permission.${employee.permissionLevel}`,
+                        })}`
+                      : ""}
                   </p>
                 </div>
               </div>

@@ -167,6 +167,7 @@ export function buildOpcCompanyImportMutations(
         vibe: employee.vibe,
         description: employee.description,
         seniority: employee.seniority ?? "junior",
+        permissionLevel: employee.permissionLevel,
       },
     });
     summary.hires += 1;

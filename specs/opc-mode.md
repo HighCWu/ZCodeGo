@@ -55,6 +55,18 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      模板按名称匹配内置/导入库，未命中按自定义招聘）；另内置 corporate 预设一键应用。
      招聘对话框对同模板的暂停/离职员工给出「复用」建议（改状态而非重复招聘）。
      ```
+   - **权限边界（prompt 级硬约束）**：员工携带 permissionLevel
+     （read-only / workspace-write / full-access，缺省 workspace-write），
+     招聘时选择、组织卡片徽标展示、委派 prompt 注入「权限边界（必须遵守）」
+     章节——read-only 禁止任何写操作、workspace-write 限定工作区内、
+     full-access 的破坏性动作仍须升级所有者。真正的会话级硬约束需接入 zcode
+     permission 体系（侵入面大，暂缓，如实标注这是 prompt 级约束）。
+   - **Office 办公室地图**：公司面板第六标签——在职员工以桌位卡呈现（创始人
+     独立办公桌），状态环实时反映工作负载：执行中（蓝）/ 待验收（琥珀）/
+     升级中（红）/ 空闲；点选员工展开详情（当前工作项 + 复盘入口）。
+     ```
+
+     ```
 5. 执行（Self-Run）：工作项「委派」把角色模板正文 + 挂接技能 + 工作项上下文合成为
    委派 prompt，经既有 `requestComposerTextInsert` 注入 composer，由用户确认发送
    （不自动发送，不绕过既有会话准入）。完成的判定与推进由用户驱动。

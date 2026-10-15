@@ -39,6 +39,7 @@ import { OpcOrgView } from "./OpcOrgView.js";
 import { OpcTalentMarket } from "./OpcTalentMarket.js";
 import { OpcSkillsView } from "./OpcSkillsView.js";
 import { OpcEvolutionView } from "./OpcEvolutionView.js";
+import { OpcOfficeMap } from "./OpcOfficeMap.js";
 import { insertOpcPrompt } from "./opcComposerBridge.js";
 import { downloadTextFile, readFileText } from "./opcFiles.js";
 import {
@@ -62,7 +63,7 @@ import { logger } from "@/logger.js";
 
 export const OPC_OPEN_PANEL_EVENT = "zcode-go:opc-open";
 
-type PanelTab = "kanban" | "org" | "market" | "skills" | "evolution";
+type PanelTab = "kanban" | "office" | "org" | "market" | "skills" | "evolution";
 
 export function ZcodeGoOpcPanelRoot({
   workspaceIdentity,
@@ -232,6 +233,7 @@ export function ZcodeGoOpcPanelRoot({
         recentLessons,
         memoryFilePath: `.opc/memory/${employee.id}.md`,
         reworkNotes: workItem.reworkNotes,
+        permissionLevel: employee.permissionLevel,
       });
       // 依赖就绪门控（与 reducer/看板同规则）：未就绪不允许委派。
       if (!isOpcWorkItemRunnable(workItem, state.workItems)) return;
@@ -355,6 +357,14 @@ export function ZcodeGoOpcPanelRoot({
                 {intl.formatMessage({ id: "opc.tab.evolution" })}
               </TabsTrigger>
             </TabsList>
+            <TabsContent value="office" className="min-h-0 flex-1">
+              <OpcOfficeMap
+                state={state}
+                onRetrospective={(employee) =>
+                  setRetroDialog({ employeeId: employee.id })
+                }
+              />
+            </TabsContent>
             <TabsContent value="kanban" className="min-h-0 flex-1">
               <OpcKanbanBoard
                 state={state}

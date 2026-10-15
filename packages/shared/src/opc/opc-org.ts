@@ -121,9 +121,6 @@ export function matchOpcRoleTemplate(
   const wanted = name.trim();
   if (!wanted) return null;
   const wantedSlug = opcSlugify(wanted);
-  const importedById = new Map(
-    imported.map((template) => [template.id, template]),
-  );
   const pool: Array<{
     id: string;
     name: string;

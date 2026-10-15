@@ -188,4 +188,17 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.org.exportCompany": "Export company",
   "opc.org.importCompany": "Import company",
   "opc.skills.export": "Export",
+  // zcode-go: OPC office map & permission messages
+  "opc.tab.office": "Office",
+  "opc.office.hint": "Office map: the ring reflects workload — working (blue) / review (amber) / escalated (red) / idle; click a desk for details.",
+  "opc.office.idle": "Idle",
+  "opc.office.working": "Working ×{count}",
+  "opc.office.pendingReview": "Review ×{count}",
+  "opc.office.escalated": "Escalated ×{count}",
+  "opc.office.founderDesk": "Owner's office",
+  "opc.office.noItems": "No active work items",
+  "opc.permission.readOnly": "Read-only",
+  "opc.permission.workspaceWrite": "Workspace write",
+  "opc.permission.fullAccess": "Full access",
+  "opc.hire.permission": "Permission level",
 };

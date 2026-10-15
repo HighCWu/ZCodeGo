@@ -89,6 +89,11 @@ export interface OpcWorkItem {
 }
 
 export type OpcEmployeeSeniority = "junior" | "senior" | "lead";
+/** 权限边界（prompt 级硬约束；会话级硬约束需接 zcode permission，暂缓）。 */
+export type OpcPermissionLevel =
+  | "read-only"
+  | "workspace-write"
+  | "full-access";
 export type OpcEmployeeStatus = "active" | "paused" | "departed";
 
 export interface OpcEmployee {
@@ -106,6 +111,8 @@ export interface OpcEmployee {
   description: string;
   seniority: OpcEmployeeSeniority;
   status: OpcEmployeeStatus;
+  /** 权限边界（缺省 workspace-write；委派 prompt 注入为硬约束章节）。 */
+  permissionLevel?: OpcPermissionLevel;
   /** 挂接技能 id 列表（.opc/skills/<id>/SKILL.md）。 */
   skillRefs: string[];
   stats: {
@@ -220,6 +227,7 @@ export interface OpcCustomEmployeeDraft {
   vibe: string;
   description: string;
   seniority: OpcEmployeeSeniority;
+  permissionLevel?: OpcPermissionLevel;
 }
 
 export type OpcMutation =
@@ -240,7 +248,13 @@ export type OpcMutation =
       patch: Partial<
         Pick<
           OpcEmployee,
-          "name" | "seniority" | "status" | "vibe" | "description" | "roleId"
+          | "name"
+          | "seniority"
+          | "status"
+          | "vibe"
+          | "description"
+          | "roleId"
+          | "permissionLevel"
         >
       >;
     }
@@ -352,6 +366,8 @@ export interface OpcDelegationPromptInput {
   memoryFilePath: string;
   /** 返工意见（上一轮验收退回，必须逐条解决）。 */
   reworkNotes?: string[];
+  /** 权限边界（缺省 workspace-write）。 */
+  permissionLevel?: OpcPermissionLevel;
 }
 
 /** agent 复盘输出围栏名：```opc-lessons { "lessons": [...] } */

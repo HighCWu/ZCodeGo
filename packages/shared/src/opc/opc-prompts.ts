@@ -83,6 +83,20 @@ export function buildOpcDelegationPrompt(
       `注意：本任务依赖以下前置工作项的产出：${workItem.dependsOn.join("、")}。`,
     );
   }
+  const permission = input.permissionLevel ?? "workspace-write";
+  const permissionText =
+    permission === "read-only"
+      ? "只读：本任务仅允许分析与建议，不得创建、修改或删除任何文件，不得执行任何变更类命令。"
+      : permission === "full-access"
+        ? "完全访问：可执行必要的系统操作；但删除/重置/外发等破坏性动作仍必须升级所有者确认，不得自行执行。"
+        : "工作区写：仅允许读写当前工作区内的文件与执行安全的本地命令，不得触达工作区之外的任何资源。";
+  sections.push(
+    "",
+    "## 权限边界（必须遵守）",
+    "",
+    `你的权限级别：${permission}。${permissionText}`,
+    "超出边界的动作一律不要执行，列入「升级给所有者」的清单并说明原因。",
+  );
   if (input.reworkNotes && input.reworkNotes.length > 0) {
     sections.push(
       "",

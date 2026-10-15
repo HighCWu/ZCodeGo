@@ -188,4 +188,17 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.org.exportCompany": "导出公司",
   "opc.org.importCompany": "导入公司",
   "opc.skills.export": "导出",
+  // zcode-go：OPC 办公室地图与权限文案
+  "opc.tab.office": "办公室",
+  "opc.office.hint": "办公室地图：状态环反映工作负载——执行中（蓝）/ 待验收（琥珀）/ 升级中（红）/ 空闲；点选桌位查看详情。",
+  "opc.office.idle": "空闲",
+  "opc.office.working": "执行中 ×{count}",
+  "opc.office.pendingReview": "待验收 ×{count}",
+  "opc.office.escalated": "升级中 ×{count}",
+  "opc.office.founderDesk": "所有者办公室",
+  "opc.office.noItems": "当前没有进行中的工作项",
+  "opc.permission.readOnly": "只读",
+  "opc.permission.workspaceWrite": "工作区写",
+  "opc.permission.fullAccess": "完全访问",
+  "opc.hire.permission": "权限级别",
 };

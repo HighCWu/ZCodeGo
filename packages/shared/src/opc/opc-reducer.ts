@@ -152,6 +152,7 @@ function applyOnce(
         vibe: custom?.vibe || "",
         description: custom?.description || "",
         seniority: custom?.seniority || "junior",
+        permissionLevel: custom?.permissionLevel,
         status: "active",
         skillRefs: mutation.skillRefs ? [...mutation.skillRefs] : [],
         stats: { completed: 0, retrospectives: 0, lessons: 0 },
