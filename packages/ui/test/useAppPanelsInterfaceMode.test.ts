@@ -5,9 +5,16 @@ import { useAppPanels } from "@/hooks/useAppPanels.js";
 import { clearTaskSidePaneMemoryStateForTest } from "@/lib/taskSidePaneMemory.js";
 
 const mode = vi.hoisted(() => ({ general: false }));
-vi.mock("@/hooks/useInterfaceMode.js", () => ({ useIsOfficeMode: () => mode.general }));
+vi.mock("@/hooks/useInterfaceMode.js", () => ({
+  useIsOfficeMode: () => mode.general,
+}));
 vi.mock("@/hooks/useServices.js", () => ({
-  useServices: () => ({ zcodeSessionService: { closeSession: vi.fn(async () => {}) } }),
+  useServices: () => ({
+    zcodeSessionService: { closeSession: vi.fn(async () => {}) },
+  }),
+  // zcode-go：useAppPanels 新增 useOptionalServices（移动抽屉设置读取）；
+  // null=服务缺失视为启用，与无 Provider 测试环境同义。
+  useOptionalServices: () => null,
 }));
 
 function renderPanels() {
@@ -73,7 +80,9 @@ describe("模式切换不改写已打开面板", () => {
     expect(result.current.sidePaneState?.tabs ?? []).toEqual([]);
     mode.general = false;
     rerender();
-    expect(result.current.recentClosedSidePaneTabs.map((item) => item.tab.id)).toContain(gitId);
+    expect(
+      result.current.recentClosedSidePaneTabs.map((item) => item.tab.id),
+    ).toContain(gitId);
     act(() => result.current.handleReopenClosedSidePaneTab(gitId));
     expect(result.current.sidePaneState?.activeTabId).toBe(gitId);
     unmount();

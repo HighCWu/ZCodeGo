@@ -10,11 +10,12 @@
  * - workspace-write 工作区写（缺省）：拒绝 shell（文件写入由 CLI 工作区边界限定）
  * - full-access    完全访问：不拒绝（破坏性动作仍由 prompt 边界约束升级）
  */
-import {
-  isZCodeToolFamily,
-  ZCODE_KNOWN_TOOL_NAMES,
-  type OpcPermissionLevel,
-} from "../index.js";
+// zcode-go：必须直连源模块——从 ../index.js 导入会形成 shared/index →
+// opc/index → 本文件 → shared/index 的 ESM 循环，顶层求值时
+// ZCODE_KNOWN_TOOL_NAMES 尚未初始化（subagentRuntimeConfig 测试实证
+// undefined.filter 崩溃；bundle 打包内联掩盖了该顺序问题）。
+import { isZCodeToolFamily, ZCODE_KNOWN_TOOL_NAMES } from "../tool-identity.js";
+import type { OpcPermissionLevel } from "./opc-types.js";
 
 const FILE_WRITE_TOOLS = ZCODE_KNOWN_TOOL_NAMES.filter((name) =>
   isZCodeToolFamily(name, "file-write"),

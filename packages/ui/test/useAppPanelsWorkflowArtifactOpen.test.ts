@@ -31,6 +31,9 @@ vi.mock("@/hooks/useServices.js", () => ({
     zcodeAgentService: { conversationWorkflowRunArtifactsV4 },
     zcodeSessionService: { closeSession: vi.fn(async () => {}) },
   }),
+  // zcode-go：useAppPanels 新增 useOptionalServices（移动抽屉设置读取）；
+  // null=服务缺失视为启用，与无 Provider 测试环境同义。
+  useOptionalServices: () => null,
 }));
 
 vi.mock("@/logger.js", () => ({
@@ -41,7 +44,10 @@ const WORKSPACE_PATH = "/repo";
 const SESSION_ID = "sess-a";
 const REPORT_URL = "file:///repo/.zcode/workflow-runs/run-1/report.html";
 
-function renderPanels(options?: { supportsEmbeddedBrowser?: boolean; sidePaneOwnerId?: string }) {
+function renderPanels(options?: {
+  supportsEmbeddedBrowser?: boolean;
+  sidePaneOwnerId?: string;
+}) {
   return renderHook(() =>
     useAppPanels({
       workspaceAbsPath: WORKSPACE_PATH,
@@ -68,7 +74,9 @@ function artifactRequest(
   };
 }
 
-function journalResult(sourcePath?: string): V4ConversationWorkflowRunArtifactsResult {
+function journalResult(
+  sourcePath?: string,
+): V4ConversationWorkflowRunArtifactsResult {
   return {
     artifacts: [
       {
@@ -76,7 +84,9 @@ function journalResult(sourcePath?: string): V4ConversationWorkflowRunArtifactsR
         kind: "file",
         contentType: "text/html",
         version: 1,
-        versions: [{ version: 1, publishedAt: 1, ...(sourcePath ? { sourcePath } : {}) }],
+        versions: [
+          { version: 1, publishedAt: 1, ...(sourcePath ? { sourcePath } : {}) },
+        ],
         itemCount: 0,
         ...(sourcePath ? { sourcePath } : {}),
       },
@@ -100,25 +110,44 @@ describe("产物落点判据", () => {
   it("只有 html + 本地 workspace + 有内嵌浏览器三条同时成立才直开", () => {
     const base = { contentType: "text/html", supportsEmbeddedBrowser: true };
     expect(shouldOpenWorkflowArtifactInBrowser(base)).toBe(true);
-    expect(shouldOpenWorkflowArtifactInBrowser({ ...base, contentType: "text/markdown" })).toBe(
-      false,
-    );
+    expect(
+      shouldOpenWorkflowArtifactInBrowser({
+        ...base,
+        contentType: "text/markdown",
+      }),
+    ).toBe(false);
     // 参数化的 content type 走产物 tab：与画 html 卡那道门同一个严格判据。
     expect(
-      shouldOpenWorkflowArtifactInBrowser({ ...base, contentType: "text/html; charset=utf-8" }),
+      shouldOpenWorkflowArtifactInBrowser({
+        ...base,
+        contentType: "text/html; charset=utf-8",
+      }),
     ).toBe(false);
-    expect(shouldOpenWorkflowArtifactInBrowser({ supportsEmbeddedBrowser: true })).toBe(false);
-    expect(shouldOpenWorkflowArtifactInBrowser({ ...base, supportsEmbeddedBrowser: false })).toBe(
-      false,
-    );
     expect(
-      shouldOpenWorkflowArtifactInBrowser({ ...base, workspaceIdentity: "ssh://host/repo" }),
+      shouldOpenWorkflowArtifactInBrowser({ supportsEmbeddedBrowser: true }),
+    ).toBe(false);
+    expect(
+      shouldOpenWorkflowArtifactInBrowser({
+        ...base,
+        supportsEmbeddedBrowser: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldOpenWorkflowArtifactInBrowser({
+        ...base,
+        workspaceIdentity: "ssh://host/repo",
+      }),
     ).toBe(false);
     // 空白 identity 不算远程（与 canRevealArtifactInWorkspace 同源）。
-    expect(shouldOpenWorkflowArtifactInBrowser({ ...base, workspaceIdentity: "  " })).toBe(true);
-    expect(shouldOpenWorkflowArtifactInBrowser({ ...base, remoteSessionId: "remote-a" })).toBe(
-      false,
-    );
+    expect(
+      shouldOpenWorkflowArtifactInBrowser({ ...base, workspaceIdentity: "  " }),
+    ).toBe(true);
+    expect(
+      shouldOpenWorkflowArtifactInBrowser({
+        ...base,
+        remoteSessionId: "remote-a",
+      }),
+    ).toBe(false);
   });
 });
 
@@ -184,8 +213,12 @@ describe("useAppPanels 打开工作流产物", () => {
     expect(tabs[0]?.id).toBe(firstTabId);
     expect(result.current.sidePaneState?.activeTabId).toBe(firstTabId);
     // 同一个落点、新的请求 id：v2 重新发布后 webview 必须重新取字节。
-    expect(result.current.browserNavigationRequest?.targetTabId).toBe(firstTabId);
-    expect(result.current.browserNavigationRequest?.id).not.toBe(firstRequestId);
+    expect(result.current.browserNavigationRequest?.targetTabId).toBe(
+      firstTabId,
+    );
+    expect(result.current.browserNavigationRequest?.id).not.toBe(
+      firstRequestId,
+    );
     expect(result.current.browserNavigationRequest?.url).toBe(REPORT_URL);
     unmount();
   });
@@ -200,7 +233,9 @@ describe("useAppPanels 打开工作流产物", () => {
     });
     await flush();
 
-    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual(["workflow-artifact"]);
+    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual([
+      "workflow-artifact",
+    ]);
     expect(conversationWorkflowRunArtifactsV4).not.toHaveBeenCalled();
     unmount();
   });
@@ -209,24 +244,32 @@ describe("useAppPanels 打开工作流产物", () => {
     const { result, unmount } = renderPanels();
 
     act(() => {
-      result.current.handleOpenWorkflowArtifact(artifactRequest({ remoteSessionId: "remote-a" }));
+      result.current.handleOpenWorkflowArtifact(
+        artifactRequest({ remoteSessionId: "remote-a" }),
+      );
     });
     await flush();
 
-    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual(["workflow-artifact"]);
+    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual([
+      "workflow-artifact",
+    ]);
     expect(conversationWorkflowRunArtifactsV4).not.toHaveBeenCalled();
     unmount();
   });
 
   it("没有内嵌浏览器的壳层仍开产物 tab", async () => {
-    const { result, unmount } = renderPanels({ supportsEmbeddedBrowser: false });
+    const { result, unmount } = renderPanels({
+      supportsEmbeddedBrowser: false,
+    });
 
     act(() => {
       result.current.handleOpenWorkflowArtifact(artifactRequest());
     });
     await flush();
 
-    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual(["workflow-artifact"]);
+    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual([
+      "workflow-artifact",
+    ]);
     expect(conversationWorkflowRunArtifactsV4).not.toHaveBeenCalled();
     unmount();
   });
@@ -255,7 +298,9 @@ describe("useAppPanels 打开工作流产物", () => {
   });
 
   it("journal 查询失败时退回产物 tab", async () => {
-    conversationWorkflowRunArtifactsV4.mockRejectedValue(new Error("capabilityUnsupported"));
+    conversationWorkflowRunArtifactsV4.mockRejectedValue(
+      new Error("capabilityUnsupported"),
+    );
     const { result, unmount } = renderPanels();
 
     act(() => {
@@ -263,13 +308,17 @@ describe("useAppPanels 打开工作流产物", () => {
     });
     await flush();
 
-    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual(["workflow-artifact"]);
+    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual([
+      "workflow-artifact",
+    ]);
     expect(result.current.browserNavigationRequest).toBeNull();
     unmount();
   });
 
   it("产物没有工作区出处时退回产物 tab", async () => {
-    conversationWorkflowRunArtifactsV4.mockResolvedValue(journalResult(undefined));
+    conversationWorkflowRunArtifactsV4.mockResolvedValue(
+      journalResult(undefined),
+    );
     const { result, unmount } = renderPanels();
 
     act(() => {
@@ -277,7 +326,9 @@ describe("useAppPanels 打开工作流产物", () => {
     });
     await flush();
 
-    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual(["workflow-artifact"]);
+    expect(tabTypes(result.current.sidePaneState?.tabs)).toEqual([
+      "workflow-artifact",
+    ]);
     expect(result.current.browserNavigationRequest).toBeNull();
     unmount();
   });
@@ -286,18 +337,25 @@ describe("useAppPanels 打开工作流产物", () => {
     // handleOpenSavedWorkflowArtifact 在同一个同步块里先 handleSelectTaskInChat 再开产物，
     // 所以点击时 sidePaneOwnerId 还停在上一条会话上。browser tab 的可见性按 ownerTaskId
     // 收窄，盖成旧会话的话切换落定后这个 tab 就消失了。
-    const { result, unmount } = renderPanels({ sidePaneOwnerId: "sess-previous" });
+    const { result, unmount } = renderPanels({
+      sidePaneOwnerId: "sess-previous",
+    });
 
     act(() => {
       result.current.handleOpenWorkflowArtifact(
-        artifactRequest({ sourcePath: ".zcode/workflow-runs/run-1/report.html" }),
+        artifactRequest({
+          sourcePath: ".zcode/workflow-runs/run-1/report.html",
+        }),
       );
     });
     await flush();
 
     const tabs = result.current.sidePaneState?.tabs ?? [];
     expect(tabTypes(tabs)).toEqual(["browser"]);
-    expect(tabs[0]).toMatchObject({ ownerTaskId: SESSION_ID, workspaceKey: WORKSPACE_PATH });
+    expect(tabs[0]).toMatchObject({
+      ownerTaskId: SESSION_ID,
+      workspaceKey: WORKSPACE_PATH,
+    });
     // 切换落定后（scope = 目标会话）这个 tab 必须还在可见集合里。
     expect(
       getVisibleSidePaneTabs(tabs, {
@@ -314,7 +372,9 @@ describe("useAppPanels 打开工作流产物", () => {
 
     act(() => {
       result.current.handleOpenWorkflowArtifact(
-        artifactRequest({ sourcePath: ".zcode/workflow-runs/run-1/report.html" }),
+        artifactRequest({
+          sourcePath: ".zcode/workflow-runs/run-1/report.html",
+        }),
       );
     });
     await flush();

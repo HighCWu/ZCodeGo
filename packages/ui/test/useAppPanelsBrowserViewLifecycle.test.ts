@@ -18,6 +18,9 @@ vi.mock("@/hooks/useServices.js", () => ({
   useServices: () => ({
     zcodeSessionService: { closeSession: closeSessionMock },
   }),
+  // zcode-go：useAppPanels 新增 useOptionalServices（移动抽屉设置读取）；
+  // null=服务缺失视为启用，与无 Provider 测试环境同义。
+  useOptionalServices: () => null,
 }));
 
 vi.mock("@/logger.js", () => ({
@@ -29,13 +32,23 @@ vi.mock("@/logger.js", () => ({
   },
 }));
 
-type ReadyHandler = Parameters<NonNullable<IPlatformService["onBrowserViewReady"]>>[0];
+type ReadyHandler = Parameters<
+  NonNullable<IPlatformService["onBrowserViewReady"]>
+>[0];
 type ReadyPayload = Parameters<ReadyHandler>[0];
-type VisibilityHandler = Parameters<NonNullable<IPlatformService["onBrowserViewVisibility"]>>[0];
+type VisibilityHandler = Parameters<
+  NonNullable<IPlatformService["onBrowserViewVisibility"]>
+>[0];
 type VisibilityPayload = Parameters<VisibilityHandler>[0];
-type CloseHandler = Parameters<NonNullable<IPlatformService["onBrowserViewCloseTab"]>>[0];
-type OperationHandler = Parameters<NonNullable<IPlatformService["onBrowserViewOperation"]>>[0];
-type OpenBrowserUrlHandler = Parameters<NonNullable<IPlatformService["onOpenBrowserUrl"]>>[0];
+type CloseHandler = Parameters<
+  NonNullable<IPlatformService["onBrowserViewCloseTab"]>
+>[0];
+type OperationHandler = Parameters<
+  NonNullable<IPlatformService["onBrowserViewOperation"]>
+>[0];
+type OpenBrowserUrlHandler = Parameters<
+  NonNullable<IPlatformService["onOpenBrowserUrl"]>
+>[0];
 
 function createBrowserViewPlatformHarness() {
   let readyHandler: ReadyHandler | null = null;
@@ -87,7 +100,8 @@ function createBrowserViewPlatformHarness() {
       operationHandler(payload);
     },
     emitOpenBrowserUrl(payload: Parameters<OpenBrowserUrlHandler>[0]) {
-      if (!openBrowserUrlHandler) throw new Error("open browser url handler 尚未注册");
+      if (!openBrowserUrlHandler)
+        throw new Error("open browser url handler 尚未注册");
       openBrowserUrlHandler(payload);
     },
     emitReady(payload: ReadyPayload) {
@@ -102,7 +116,10 @@ function createBrowserViewPlatformHarness() {
   };
 }
 
-function readyPayload(tabId: string, overrides: Partial<ReadyPayload> = {}): ReadyPayload {
+function readyPayload(
+  tabId: string,
+  overrides: Partial<ReadyPayload> = {},
+): ReadyPayload {
   return {
     workspaceKey: "ssh://host/repo",
     remoteSessionId: "remote-a",
@@ -209,7 +226,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("切进设置页后 Ready 订阅不断开", () => {
-    const { emitReady, rerender, result, unmount } = renderSettingsOverlayHook(true);
+    const { emitReady, rerender, result, unmount } =
+      renderSettingsOverlayHook(true);
 
     act(() => {
       rerender({ isWorkspaceVisible: false });
@@ -225,7 +243,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("设置页覆盖期间 visibility 仍能切换 active tab", () => {
-    const { emitReady, emitVisibility, result, unmount } = renderSettingsOverlayHook(false);
+    const { emitReady, emitVisibility, result, unmount } =
+      renderSettingsOverlayHook(false);
 
     act(() => {
       emitReady(readyPayload("tab-a"));
@@ -242,7 +261,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("设置页覆盖期间 webview 的 target=_blank 仍能开右侧 browser tab", () => {
-    const { emitOpenBrowserUrl, result, unmount } = renderSettingsOverlayHook(false);
+    const { emitOpenBrowserUrl, result, unmount } =
+      renderSettingsOverlayHook(false);
 
     act(() => {
       emitOpenBrowserUrl({
@@ -259,7 +279,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("非当前对话的 webview popup 只后台挂载，不抢当前对话焦点", () => {
-    const { emitOpenBrowserUrl, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitOpenBrowserUrl, result, unmount } =
+      renderBrowserViewLifecycleHook();
 
     act(() => {
       emitOpenBrowserUrl({
@@ -288,7 +309,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("同一 React batch 内按 Ready(A) → Ready(B) → visibility(B) 保留 shell 并激活 B", () => {
-    const { emitReady, emitVisibility, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitReady, emitVisibility, result, unmount } =
+      renderBrowserViewLifecycleHook();
 
     act(() => {
       emitReady(readyPayload("tab-a"));
@@ -324,7 +346,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("同一 React batch 内普通激活先于 BrowserView operation 时不回滚 active tab", () => {
-    const { emitOperation, emitReady, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitOperation, emitReady, result, unmount } =
+      renderBrowserViewLifecycleHook();
     act(() => emitReady(readyPayload("tab-a")));
     act(() => result.current.handleToggleGit());
     act(() => result.current.handleActivateSidePaneTab("browser-use:tab-a"));
@@ -339,12 +362,16 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("同一 React batch 内普通排序先于 BrowserView operation 时不回滚 tab 顺序", () => {
-    const { emitOperation, emitReady, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitOperation, emitReady, result, unmount } =
+      renderBrowserViewLifecycleHook();
     act(() => emitReady(readyPayload("tab-a")));
     act(() => emitReady(readyPayload("tab-b")));
 
     act(() => {
-      result.current.handleReorderSidePaneTab("browser-use:tab-b", "browser-use:tab-a");
+      result.current.handleReorderSidePaneTab(
+        "browser-use:tab-b",
+        "browser-use:tab-a",
+      );
       emitOperation(readyPayload("tab-a"));
     });
 
@@ -400,7 +427,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("A 主动收起后关闭 B，仍有可见 tab 时保持收起和 owner 偏好", () => {
-    const { emitClose, emitReady, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitClose, emitReady, result, unmount } =
+      renderBrowserViewLifecycleHook();
 
     act(() => {
       emitReady(readyPayload("tab-a"));
@@ -425,9 +453,12 @@ describe("useAppPanels BrowserView lifecycle", () => {
       workspaceIdentity: WORKSPACE_KEY,
       taskId: "sess-a",
     });
-    expect(getSidePaneCollapsedPreference(readTaskSidePaneMemoryState(memoryKey), "sess-a")).toBe(
-      true,
-    );
+    expect(
+      getSidePaneCollapsedPreference(
+        readTaskSidePaneMemoryState(memoryKey),
+        "sess-a",
+      ),
+    ).toBe(true);
     unmount();
   });
 
@@ -448,13 +479,16 @@ describe("useAppPanels BrowserView lifecycle", () => {
 
     act(() => result.current.handleToggleGit());
 
-    expect(result.current.sidePaneState?.tabs).toEqual([expect.objectContaining({ type: "git" })]);
+    expect(result.current.sidePaneState?.tabs).toEqual([
+      expect.objectContaining({ type: "git" }),
+    ]);
     expect(result.current.isSidePaneCollapsed).toBe(false);
     unmount();
   });
 
   it("旧 generation 与不同 remote session 的 visibility 不改变 active tab", () => {
-    const { emitReady, emitVisibility, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitReady, emitVisibility, result, unmount } =
+      renderBrowserViewLifecycleHook();
     act(() => emitReady(readyPayload("tab-a")));
     act(() => emitReady(readyPayload("tab-b")));
     act(() => emitVisibility({ ...readyPayload("tab-a"), visible: true }));
@@ -476,7 +510,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("旧 generation 与不同 remote session 的 hide 不折叠当前 shell", () => {
-    const { emitReady, emitVisibility, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitReady, emitVisibility, result, unmount } =
+      renderBrowserViewLifecycleHook();
     act(() => emitReady(readyPayload("tab-a")));
 
     act(() => {
@@ -498,9 +533,12 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("Agent 在其他 workspace 活跃时关闭 tab，切回原 workspace 不残留幽灵 tab", () => {
-    const { emitClose, emitReady, rerender, result, unmount } = renderCrossWorkspaceHook();
+    const { emitClose, emitReady, rerender, result, unmount } =
+      renderCrossWorkspaceHook();
     act(() => emitReady(readyPayload("tab-a")));
-    expect(result.current.sidePaneState?.tabs.map((tab) => tab.id)).toEqual(["browser-use:tab-a"]);
+    expect(result.current.sidePaneState?.tabs.map((tab) => tab.id)).toEqual([
+      "browser-use:tab-a",
+    ]);
 
     // 用户切到另一个 workspace，原 workspace 的 side pane 状态被存入 memory。
     act(() => rerender({ workspaceIdentity: OTHER_WORKSPACE_KEY }));
@@ -523,9 +561,12 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("关闭通知带的 workspace scope 等于当前活跃 workspace 时立即从 UI 移除", () => {
-    const { emitClose, emitReady, result, unmount } = renderCrossWorkspaceHook();
+    const { emitClose, emitReady, result, unmount } =
+      renderCrossWorkspaceHook();
     act(() => emitReady(readyPayload("tab-a")));
-    expect(result.current.sidePaneState?.tabs.map((tab) => tab.id)).toEqual(["browser-use:tab-a"]);
+    expect(result.current.sidePaneState?.tabs.map((tab) => tab.id)).toEqual([
+      "browser-use:tab-a",
+    ]);
 
     // 修复后 main 会给每条通知都带上 owner scope，所以「没切 workspace 时 Agent 关 tab」这条
     // 生产最常见路径也走带 workspaceKey 的分支。它必须落回活跃分支、同步更新当前 React state，
@@ -548,7 +589,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
   });
 
   it("关闭通知带的 workspace scope 不匹配时不误删其他 workspace 的同名 tab", () => {
-    const { emitClose, emitReady, rerender, result, unmount } = renderCrossWorkspaceHook();
+    const { emitClose, emitReady, rerender, result, unmount } =
+      renderCrossWorkspaceHook();
     act(() => emitReady(readyPayload("tab-a")));
     act(() => rerender({ workspaceIdentity: OTHER_WORKSPACE_KEY }));
 
@@ -562,7 +604,9 @@ describe("useAppPanels BrowserView lifecycle", () => {
     );
 
     act(() => rerender({ workspaceIdentity: WORKSPACE_KEY }));
-    expect(result.current.sidePaneState?.tabs.map((tab) => tab.id)).toEqual(["browser-use:tab-a"]);
+    expect(result.current.sidePaneState?.tabs.map((tab) => tab.id)).toEqual([
+      "browser-use:tab-a",
+    ]);
     unmount();
   });
 
@@ -571,7 +615,8 @@ describe("useAppPanels BrowserView lifecycle", () => {
     // 兜底冻结了 main 侧 owner.remoteSessionId，close 侧却只取 tab.remoteSessionId。human tab 从不写该
     // 字段，且 stamp 会跳过已带 ownerTaskId 的 tab，于是远程下 close payload 缺 remoteSessionId，
     // main 判 scope 失配抛错，renderer 拿不到授权就永不移除 UI 壳 —— tab 永远关不掉。
-    const { emitOpenBrowserUrl, platform, result, unmount } = renderBrowserViewLifecycleHook();
+    const { emitOpenBrowserUrl, platform, result, unmount } =
+      renderBrowserViewLifecycleHook();
 
     act(() => {
       emitOpenBrowserUrl({
@@ -586,7 +631,9 @@ describe("useAppPanels BrowserView lifecycle", () => {
       });
     });
 
-    const humanTab = result.current.sidePaneState?.tabs.find((tab) => tab.type === "browser");
+    const humanTab = result.current.sidePaneState?.tabs.find(
+      (tab) => tab.type === "browser",
+    );
     expect(humanTab).toMatchObject({ remoteSessionId: "remote-a" });
 
     await act(async () => {
@@ -602,9 +649,11 @@ describe("useAppPanels BrowserView lifecycle", () => {
       sessionId: "sess-a",
     });
     // 授权拿到后 UI 壳必须真的移除（tab 清空后 sidePaneState 本身会归空）。
-    expect((result.current.sidePaneState?.tabs ?? []).filter((tab) => tab.type === "browser")).toEqual(
-      [],
-    );
+    expect(
+      (result.current.sidePaneState?.tabs ?? []).filter(
+        (tab) => tab.type === "browser",
+      ),
+    ).toEqual([]);
     unmount();
   });
 });
