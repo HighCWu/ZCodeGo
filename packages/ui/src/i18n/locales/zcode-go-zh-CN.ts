@@ -249,4 +249,27 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.kanban.orchestrate": "一键编排 {count} 项",
   "opc.kanban.orchestrateTitle":
     "无界面派发全部就绪且已分配的工作项（后台会话，完成后请在任务列表验收）",
+  // zcode-go：OPC 升级路由与项目复盘文案（⑦ 轮补漏）
+  "opc.escalate.title": "升级处理",
+  "opc.escalate.description":
+    "先转派团队内最合适的同事；团队内解决不了再升级给所有者。",
+  "opc.escalate.routeTitle": "转派团队成员",
+  "opc.escalate.noCandidates": "没有可转派的在职同事——请直接升级给所有者。",
+  "opc.escalate.peer": "同类目 · 完成 {completed} 项",
+  "opc.escalate.top": "完成 {completed} 项",
+  "opc.escalate.transferNote": "升级路由转派",
+  "opc.escalate.ownerNote": "升级给所有者（附说明）",
+  "opc.escalate.notePlaceholder": "说明阻塞原因与所需决策…",
+  "opc.escalate.toOwner": "升级给所有者",
+  "opc.evolution.projectRetro": "项目复盘",
+  "opc.projectRetro.title": "项目级复盘",
+  "opc.projectRetro.description":
+    "回顾近期全部工作项，按员工逐人提炼经验；归属不明的记到创始人。",
+  "opc.projectRetro.goalLabel": "复盘重点（可选）",
+  "opc.projectRetro.goalPlaceholder": "例如：本迭代交付节奏与质量回顾…",
+  "opc.projectRetro.generatePrompt": "生成复盘提示词",
+  "opc.projectRetro.outputLabel": "agent 输出（粘贴 opc-lessons 块）",
+  "opc.projectRetro.outputPlaceholder":
+    "粘贴 agent 输出的 opc-lessons 围栏 JSON…",
+  "opc.projectRetro.submit": "逐人落账",
 };

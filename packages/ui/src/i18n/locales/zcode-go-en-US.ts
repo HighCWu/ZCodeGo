@@ -260,4 +260,30 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.kanban.orchestrate": "Orchestrate {count}",
   "opc.kanban.orchestrateTitle":
     "Dispatch all ready & assigned items headlessly (background sessions; verify in the task list when done)",
+  // zcode-go: OPC escalation routing & project retro messages (⑦ gap fix)
+  "opc.escalate.title": "Escalation",
+  "opc.escalate.description":
+    "Route to the best-fit teammate first; escalate to the owner only if the team can't resolve it.",
+  "opc.escalate.routeTitle": "Route to a team member",
+  "opc.escalate.noCandidates":
+    "No active teammates to route to — escalate to the owner directly.",
+  "opc.escalate.peer": "same category · {completed} done",
+  "opc.escalate.top": "{completed} done",
+  "opc.escalate.transferNote": "escalation routing",
+  "opc.escalate.ownerNote": "Escalate to owner (with note)",
+  "opc.escalate.notePlaceholder":
+    "Describe the blocker and the decision needed…",
+  "opc.escalate.toOwner": "Escalate to owner",
+  "opc.evolution.projectRetro": "Project retro",
+  "opc.projectRetro.title": "Project retrospective",
+  "opc.projectRetro.description":
+    "Review recent work items and distill lessons per employee; unattributed lessons go to the founder.",
+  "opc.projectRetro.goalLabel": "Retro focus (optional)",
+  "opc.projectRetro.goalPlaceholder":
+    "e.g. delivery cadence & quality review for this iteration…",
+  "opc.projectRetro.generatePrompt": "Generate retro prompt",
+  "opc.projectRetro.outputLabel": "Agent output (paste opc-lessons block)",
+  "opc.projectRetro.outputPlaceholder":
+    "Paste the agent's opc-lessons fenced JSON…",
+  "opc.projectRetro.submit": "Record per employee",
 };
