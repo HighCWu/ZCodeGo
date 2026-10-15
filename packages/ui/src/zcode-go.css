@@ -20,3 +20,20 @@
   content: "Go";
 }
 
+/* zcode-go：OPC Office 桌位像素质感——执行中员工的微动画与硬边像素框 */
+@keyframes zcode-go-opc-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+.zcode-go-opc-desk-working {
+  animation: zcode-go-opc-bob 1.6s steps(2, end) infinite;
+  box-shadow:
+    3px 0 0 0 var(--border),
+    -3px 0 0 0 var(--border),
+    0 3px 0 0 var(--border);
+}

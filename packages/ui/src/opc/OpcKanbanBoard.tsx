@@ -42,6 +42,9 @@ export interface OpcKanbanBoardProps {
   onRework: (workItem: OpcWorkItem) => void;
   /** done 且有被依赖项 → 生成整合 prompt 注入 composer。 */
   onIntegrate: (workItem: OpcWorkItem) => void;
+  /** 入站队列（渠道中立 ingest）打开审批对话框。 */
+  onOpenInbox: () => void;
+  inboxCount: number;
 }
 
 export function OpcKanbanBoard({
@@ -55,6 +58,8 @@ export function OpcKanbanBoard({
   onResolveEscalation,
   onRework,
   onIntegrate,
+  onOpenInbox,
+  inboxCount,
 }: OpcKanbanBoardProps) {
   const { intl } = useZCodeIntl();
   const [escalationFilter, setEscalationFilter] = useState(false);
@@ -83,6 +88,15 @@ export function OpcKanbanBoard({
               {intl.formatMessage(
                 { id: "opc.kanban.escalationFilter" },
                 { count: escalationCount },
+              )}
+            </Button>
+          ) : null}
+          {inboxCount > 0 ? (
+            <Button size="xs" variant="outline" onClick={onOpenInbox}>
+              📥{" "}
+              {intl.formatMessage(
+                { id: "opc.kanban.inboxFilter" },
+                { count: inboxCount },
               )}
             </Button>
           ) : null}

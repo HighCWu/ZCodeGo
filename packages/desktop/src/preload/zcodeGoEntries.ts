@@ -119,6 +119,18 @@ export function installZcodeGoPreloadEntries({ ipcRenderer }: { ipcRenderer: Ele
     payload: { workspacePath: string; sourcePath: string },
   ): Promise<{ ok: boolean; imported: number; state: unknown; error?: string }> =>
     ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcImportSkillFolder, payload),
+  /** zcode-go：OPC 模式——消费入站队列条目（转工作项或忽略；文件名须纯 basename）。 */
+  zcodeGoOpcConsumeInbox: (payload: {
+    workspacePath: string;
+    fileName: string;
+    convert?: {
+      title: string;
+      detail?: string;
+      priority?: string;
+      assigneeId?: string | null;
+    } | null;
+  }): Promise<{ ok: boolean; state: unknown; inbox: unknown[]; error?: string }> =>
+    ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcConsumeInbox, payload),
   /** zcode-go：OPC 模式——公司状态变化事件；返回退订函数。 */
   onZcodeGoOpcStateChanged: (
     handler: (payload: { workspacePath: string }) => void,

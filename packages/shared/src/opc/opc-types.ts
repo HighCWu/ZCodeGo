@@ -374,3 +374,17 @@ export interface OpcDelegationPromptInput {
 export const OPC_LESSONS_FENCE = "opc-lessons";
 /** agent 技能升级输出围栏名：```opc-skill ...（完整新 SKILL.md 正文） */
 export const OPC_SKILL_FENCE = "opc-skill";
+
+export const OPC_INBOX_DIR = "inbox";
+
+/** 入站队列条目（渠道中立 ingest 契约；spec「入站队列」节）。 */
+export interface OpcInboxItem {
+  /** inbox 文件名（纯 basename，消费凭据）。 */
+  fileName: string;
+  title: string;
+  detail?: string;
+  priority?: "low" | "medium" | "high" | "urgent";
+  /** 来源标识（feishu/telegram/plugin/script/...）。 */
+  source?: string;
+  receivedAt: string;
+}

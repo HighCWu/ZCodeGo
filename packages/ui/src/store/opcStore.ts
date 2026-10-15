@@ -11,6 +11,7 @@ import {
   findOpcBuiltinRoleDraft,
   type OpcCompanyState,
   type OpcEvolutionEvent,
+  type OpcInboxItem,
   type OpcMutation,
 } from "@zcode/shared";
 import { logger } from "@/logger.js";
@@ -27,13 +28,27 @@ interface OpcApplyOutcome {
 }
 
 interface ZcodeGoOpcBridge {
-  zcodeGoOpcGetState?: (payload: {
+  zcodeGoOpcGetState?: (payload: { workspacePath: string }) => Promise<{
+    ok: boolean;
+    state: OpcCompanyState | null;
+    inbox?: OpcInboxItem[];
+    roleTemplateBodies?: Record<string, string>;
+    skillBodies?: Record<string, string>;
+    error?: string;
+  }>;
+  zcodeGoOpcConsumeInbox?: (payload: {
     workspacePath: string;
+    fileName: string;
+    convert?: {
+      title: string;
+      detail?: string;
+      priority?: "low" | "medium" | "high" | "urgent";
+      assigneeId?: string | null;
+    } | null;
   }) => Promise<{
     ok: boolean;
     state: OpcCompanyState | null;
-    roleTemplateBodies?: Record<string, string>;
-    skillBodies?: Record<string, string>;
+    inbox?: OpcInboxItem[];
     error?: string;
   }>;
   zcodeGoOpcApply?: (payload: {
@@ -100,6 +115,7 @@ export interface OpcStoreState {
   workspacePath: string | null;
   state: OpcCompanyState | null;
   bodies: OpcBodies;
+  inbox: OpcInboxItem[];
   loading: boolean;
   error: string | null;
   /** 最近一次 apply 触发的晋升（UI toast 用，消费后 clearRecentPromotions）。 */
@@ -118,6 +134,16 @@ export interface OpcStoreState {
   importSkillFolder: (
     sourcePath: string,
   ) => Promise<{ ok: boolean; imported: number }>;
+  /** 消费入站队列条目（转工作项或忽略）；main 返回新 state + 剩余 inbox。 */
+  consumeInbox: (
+    fileName: string,
+    convert: {
+      title: string;
+      detail?: string;
+      priority?: "low" | "medium" | "high" | "urgent";
+      assigneeId?: string | null;
+    } | null,
+  ) => Promise<boolean>;
   clearRecentPromotions: () => void;
   /** 供组件按员工模板 id 解角色正文（内置回退逻辑集中在这里）。 */
   resolveRoleBody: (templateId: string) => string | null;
@@ -132,6 +158,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
   workspacePath: null,
   state: null,
   bodies: { roleTemplateBodies: {}, skillBodies: {} },
+  inbox: [],
   loading: false,
   error: null,
   recentPromotedSkillIds: [],
@@ -165,6 +192,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           loading: false,
           error: null,
           state: result.state,
+          inbox: result.inbox ?? [],
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},
@@ -207,6 +235,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
       if (result.ok && result.state) {
         set({
           state: result.state,
+          inbox: result.inbox ?? [],
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},
@@ -216,6 +245,36 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
       }
     } catch (error) {
       logger.warn("[zcode-go][opc] 刷新公司状态失败", error);
+    }
+  },
+
+  /** 消费入站条目（转工作项或忽略）；main 返回新 state + 剩余 inbox。 */
+  consumeInbox: async (
+    fileName: string,
+    convert: {
+      title: string;
+      detail?: string;
+      priority?: "low" | "medium" | "high" | "urgent";
+      assigneeId?: string | null;
+    } | null,
+  ): Promise<boolean> => {
+    const bridge = getOpcBridge();
+    const { workspacePath } = get();
+    if (!bridge?.zcodeGoOpcConsumeInbox || !workspacePath) return false;
+    try {
+      const result = await bridge.zcodeGoOpcConsumeInbox({
+        workspacePath,
+        fileName,
+        convert,
+      });
+      if (result.ok && result.state) {
+        // 消费只建工作项（不新增技能/模板），bodies 无需刷新
+        set({ state: result.state, inbox: result.inbox ?? [] });
+      }
+      return result.ok;
+    } catch (error) {
+      logger.warn("[zcode-go][opc] 消费入站条目失败", error);
+      return false;
     }
   },
 

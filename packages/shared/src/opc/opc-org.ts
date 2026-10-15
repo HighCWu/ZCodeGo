@@ -353,3 +353,41 @@ export const OPC_ORG_PRESETS: OpcOrgPreset[] = [
     draft: { slots: [], hires: [] },
   },
 ];
+
+import type { OpcInboxItem } from "./opc-types.js";
+
+/** inbox 文件内容 → 条目（宽松解析：title 必填，其余缺省；坏文件返回 null）。 */
+export function parseOpcInboxFile(
+  fileName: string,
+  text: string,
+): OpcInboxItem | null {
+  if (fileName.includes("/") || fileName.includes("\\")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const record = parsed as Record<string, unknown>;
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  if (!title) return null;
+  const priority =
+    record.priority === "low" ||
+    record.priority === "medium" ||
+    record.priority === "high" ||
+    record.priority === "urgent"
+      ? record.priority
+      : "medium";
+  return {
+    fileName,
+    title,
+    detail: typeof record.detail === "string" ? record.detail : undefined,
+    priority,
+    source: typeof record.source === "string" ? record.source : undefined,
+    receivedAt:
+      typeof record.receivedAt === "string"
+        ? record.receivedAt
+        : new Date().toISOString(),
+  };
+}

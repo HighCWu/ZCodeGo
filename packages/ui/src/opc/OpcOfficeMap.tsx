@@ -103,6 +103,7 @@ export function OpcOfficeMap({
                 className={cn(
                   "flex flex-col items-center gap-1 rounded-xl border-2 bg-card p-3 text-center transition-shadow hover:shadow-md",
                   WORKLOAD_RING[desk.workload],
+                  desk.workload === "working" && "zcode-go-opc-desk-working",
                   selectedId === desk.employee.id && "ring-2 ring-primary/60",
                 )}
               >

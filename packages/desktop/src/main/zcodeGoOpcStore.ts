@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 公司状态持久化 + IPC 收口：inbox 是该收口的自然延伸（同插件宿主单文件惯例），拆散会破坏事实源内聚。 */
 /**
  * zcode-go OPC 公司状态存储（desktop main 进程，唯一事实源）。
  *
@@ -14,16 +15,19 @@ import {
   existsSync,
   mkdir,
   readFile,
+  readdir,
   rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   applyOpcMutation,
   createEmptyOpcCompanyState,
   OPC_BUILTIN_SKILL_DRAFTS,
   OPC_COMPANY_FILE,
   OPC_DIR_NAME,
+  OPC_INBOX_DIR,
   OPC_EVOLUTION_LOG_FILE,
   OPC_MEMORY_DIR,
   OPC_ROLES_TEMPLATES_SUBDIR,
@@ -35,6 +39,7 @@ import {
   renderOpcSkillFile,
   type OpcCompanyState,
   type OpcEvolutionEvent,
+  type OpcInboxItem,
   type OpcMutation,
 } from "@zcode/shared";
 // zcode-go：OPC 文件助手与模板包同步（本文件超行后拆出）
@@ -193,6 +198,94 @@ async function persistDerivedFiles(
   }
 }
 
+// ---------------------------------------------------------------------------
+// 入站队列（渠道中立 ingest；spec「入站队列」节）
+// ---------------------------------------------------------------------------
+
+async function scanInbox(workspaceRoot: string): Promise<OpcInboxItem[]> {
+  const inboxDir = join(workspaceRoot, OPC_INBOX_DIR);
+  let entries;
+  try {
+    entries = await readdir(inboxDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const items: OpcInboxItem[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    try {
+      const item = parseOpcInboxFile(
+        entry.name,
+        await readFile(join(inboxDir, entry.name), "utf8"),
+      );
+      if (item) items.push(item);
+    } catch {
+      /* 单文件损坏不中断扫描 */
+    }
+  }
+  return items.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+}
+
+/** 消费入站条目：纯 basename 校验（拒绝路径穿越）；convert 时走正规建项路径。 */
+async function consumeInbox(
+  workspacePath: string,
+  fileName: string,
+  convert: {
+    title: string;
+    detail?: string;
+    priority?: "low" | "medium" | "high" | "urgent";
+    assigneeId?: string | null;
+  } | null,
+): Promise<{
+  ok: boolean;
+  state: OpcCompanyState | null;
+  inbox: OpcInboxItem[];
+  error?: string;
+}> {
+  if (!fileName || fileName !== basename(fileName) || !fileName.endsWith(".json")) {
+    return { ok: false, state: null, inbox: [], error: "invalid inbox fileName" };
+  }
+  const inboxFile = join(opcRoot(workspacePath), OPC_INBOX_DIR, fileName);
+  return enqueue(workspacePath, async () => {
+    try {
+      await rm(inboxFile, { force: true });
+    } catch {
+      /* 文件不存在即已被消费 */
+    }
+    if (convert) {
+      const result = await withState(workspacePath, async (state) => {
+        const applied = applyOpcMutation(
+          state,
+          {
+            kind: "workitem.create",
+            title: convert.title,
+            detail: convert.detail,
+            priority: convert.priority,
+            assigneeId: convert.assigneeId ?? null,
+          },
+          Date.now(),
+        );
+        return applied.state;
+      });
+      const inbox = await scanInbox(opcRoot(workspacePath));
+      if (result.ok && result.state) {
+        broadcastStateChanged(opcLogger ?? silentOpcLogger, workspacePath);
+      }
+      return {
+        ok: result.ok,
+        state: result.state,
+        inbox,
+        ...(result.error ? { error: result.error } : {}),
+      };
+    }
+    return {
+      ok: true,
+      state: await readCompanyState(opcRoot(workspacePath)),
+      inbox: await scanInbox(opcRoot(workspacePath)),
+    };
+  });
+}
+
 async function withState(
   workspacePath: string,
   mutate: (
@@ -263,6 +356,7 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           return {
             ok: true as const,
             state,
+            inbox: await scanInbox(workspaceRoot),
             ...(await readBodies(workspaceRoot, state)),
           };
         } catch (error) {
@@ -419,6 +513,23 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
         ...(result.error ? { error: result.error } : {}),
       };
     },
+  );
+
+  ipcMain.handle(
+    PlatformChannels.ZcodeGoOpcConsumeInbox,
+    async (
+      _event,
+      payload: {
+        workspacePath: string;
+        fileName: string;
+        convert?: {
+          title: string;
+          detail?: string;
+          priority?: "low" | "medium" | "high" | "urgent";
+          assigneeId?: string | null;
+        } | null;
+      },
+    ) => consumeInbox(payload.workspacePath, payload.fileName, payload.convert ?? null),
   );
 
   logger.info("[zcode-go] OPC 公司状态存储就绪（IPC 已注册）");

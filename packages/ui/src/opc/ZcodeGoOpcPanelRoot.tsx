@@ -77,6 +77,7 @@ export function ZcodeGoOpcPanelRoot({
   const resolveSkillBody = useOpcStore((s) => s.resolveSkillBody);
   const workspacePath = useOpcStore((s) => s.workspacePath);
   const bodies = useOpcStore((s) => s.bodies);
+  const inbox = useOpcStore((s) => s.inbox);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("kanban");
   const [workItemDialog, setWorkItemDialog] =
@@ -89,6 +90,7 @@ export function ZcodeGoOpcPanelRoot({
   const [reworkDialog, setReworkDialog] = useState<OpcWorkItem | null>(null);
   const [orgGenerateOpen, setOrgGenerateOpen] = useState(false);
   const [orgPresetOpen, setOrgPresetOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [upgradeDialog, setUpgradeDialog] =
     useState<OpcUpgradeDialogState | null>(null);
 
@@ -381,6 +383,8 @@ export function ZcodeGoOpcPanelRoot({
                 onResolveEscalation={handleResolveEscalation}
                 onRework={handleRework}
                 onIntegrate={handleIntegrate}
+                onOpenInbox={() => setInboxOpen(true)}
+                inboxCount={inbox.length}
               />
             </TabsContent>
             <TabsContent value="org" className="min-h-0 flex-1">

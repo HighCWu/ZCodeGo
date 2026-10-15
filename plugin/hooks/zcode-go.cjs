@@ -216,13 +216,45 @@ function discoverOfficial() {
   return info;
 }
 function runOpcCommand(argsText, cwd) {
-  const sub = argsText.trim().toLowerCase();
+  const raw = argsText.trim();
+  const sub = raw.toLowerCase();
+  if (sub.startsWith("add ")) {
+    const title = argsText.trim().slice(4).trim();
+    if (!title) {
+      emit({ continue: false, stopReason: "\u{1F4E5} \u7528\u6CD5\uFF1A/opc add <\u6807\u9898>" });
+      return;
+    }
+    try {
+      const inboxDir = (0, import_node_path.join)(cwd, ".opc", "inbox");
+      (0, import_node_fs.mkdirSync)(inboxDir, { recursive: true });
+      const fileName = `${Date.now()}-plugin.json`;
+      (0, import_node_fs.writeFileSync)(
+        (0, import_node_path.join)(inboxDir, fileName),
+        JSON.stringify(
+          { title, source: "plugin", receivedAt: (/* @__PURE__ */ new Date()).toISOString() },
+          null,
+          1
+        ),
+        "utf8"
+      );
+      emit({
+        continue: false,
+        stopReason: `\u{1F4E5} \u5DF2\u5165\u7AD9\uFF1A${title}
+\uFF08ZCode Go \u684C\u9762 OPC \u9762\u677F \u2192 \u770B\u677F \u2192 \u5F85\u5904\u7406\u5165\u7AD9\uFF0C\u4E00\u952E\u8F6C\u4E3A\u5DE5\u4F5C\u9879\uFF09`
+      });
+    } catch (error) {
+      log(`\u5165\u7AD9\u6295\u9012\u5931\u8D25: ${String(error)}`);
+      emit({ continue: false, stopReason: "\u274C \u5165\u7AD9\u6295\u9012\u5931\u8D25\uFF0C\u8BE6\u89C1 ~/.zcode-go/plugin.log" });
+    }
+    return;
+  }
   const companyPath = (0, import_node_path.join)(cwd, ".opc", "company.json");
   if (sub === "help") {
     emit({
       continue: false,
       stopReason: `\u{1F4CA} /opc \u2014 OPC \u516C\u53F8\u72B6\u6001\u6458\u8981\uFF08\u53EA\u8BFB\uFF09
-\u7528\u6CD5\uFF1A/opc [help]
+\u7528\u6CD5\uFF1A/opc [help | add <\u6807\u9898>]
+  add\uFF1A\u6295\u9012\u4E00\u6761\u5165\u7AD9\uFF08\u8F6C\u4E3A\u770B\u677F\u5F85\u5904\u7406\uFF0C\u4E0D\u6D88\u8017\u6A21\u578B\uFF09
 \u6570\u636E\u6E90\uFF1A${companyPath}\uFF08\u5DE5\u4F5C\u533A\u9996\u6B21\u6253\u5F00 OPC \u9762\u677F\u65F6\u751F\u6210\uFF09`
     });
     return;
@@ -296,7 +328,7 @@ function runHook() {
     const opcRaw = /^\/opc\b/.test(low);
     const opcExpanded = low.includes("run custom command /opc");
     if (opcRaw || opcExpanded) {
-      const opcArgs = opcExpanded ? prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "" : prompt.split(/\s+/)[1] ?? "";
+      const opcArgs = opcExpanded ? prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "" : prompt.match(/^\/opc\s+([\s\S]+)$/)?.[1] ?? "";
       runOpcCommand(opcArgs, String(event.cwd ?? process.cwd()));
       return;
     }

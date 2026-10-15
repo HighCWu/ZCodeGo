@@ -3,35 +3,46 @@
  */
 export const zcodeGoMessagesZhCN: Record<string, string> = {
   "zcodeGoMobileBridge.signalingOrigin.title": "P2P 信令服务器",
-  "zcodeGoMobileBridge.signalingOrigin.description": "默认使用官方服务；自部署可改为你的 Worker 地址。",
+  "zcodeGoMobileBridge.signalingOrigin.description":
+    "默认使用官方服务；自部署可改为你的 Worker 地址。",
   "zcodeGoMobileBridge.signalingOrigin.apply": "确认变更",
   "zcodeGoMobileBridge.signalingOrigin.applied": "已保存，二维码已刷新",
   "zcodeGoMobileBridge.signalingOrigin.resetHint": "清空后确认可恢复默认服务",
   "zcodeGoMobileBridge.signalingOrigin.saveFailed": "保存失败，请重试",
-  "zcodeGoMobileBridge.signalingOrigin.invalidUrl": "地址需为有效的 https:// URL（本地调试可用 http://localhost）",
-  "zcodeGoMobileBridge.signalingOrigin.envOverride": "环境变量 ZCODE_GO_SIGNALING_ORIGIN 覆盖中，配置已保存但未生效",
+  "zcodeGoMobileBridge.signalingOrigin.invalidUrl":
+    "地址需为有效的 https:// URL（本地调试可用 http://localhost）",
+  "zcodeGoMobileBridge.signalingOrigin.envOverride":
+    "环境变量 ZCODE_GO_SIGNALING_ORIGIN 覆盖中，配置已保存但未生效",
   "zcodeGoMobileBridge.section": "P2P 直连",
-  "zcodeGoMobileBridge.hint": "扫码或在手机上打开链接，即可远程控制当前桌面。连接为手机与桌面直连（WebRTC P2P）。",
+  "zcodeGoMobileBridge.hint":
+    "扫码或在手机上打开链接，即可远程控制当前桌面。连接为手机与桌面直连（WebRTC P2P）。",
   "zcodeGoMobileBridge.copyLink.copied": "已复制",
   "zcodeGoMobileBridge.refresh": "重新生成配对码",
-  "zcodeGo.fork.inProgress": "正在分叉 {count} 条历史（官方分叉完整复制需较长时间；模型上下文从压缩摘要处继续），完成后自动切换…",
+  "zcodeGo.fork.inProgress":
+    "正在分叉 {count} 条历史（官方分叉完整复制需较长时间；模型上下文从压缩摘要处继续），完成后自动切换…",
   "taskList.openInNewWindow": "在新窗口打开",
   "taskList.openInNewWindowFailed": "在新窗口打开会话失败：{error}",
   "settings.zcodeGo.title": "ZCode Go",
   "settings.zcodeGo.p2pBridge": "P2P 直连远程桥",
-  "settings.zcodeGo.p2pBridgeDescription": "远程弹层中启用 ZCode Go 的 WebRTC 直连通道（手机与桌面同网时零中继、不经第三方服务器）。关闭后弹层仅保留官方 relay 入口。",
+  "settings.zcodeGo.p2pBridgeDescription":
+    "远程弹层中启用 ZCode Go 的 WebRTC 直连通道（手机与桌面同网时零中继、不经第三方服务器）。关闭后弹层仅保留官方 relay 入口。",
   "settings.zcodeGo.hoverForkDualSession": "hover fork 双会话模型",
-  "settings.zcodeGo.hoverForkDualSessionDescription": "手动 fork 时产出可见任务行 + 精简活跃端点 + hover 转接 + 边界前历史后台补齐。关闭后手动 fork 走兼容轮换模型。",
+  "settings.zcodeGo.hoverForkDualSessionDescription":
+    "手动 fork 时产出可见任务行 + 精简活跃端点 + hover 转接 + 边界前历史后台补齐。关闭后手动 fork 走兼容轮换模型。",
   "settings.zcodeGo.mobileDrawer": "移动端抽屉视口",
-  "settings.zcodeGo.mobileDrawerDescription": "移动浏览器视口下侧栏以左滑抽屉呈现。关闭后移动视口按桌面布局渲染。",
+  "settings.zcodeGo.mobileDrawerDescription":
+    "移动浏览器视口下侧栏以左滑抽屉呈现。关闭后移动视口按桌面布局渲染。",
   "settings.zcodeGo.uiAutoRecovery": "UI 崩溃自动恢复",
-  "settings.zcodeGo.uiAutoRecoveryDescription": "界面子树崩溃后自动重渲染或整页重载（每区域 5 分钟最多 3 次）。关闭后仅提供手动恢复按钮。",
+  "settings.zcodeGo.uiAutoRecoveryDescription":
+    "界面子树崩溃后自动重渲染或整页重载（每区域 5 分钟最多 3 次）。关闭后仅提供手动恢复按钮。",
   "settings.zcodeGo.takeoverCloseOfficial": "触发后关闭官版 ZCode",
-  "settings.zcodeGo.takeoverCloseOfficialDescription": "在官方 ZCode 对话中触发 /zcode-go 拉起本应用时，自动退出官方进程（接管独占）。关闭后两者共存运行。",
+  "settings.zcodeGo.takeoverCloseOfficialDescription":
+    "在官方 ZCode 对话中触发 /zcode-go 拉起本应用时，自动退出官方进程（接管独占）。关闭后两者共存运行。",
   // zcode-go：OPC 模式（AI 原生公司）文案
   "settings.interfaceMode.opc": "OPC 公司模式",
   "occupationOnboarding.opc": "OPC 公司模式",
-  "occupationOnboarding.opcDescription": "把 AI 当作一家公司来运营：招聘角色员工、看板派活、经验自动沉淀升级（自进化）。",
+  "occupationOnboarding.opcDescription":
+    "把 AI 当作一家公司来运营：招聘角色员工、看板派活、经验自动沉淀升级（自进化）。",
   "opc.status.backlog": "待办",
   "opc.status.ready": "就绪",
   "opc.status.in_progress": "进行中",
@@ -57,7 +68,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.category.operations": "运营",
   "opc.category.education": "教育",
   "opc.category.executive": "高管",
-  "opc.panel.subtitle": "AI 原生公司操作台：看板派活、人才市场招聘、经验自动晋升为技能（自进化）。",
+  "opc.panel.subtitle":
+    "AI 原生公司操作台：看板派活、人才市场招聘、经验自动晋升为技能（自进化）。",
   "opc.tab.kanban": "看板",
   "opc.tab.org": "组织",
   "opc.tab.market": "人才市场",
@@ -69,10 +81,12 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.stat.done": "已完成",
   "opc.stat.skills": "技能",
   "opc.stat.promoted": "已晋升",
-  "opc.kanban.hint": "工作项沿状态机推进；委派会把角色说明书与技能合成为任务提示词。",
+  "opc.kanban.hint":
+    "工作项沿状态机推进；委派会把角色说明书与技能合成为任务提示词。",
   "opc.kanban.create": "新建工作项",
   "opc.kanban.delegate": "委派",
-  "opc.org.hint": "员工来自人才市场模板或自定义招聘；复盘会把经验沉淀进个人档案。",
+  "opc.org.hint":
+    "员工来自人才市场模板或自定义招聘；复盘会把经验沉淀进个人档案。",
   "opc.org.hire": "自定义招聘",
   "opc.org.roleSlots": "岗位：",
   "opc.org.newSlotPlaceholder": "新岗位名称（如：研发负责人）",
@@ -83,11 +97,13 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.org.resume": "恢复",
   "opc.org.depart": "离职",
   "opc.org.retro": "复盘",
-  "opc.market.hint": "内置 24 个角色模板（与 OpenOPC talent 格式兼容），也可从目录批量导入。",
+  "opc.market.hint":
+    "内置 24 个角色模板（与 OpenOPC talent 格式兼容），也可从目录批量导入。",
   "opc.market.importPlaceholder": "模板目录路径（OpenOPC talent 格式 .md）",
   "opc.market.import": "导入目录",
   "opc.market.hire": "招聘",
-  "opc.skills.hint": "技能存于工作区 .opc/skills/，委派时自动注入；重复经验会自动晋升为 playbook。",
+  "opc.skills.hint":
+    "技能存于工作区 .opc/skills/，委派时自动注入；重复经验会自动晋升为 playbook。",
   "opc.skills.importPlaceholder": "技能目录路径（递归找 SKILL.md）",
   "opc.skills.import": "导入目录",
   "opc.skills.upgrade": "升级",
@@ -120,17 +136,20 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.hire.vibe": "一句话人设",
   "opc.hire.description": "职责描述",
   "opc.retro.title": "复盘沉淀",
-  "opc.retro.description": "把会话中的经验蒸馏为结构化教训；同一经验两次复盘后会自动晋升为共享 playbook 技能。",
+  "opc.retro.description":
+    "把会话中的经验蒸馏为结构化教训；同一经验两次复盘后会自动晋升为共享 playbook 技能。",
   "opc.retro.employee": "员工",
   "opc.retro.workItem": "关联工作项",
   "opc.retro.noWorkItem": "不关联",
   "opc.retro.outputLabel": "复盘输出（粘贴 agent 输出或手写）",
-  "opc.retro.outputPlaceholder": "可先点「生成复盘提示词」发给 agent，再把其输出的 opc-lessons 块粘贴到这里…",
+  "opc.retro.outputPlaceholder":
+    "可先点「生成复盘提示词」发给 agent，再把其输出的 opc-lessons 块粘贴到这里…",
   "opc.retro.generatePrompt": "生成复盘提示词",
   "opc.retro.parsedCount": "已解析 {count} 条经验",
   "opc.retro.submit": "沉淀经验",
   "opc.upgrade.title": "技能自主升级",
-  "opc.upgrade.description": "把当前技能正文交给 agent 迭代增强，回填新正文后版本 +1 并记录变更。",
+  "opc.upgrade.description":
+    "把当前技能正文交给 agent 迭代增强，回填新正文后版本 +1 并记录变更。",
   "opc.upgrade.goal": "升级目标（可选）",
   "opc.upgrade.goalPlaceholder": "例如：补充移动端适配经验",
   "opc.upgrade.generatePrompt": "生成升级提示词",
@@ -139,15 +158,18 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.upgrade.submit": "保存新版本",
   "opc.common.cancel": "取消",
   "opc.common.save": "保存",
-  "opc.home.ipcUnavailable": "OPC 公司状态通道不可用（需要桌面端 zcode-go 运行时）。",
+  "opc.home.ipcUnavailable":
+    "OPC 公司状态通道不可用（需要桌面端 zcode-go 运行时）。",
   "opc.home.loading": "正在打开公司…",
   "opc.home.unavailable": "公司状态暂不可用。",
-  "opc.home.summary": "{employees} 名员工 · {workItems} 个工作项 · {skills} 项技能",
+  "opc.home.summary":
+    "{employees} 名员工 · {workItems} 个工作项 · {skills} 项技能",
   "opc.home.openPanel": "打开公司面板",
   "opc.home.newWorkItem": "新建工作项",
   "opc.home.hire": "招聘员工",
   "opc.home.kanbanTitle": "看板概览",
-  "opc.home.emptyCompany": "公司刚成立：去人才市场招几位员工，或直接新建第一个工作项。",
+  "opc.home.emptyCompany":
+    "公司刚成立：去人才市场招几位员工，或直接新建第一个工作项。",
   // zcode-go：OPC Self-Run 管理动作文案
   "opc.kanban.locked": "依赖未就绪 ×{count}",
   "opc.kanban.escalate": "升级给所有者",
@@ -158,29 +180,37 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.kanban.rework": "退回返工",
   "opc.kanban.integrate": "整合产出",
   "opc.rework.title": "退回返工",
-  "opc.rework.description": "工作项退回执行态；返工意见将在下次委派时注入，必须逐条解决。",
+  "opc.rework.description":
+    "工作项退回执行态；返工意见将在下次委派时注入，必须逐条解决。",
   "opc.rework.existing": "已有返工意见",
   "opc.rework.notePlaceholder": "写清验收未通过的原因与期望的修改方向…",
   "opc.rework.submit": "退回返工",
   "opc.workitem.deps": "依赖项",
-  "opc.workitem.depsHint": "依赖项全部完成后本项才可进入执行/委派；完成后自动从待办升入就绪。",
+  "opc.workitem.depsHint":
+    "依赖项全部完成后本项才可进入执行/委派；完成后自动从待办升入就绪。",
   // zcode-go：OPC 组织智能文案
   "opc.org.generate": "按目标生成",
   "opc.org.presets": "架构预设",
   "opc.org.generateTitle": "按目标生成架构",
-  "opc.org.generateDescription": "把目标交给 agent 设计组织；将其输出的 opc-org 围栏块粘贴回来预览并一键应用。",
+  "opc.org.generateDescription":
+    "把目标交给 agent 设计组织；将其输出的 opc-org 围栏块粘贴回来预览并一键应用。",
   "opc.org.goalLabel": "公司目标",
-  "opc.org.goalPlaceholder": "例如：做一款面向独立开发者的自动化工具，三个月内商业化…",
+  "opc.org.goalPlaceholder":
+    "例如：做一款面向独立开发者的自动化工具，三个月内商业化…",
   "opc.org.generatePrompt": "生成组织提示词",
   "opc.org.outputLabel": "agent 输出（粘贴 opc-org 块）",
   "opc.org.outputPlaceholder": "粘贴 agent 输出的 opc-org 围栏 JSON…",
   "opc.org.parseFailed": "未能解析 opc-org 围栏块，请检查输出格式",
-  "opc.org.parsed": "将新建 {slots} 个岗位、招聘 {hires} 人、复用 {reused} 人、跳过 {skipped} 人",
+  "opc.org.parsed":
+    "将新建 {slots} 个岗位、招聘 {hires} 人、复用 {reused} 人、跳过 {skipped} 人",
   "opc.org.apply": "应用架构",
   "opc.org.presetTitle": "架构预设",
-  "opc.org.presetDescription": "一键应用内置组织架构；已存在的岗位/同名在职员工自动去重。",
-  "opc.org.presetSummary": "将新建 {slots} 个岗位、招聘 {hires} 人、复用 {reused} 人、跳过 {skipped} 人",
-  "opc.hire.reuseHint": "检测到「{name}」（{status}）与本模板匹配——复用可继承其全部经验档案与统计。",
+  "opc.org.presetDescription":
+    "一键应用内置组织架构；已存在的岗位/同名在职员工自动去重。",
+  "opc.org.presetSummary":
+    "将新建 {slots} 个岗位、招聘 {hires} 人、复用 {reused} 人、跳过 {skipped} 人",
+  "opc.hire.reuseHint":
+    "检测到「{name}」（{status}）与本模板匹配——复用可继承其全部经验档案与统计。",
   "opc.hire.reuse": "复用「{name}」上岗",
   "opc.employee.statusPaused": "暂停中",
   "opc.employee.statusDeparted": "已离职",
@@ -190,7 +220,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.skills.export": "导出",
   // zcode-go：OPC 办公室地图与权限文案
   "opc.tab.office": "办公室",
-  "opc.office.hint": "办公室地图：状态环反映工作负载——执行中（蓝）/ 待验收（琥珀）/ 升级中（红）/ 空闲；点选桌位查看详情。",
+  "opc.office.hint":
+    "办公室地图：状态环反映工作负载——执行中（蓝）/ 待验收（琥珀）/ 升级中（红）/ 空闲；点选桌位查看详情。",
   "opc.office.idle": "空闲",
   "opc.office.working": "执行中 ×{count}",
   "opc.office.pendingReview": "待验收 ×{count}",
@@ -201,4 +232,14 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.permission.workspaceWrite": "工作区写",
   "opc.permission.fullAccess": "完全访问",
   "opc.hire.permission": "权限级别",
+  // zcode-go：OPC 入站队列文案
+  "opc.kanban.inboxFilter": "待处理入站 {count}",
+  "opc.inbox.title": "入站队列",
+  "opc.inbox.description":
+    "外部渠道投递的条目（.opc/inbox/）；转为工作项走正规建项路径，忽略则移除。默认优先级/负责人对本批生效。",
+  "opc.inbox.assignee": "负责人",
+  "opc.inbox.convert": "转为工作项",
+  "opc.inbox.dismiss": "忽略",
+  "opc.inbox.empty": "入站队列为空（外部投递契约见 spec「入站队列」节）",
+  "opc.common.close": "关闭",
 };

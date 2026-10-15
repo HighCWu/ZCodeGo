@@ -198,3 +198,31 @@ describe("buildOpcOrgGeneratePrompt", () => {
     expect(prompt).toContain("opc-org");
   });
 });
+
+import { parseOpcInboxFile } from "../src/opc/opc-org.js";
+
+describe("parseOpcInboxFile（入站契约）", () => {
+  it("标准条目解析 + 缺省填充", () => {
+    const item = parseOpcInboxFile(
+      "1-plugin.json",
+      JSON.stringify({
+        title: "修复登录页",
+        source: "plugin",
+        receivedAt: "2026-01-01T00:00:00Z",
+      }),
+    )!;
+    expect(item?.title).toBe("修复登录页");
+    expect(item?.priority).toBe("medium");
+    expect(item?.fileName).toBe("1-plugin.json");
+  });
+
+  it("坏文件/无标题/路径分隔符拒绝", () => {
+    expect(parseOpcInboxFile("a.json", "not json")).toBeNull();
+    expect(
+      parseOpcInboxFile("a.json", JSON.stringify({ detail: "无标题" })),
+    ).toBeNull();
+    expect(
+      parseOpcInboxFile("../evil.json", JSON.stringify({ title: "x" })),
+    ).toBeNull();
+  });
+});

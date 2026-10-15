@@ -21,6 +21,7 @@ import type { AppSettings, Locale } from "./protocol.js";
 import type {
   OpcCompanyState,
   OpcEvolutionEvent,
+  OpcInboxItem,
   OpcMutation,
 } from "./opc/opc-types.js";
 import type { StorageCleanRequest, StorageCleanResult, StorageUsageSnapshot } from "./storage.js";
@@ -521,6 +522,8 @@ export const PlatformChannels = {
   ZcodeGoOpcImportSkillFolder: "zcode:zcode-go-opc-import-skill-folder",
   /** Main → Renderer：OPC 公司状态变化（任意窗口写入后广播，接收方整树 reload） */
   ZcodeGoOpcStateChanged: "zcode:zcode-go-opc-state-changed",
+  /** Renderer → Main：消费入站队列条目（转工作项或忽略；文件名须纯 basename） */
+  ZcodeGoOpcConsumeInbox: "zcode:zcode-go-opc-consume-inbox",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -1419,6 +1422,8 @@ export interface PlatformChannelMap {
     response: {
       ok: boolean;
       state: OpcCompanyState | null;
+      /** 入站队列快照（.opc/inbox/*.json，非状态事实）。 */
+      inbox?: OpcInboxItem[];
       /** 导入角色模板正文（templates/roles/<id>.md），prompt 构造用。 */
       roleTemplateBodies?: Record<string, string>;
       /** 技能正文（skills/<id>/SKILL.md），prompt 构造用。 */
@@ -1461,6 +1466,25 @@ export interface PlatformChannelMap {
     /** 事件（main → renderer）：载荷为空，接收方按 workspacePath 主动 GetState。 */
     request: void;
     response: { workspacePath: string };
+  };
+  [PlatformChannels.ZcodeGoOpcConsumeInbox]: {
+    request: {
+      workspacePath: string;
+      fileName: string;
+      /** convert：以给定字段建工作项；null/缺省 = 忽略（仅删文件）。 */
+      convert?: {
+        title: string;
+        detail?: string;
+        priority?: import("./opc/opc-types.js").OpcInboxItem["priority"];
+        assigneeId?: string | null;
+      } | null;
+    };
+    response: {
+      ok: boolean;
+      state: OpcCompanyState | null;
+      inbox?: OpcInboxItem[];
+      error?: string;
+    };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

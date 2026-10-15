@@ -11,7 +11,17 @@
  *   status    —— 打印官方安装探测与接管状态（排障用）
  */
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -50,19 +60,34 @@ function deleteEmptyJunkSession(event: Record<string, unknown>): void {
     const sessionId = String(event.session_id ?? event.sessionId ?? "");
     if (!sessionId.startsWith("sess_")) return;
     const builtin = (
-      process as unknown as { getBuiltinModule?: (id: string) => { DatabaseSync: new (path: string, options?: { timeout?: number }) => any } | undefined }
+      process as unknown as {
+        getBuiltinModule?: (
+          id: string,
+        ) =>
+          | {
+              DatabaseSync: new (
+                path: string,
+                options?: { timeout?: number },
+              ) => any;
+            }
+          | undefined;
+      }
     ).getBuiltinModule?.("node:sqlite");
     if (!builtin) return;
     const db = new builtin.DatabaseSync(SESSION_DB, { timeout: 5_000 });
     try {
-      const row = db.prepare("select count(*) as n from message where session_id = ?").get(sessionId) as
-        | { n: number }
-        | undefined;
+      const row = db
+        .prepare("select count(*) as n from message where session_id = ?")
+        .get(sessionId) as { n: number } | undefined;
       if (!row || row.n !== 0) return;
       db.exec("begin immediate");
       try {
-        db.prepare("delete from input_history where session_id = ?").run(sessionId);
-        db.prepare("delete from session_input where session_id = ?").run(sessionId);
+        db.prepare("delete from input_history where session_id = ?").run(
+          sessionId,
+        );
+        db.prepare("delete from session_input where session_id = ?").run(
+          sessionId,
+        );
         db.prepare("delete from session where id = ?").run(sessionId);
         db.exec("commit");
         log(`已清理 /zcode-go 空会话: ${sessionId}`);
@@ -79,11 +104,15 @@ function deleteEmptyJunkSession(event: Record<string, unknown>): void {
     }
     // 任务索引库才是侧栏列表的真数据源（~/.zcode/v2/tasks-index.sqlite）——只删
     // 会话库会在索引里留 ghost（实测「New session」残留）。同步删任务行。
-    const tasksDb = new builtin.DatabaseSync(TASKS_INDEX_DB, { timeout: 5_000 });
+    const tasksDb = new builtin.DatabaseSync(TASKS_INDEX_DB, {
+      timeout: 5_000,
+    });
     try {
       tasksDb.exec("begin immediate");
       try {
-        tasksDb.prepare("delete from task_group_members where task_id = ?").run(sessionId);
+        tasksDb
+          .prepare("delete from task_group_members where task_id = ?")
+          .run(sessionId);
         tasksDb.prepare("delete from tasks where task_id = ?").run(sessionId);
         tasksDb.exec("commit");
       } catch (transactionError) {
@@ -98,7 +127,9 @@ function deleteEmptyJunkSession(event: Record<string, unknown>): void {
       tasksDb.close();
     }
   } catch (error) {
-    log(`清理空会话失败（放行）: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `清理空会话失败（放行）: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 const PLUGIN_LOG = join(STATE_DIR, "plugin.log");
@@ -106,7 +137,9 @@ const PLUGIN_LOG = join(STATE_DIR, "plugin.log");
 function log(message: string): void {
   try {
     mkdirSync(STATE_DIR, { recursive: true });
-    writeFileSync(PLUGIN_LOG, `${new Date().toISOString()} ${message}\n`, { flag: "a" });
+    writeFileSync(PLUGIN_LOG, `${new Date().toISOString()} ${message}\n`, {
+      flag: "a",
+    });
   } catch {
     /* 排障日志尽力而为 */
   }
@@ -115,7 +148,9 @@ function log(message: string): void {
 function readJson(path: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -151,23 +186,35 @@ function procInfoLinux(pid: number): ProcInfo | null {
 }
 
 function procInfoPs(pid: number): ProcInfo | null {
-  const ppid = spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" });
+  const ppid = spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], {
+    encoding: "utf8",
+  });
   if (ppid.status !== 0 || !ppid.stdout.trim()) return null;
-  const exeProbe = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], { encoding: "utf8" });
+  const exeProbe = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], {
+    encoding: "utf8",
+  });
   return { pid, ppid: Number(ppid.stdout.trim()), exe: exeProbe.stdout.trim() };
 }
 
 function procInfoWindows(pid: number): ProcInfo | null {
   const ppidOut = spawnSync(
     "powershell",
-    ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId`],
+    [
+      "-NoProfile",
+      "-Command",
+      `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId`,
+    ],
     { encoding: "utf8", timeout: 8000 },
   );
   const ppid = Number((ppidOut.stdout ?? "").trim());
   if (!Number.isFinite(ppid) || ppid <= 0) return null;
   const exeOut = spawnSync(
     "powershell",
-    ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ExecutablePath`],
+    [
+      "-NoProfile",
+      "-Command",
+      `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ExecutablePath`,
+    ],
     { encoding: "utf8", timeout: 8000 },
   );
   return { pid, ppid, exe: (exeOut.stdout ?? "").trim() };
@@ -201,8 +248,15 @@ function isOfficialExe(exe: string): boolean {
 
 function resourcesDirOf(binPath: string): string {
   const resolved = resolve(binPath);
-  if (process.platform === "darwin" && resolved.includes(".app/Contents/MacOS")) {
-    return join(resolved.slice(0, resolved.indexOf(".app") + 4), "Contents", "Resources");
+  if (
+    process.platform === "darwin" &&
+    resolved.includes(".app/Contents/MacOS")
+  ) {
+    return join(
+      resolved.slice(0, resolved.indexOf(".app") + 4),
+      "Contents",
+      "Resources",
+    );
   }
   return join(dirname(resolved), "resources");
 }
@@ -259,21 +313,59 @@ export function discoverOfficial(): Record<string, unknown> | null {
 // hook 进程绝不做任何写入，避免双写者。
 
 function runOpcCommand(argsText: string, cwd: string): void {
-  const sub = argsText.trim().toLowerCase();
+  const raw = argsText.trim();
+  const sub = raw.toLowerCase();
+  // /opc add <标题>：入站队列投递（渠道第一接入方——飞书/Telegram 等经 bot
+  // 会话转发即可落条目）。只写 inbox/*.json 新文件，绝不触碰 company.json。
+  if (sub.startsWith("add ")) {
+    const title = argsText.trim().slice(4).trim();
+    if (!title) {
+      emit({ continue: false, stopReason: "📥 用法：/opc add <标题>" });
+      return;
+    }
+    try {
+      const inboxDir = join(cwd, ".opc", "inbox");
+      mkdirSync(inboxDir, { recursive: true });
+      const fileName = `${Date.now()}-plugin.json`;
+      writeFileSync(
+        join(inboxDir, fileName),
+        JSON.stringify(
+          { title, source: "plugin", receivedAt: new Date().toISOString() },
+          null,
+          1,
+        ),
+        "utf8",
+      );
+      emit({
+        continue: false,
+        stopReason: `📥 已入站：${title}\n（ZCode Go 桌面 OPC 面板 → 看板 → 待处理入站，一键转为工作项）`,
+      });
+    } catch (error) {
+      log(`入站投递失败: ${String(error)}`);
+      emit({
+        continue: false,
+        stopReason: "❌ 入站投递失败，详见 ~/.zcode-go/plugin.log",
+      });
+    }
+    return;
+  }
   const companyPath = join(cwd, ".opc", "company.json");
   if (sub === "help") {
     emit({
       continue: false,
       stopReason:
         `📊 /opc — OPC 公司状态摘要（只读）\n` +
-        `用法：/opc [help]\n数据源：${companyPath}（工作区首次打开 OPC 面板时生成）`,
+        `用法：/opc [help | add <标题>]\n` +
+        `  add：投递一条入站（转为看板待处理，不消耗模型）\n` +
+        `数据源：${companyPath}（工作区首次打开 OPC 面板时生成）`,
     });
     return;
   }
   let info: Record<string, unknown> | null = null;
   try {
     const parsed: unknown = JSON.parse(readFileSync(companyPath, "utf8"));
-    if (typeof parsed === "object" && parsed !== null) info = parsed as Record<string, unknown>;
+    if (typeof parsed === "object" && parsed !== null)
+      info = parsed as Record<string, unknown>;
   } catch {
     /* 未初始化/不可读 */
   }
@@ -286,13 +378,29 @@ function runOpcCommand(argsText: string, cwd: string): void {
     : [];
   const skills = Array.isArray(info?.skills) ? (info!.skills as unknown[]) : [];
   if (!info || !Array.isArray(info.employees)) {
+    let inboxCount = 0;
+    try {
+      inboxCount = readdirSync(join(cwd, ".opc", "inbox")).filter((name) =>
+        name.endsWith(".json"),
+      ).length;
+    } catch {
+      /* 无 inbox 目录 */
+    }
     emit({
       continue: false,
-      stopReason: `📊 当前目录未发现 OPC 公司：${companyPath}\n（在 ZCode Go 桌面打开 OPC 模式/面板即自动初始化）`,
+      stopReason: `📊 当前目录未发现 OPC 公司：${companyPath}\n（在 ZCode Go 桌面打开 OPC 模式/面板即自动初始化）${
+        inboxCount > 0 ? `\n📥 入站待处理 ${inboxCount} 条（转正后可见）` : ""
+      }`,
     });
     return;
   }
-  const statusOrder = ["backlog", "ready", "in_progress", "review", "done"] as const;
+  const statusOrder = [
+    "backlog",
+    "ready",
+    "in_progress",
+    "review",
+    "done",
+  ] as const;
   const statusCounts = new Map<string, number>();
   for (const item of workItems) {
     const status = String(item.status ?? "backlog");
@@ -312,7 +420,9 @@ function runOpcCommand(argsText: string, cwd: string): void {
   if (escalations.length > 0) {
     lines.push(`⬆ 待所有者处理 ${escalations.length} 项：`);
     for (const item of escalations.slice(0, 5)) {
-      lines.push(`   - ${String(item.title ?? "?")}${item.escalationNote ? `（${String(item.escalationNote)}）` : ""}`);
+      lines.push(
+        `   - ${String(item.title ?? "?")}${item.escalationNote ? `（${String(item.escalationNote)}）` : ""}`,
+      );
     }
   }
   if (lastEvent && typeof lastEvent.summary === "string") {
@@ -352,10 +462,10 @@ function runHook(): void {
     const opcRaw = /^\/opc\b/.test(low);
     const opcExpanded = low.includes("run custom command /opc");
     if (opcRaw || opcExpanded) {
-      const opcArgs =
-        (opcExpanded
-          ? (prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "")
-          : (prompt.split(/\s+/)[1] ?? ""));
+      // 取 "/opc " 之后的完整参数（add 子命令带中文标题，不能按空白切分只取词）
+      const opcArgs = opcExpanded
+        ? (prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "")
+        : (prompt.match(/^\/opc\s+([\s\S]+)$/)?.[1] ?? "");
       runOpcCommand(opcArgs, String(event.cwd ?? process.cwd()));
       return;
     }
@@ -371,10 +481,14 @@ function runHook(): void {
     if (rawForm) {
       sub = (prompt.split(/\s+/)[1] ?? "").toLowerCase();
     } else {
-      const m = prompt.match(/[Rr]un custom command\s+\/zcode[_-]go\s+([^\n.]+)/);
+      const m = prompt.match(
+        /[Rr]un custom command\s+\/zcode[_-]go\s+([^\n.]+)/,
+      );
       if (m) sub = m[1].trim().toLowerCase();
     }
-    const info = (discoverOfficial() ?? readJson(OFFICIAL_JSON) ?? {}) as Record<string, unknown>;
+    const info = (discoverOfficial() ??
+      readJson(OFFICIAL_JSON) ??
+      {}) as Record<string, unknown>;
 
     if (sub === "status") {
       emit({
@@ -390,7 +504,10 @@ function runHook(): void {
     if (sub === "off") {
       mkdirSync(STATE_DIR, { recursive: true });
       writeFileSync(DISABLE_FILE, "", "utf8");
-      emit({ continue: false, stopReason: "⏹ zcode-go 接管已停用（/zcode-go on 重新启用）" });
+      emit({
+        continue: false,
+        stopReason: "⏹ zcode-go 接管已停用（/zcode-go on 重新启用）",
+      });
       return;
     }
     if (sub === "on") {
@@ -399,11 +516,17 @@ function runHook(): void {
       } catch {
         /* 不存在即已启用 */
       }
-      emit({ continue: false, stopReason: "▶️ zcode-go 接管已启用（/zcode-go 切换桌面）" });
+      emit({
+        continue: false,
+        stopReason: "▶️ zcode-go 接管已启用（/zcode-go 切换桌面）",
+      });
       return;
     }
     if (existsSync(DISABLE_FILE)) {
-      emit({ continue: false, stopReason: "⏸ zcode-go 接管已停用；发送 /zcode-go on 启用。" });
+      emit({
+        continue: false,
+        stopReason: "⏸ zcode-go 接管已停用；发送 /zcode-go on 启用。",
+      });
       return;
     }
     const { command, args } = selfExecArgs("takeover");
@@ -424,7 +547,10 @@ function runHook(): void {
       });
     } catch (error) {
       log(`拉起编排失败: ${String(error)}`);
-      emit({ continue: false, stopReason: "❌ 切换编排拉起失败，详见 ~/.zcode-go/plugin.log" });
+      emit({
+        continue: false,
+        stopReason: "❌ 切换编排拉起失败，详见 ~/.zcode-go/plugin.log",
+      });
     }
   });
 }
@@ -497,7 +623,9 @@ function runTakeover(): void {
   }
   const launcher = resolveLauncher();
   if (!launcher) {
-    log("未找到 zcode-go 启动器：请在 ~/.zcode-go/config.json 设 zcodeGoLauncher，或重跑 scripts/sync-plugin.mjs");
+    log(
+      "未找到 zcode-go 启动器：请在 ~/.zcode-go/config.json 设 zcodeGoLauncher，或重跑 scripts/sync-plugin.mjs",
+    );
     return;
   }
   try {
@@ -570,10 +698,14 @@ function pluginRoot(): string {
 
 function readPackVersion(packDir: string): string | null {
   try {
-    const parsed = JSON.parse(readFileSync(join(packDir, "pack.json"), "utf8")) as {
+    const parsed = JSON.parse(
+      readFileSync(join(packDir, "pack.json"), "utf8"),
+    ) as {
       version?: unknown;
     };
-    return typeof parsed?.version === "string" && parsed.version.length > 0 ? parsed.version : null;
+    return typeof parsed?.version === "string" && parsed.version.length > 0
+      ? parsed.version
+      : null;
   } catch {
     return null;
   }
@@ -601,7 +733,11 @@ function repoRootGuess(): string | null {
 function listPackDirs(root: string): string[] {
   try {
     return readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && readPackVersion(join(root, entry.name)) !== null)
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          readPackVersion(join(root, entry.name)) !== null,
+      )
       .map((entry) => join(root, entry.name));
   } catch {
     return [];
@@ -643,7 +779,9 @@ function mirrorPluginPacks(say: (message: string) => void): number {
 
 function readPackTime(packDir: string): Date | null {
   try {
-    const parsed = JSON.parse(readFileSync(join(packDir, "pack.json"), "utf8")) as {
+    const parsed = JSON.parse(
+      readFileSync(join(packDir, "pack.json"), "utf8"),
+    ) as {
       fetchedAt?: unknown;
     };
     if (typeof parsed?.fetchedAt !== "string") return null;
@@ -702,7 +840,10 @@ const mode = process.argv[2] ?? "hook";
 if (mode === "takeover") {
   runTakeover();
 } else if (mode === "status") {
-  const info = (discoverOfficial() ?? readJson(OFFICIAL_JSON) ?? {}) as Record<string, unknown>;
+  const info = (discoverOfficial() ?? readJson(OFFICIAL_JSON) ?? {}) as Record<
+    string,
+    unknown
+  >;
   process.stdout.write(
     `bin=${info.bin ?? "?"}\nruntimeBundle=${info.runtimeBundle ?? "?"}\n` +
       `takeover=${existsSync(DISABLE_FILE) ? "disabled" : "enabled"}\n` +

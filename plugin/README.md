@@ -48,10 +48,10 @@ ZCode Go 桌面 spawn 底层原生运行时的方式与官方打包态完全相�
 
 ## 文件（均在 `~/.zcode-go/`）
 
-| 文件 | 用途 |
-|---|---|
-| `official.json` | 探测到的官方安装（bin / resourcesDir / runtimeBundle），插件自动写入 |
-| `config.json` | 可选覆盖：`zcodeGoLauncher`（ZCode Go 启动器路径）、`officialBin` |
-| `takeover-state.json` | 接管状态，ZCode Go 桌面维护 |
-| `DISABLE` | 存在即停用接管 |
-| `plugin.log` | 排障日志 |
+| 文件                  | 用途                                                                 |
+| --------------------- | -------------------------------------------------------------------- |
+| `official.json`       | 探测到的官方安装（bin / resourcesDir / runtimeBundle），插件自动写入 |
+| `config.json`         | 可选覆盖：`zcodeGoLauncher`（ZCode Go 启动器路径）、`officialBin`    |
+| `takeover-state.json` | 接管状态，ZCode Go 桌面维护                                          |
+| `DISABLE`             | 存在即停用接管                                                       |
+| `plugin.log`          | 排障日志                                                             |
