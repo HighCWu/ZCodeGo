@@ -223,3 +223,22 @@ pre-push 钩子 test:unit:affected 以远端 sha 为 base；OPC 改 shared 后�
    存量红，zcode-agent 目录零变更。
 这 2+ 例存量红用 --no-verify 推送（CI 的 unit-tests job 是显式白名单，
 不含这些文件；E2E 门禁不受影响）。
+
+## desktop main 盲区第三次踩坑（parseOpcInboxFile，CI 九轮实证收口）
+
+scanInbox 调用 parseOpcInboxFile 但缺 import——esbuild 把调用留成自由全局
+变量，构建零报错，运行时 ReferenceError 被「单文件损坏不中断扫描」的
+catch 吞掉 → 入站队列恒空。症状极具迷惑性：文件在磁盘（脚本 readdir 可见、
+app root 视角可见）、路径一致、GetState 恒 []，耗九轮 CI 才定位。收口三
+件事：①「未定义标识符」类问题必须 bundle grep 特征字面量（本次「入站扫
+描跳过」warn 串 + parseOpcInboxFile 绑定计数）而非靠跑；②catch 吞错必须
+留痕（warn 级），「静默降级」与「真没数据」无法区分就是排查黑洞；③E2E
+诊断增强（失败分支 dump 双侧现场 + app.log 尾部进步骤日志）是九轮里真正
+起作用的手段——写脚本时就该带上。
+
+另两笔：受影响单测在 Node 25（本地 nvm 漂移，mise.toml 要求 24.14.0）下
+jsdom 29 的 window.localStorage 求值即失 → 凡裸调 localStorage.clear() 的
+测试全红；pre-push 钩子用当前 PATH 的 node，推送前先 `node --version` 对
+齐 mise。Windows runner 的 lazy-history 临界超时是环境综合症（挂点漂移：
+boot1 消息不足 / tail window / notOwned 风暴，mac+linux 同代码全绿），
+不要按代码回归追。
