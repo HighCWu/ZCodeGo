@@ -228,9 +228,9 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.office.escalated": "升级中 ×{count}",
   "opc.office.founderDesk": "所有者办公室",
   "opc.office.noItems": "当前没有进行中的工作项",
-  "opc.permission.readOnly": "只读",
-  "opc.permission.workspaceWrite": "工作区写",
-  "opc.permission.fullAccess": "完全访问",
+  "opc.permission.read-only": "只读",
+  "opc.permission.workspace-write": "工作区写",
+  "opc.permission.full-access": "完全访问",
   "opc.hire.permission": "权限级别",
   // zcode-go：OPC 入站队列文案
   "opc.kanban.inboxFilter": "待处理入站 {count}",

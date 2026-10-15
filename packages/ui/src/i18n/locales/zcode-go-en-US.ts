@@ -239,9 +239,9 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.office.escalated": "Escalated ×{count}",
   "opc.office.founderDesk": "Owner's office",
   "opc.office.noItems": "No active work items",
-  "opc.permission.readOnly": "Read-only",
-  "opc.permission.workspaceWrite": "Workspace write",
-  "opc.permission.fullAccess": "Full access",
+  "opc.permission.read-only": "Read-only",
+  "opc.permission.workspace-write": "Workspace write",
+  "opc.permission.full-access": "Full access",
   "opc.hire.permission": "Permission level",
   // zcode-go: OPC inbound queue messages
   "opc.kanban.inboxFilter": "{count} inbound",
