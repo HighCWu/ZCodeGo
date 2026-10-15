@@ -31,8 +31,8 @@ export interface OpcKanbanBoardProps {
   onStatusChange: (workItemId: string, status: OpcWorkItemStatus) => void;
   onDeleteWorkItem: (workItemId: string) => void;
   onDelegate: (workItem: OpcWorkItem) => void;
-  /** 升级上报（OpenOPC escalation：超权限/阻塞，待所有者处理）。 */
-  onEscalate: (workItemId: string) => void;
+  /** 升级上报（打开对话框：先团队内路由，后所有者）。 */
+  onEscalate: (workItem: OpcWorkItem) => void;
   /** 解除升级；takeover = 所有者接手（转派创始人）。 */
   onResolveEscalation: (
     workItemId: string,
@@ -290,7 +290,7 @@ export function OpcKanbanBoard({
                               <Button
                                 size="xs"
                                 variant="ghost"
-                                onClick={() => onEscalate(item.id)}
+                                onClick={() => onEscalate(item)}
                                 title={intl.formatMessage({
                                   id: "opc.kanban.escalate",
                                 })}

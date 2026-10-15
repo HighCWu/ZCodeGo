@@ -187,10 +187,15 @@ export function extractOpcFencedBlock(
   return null;
 }
 
+export interface OpcParsedLesson {
+  statement: string;
+  tags: string[];
+  /** 项目复盘时的员工归属（单员工复盘可缺省）。 */
+  employee?: string;
+}
+
 /** 解析 agent 复盘输出的 ```opc-lessons JSON 块；容错：JSON 坏时逐行提取引号句。 */
-export function parseOpcLessonsBlock(
-  text: string,
-): Array<{ statement: string; tags: string[] }> {
+export function parseOpcLessonsBlock(text: string): OpcParsedLesson[] {
   const raw = extractOpcFencedBlock(text, "opc-lessons");
   if (!raw) return [];
   const jsonStart = raw.indexOf("{");
@@ -202,7 +207,7 @@ export function parseOpcLessonsBlock(
       if (Array.isArray(lessons)) {
         const result = lessons
           .map((item) => {
-            const record = item as { statement?: unknown; tags?: unknown };
+            const record = item as Record<string, unknown>;
             const statement =
               typeof record.statement === "string"
                 ? record.statement.trim()
@@ -213,12 +218,16 @@ export function parseOpcLessonsBlock(
                     typeof tag === "string" && tag.trim().length > 0,
                 )
               : [];
-            return statement.length > 0 ? { statement, tags } : null;
+            if (statement.length === 0) return null;
+            const employee =
+              typeof record.employee === "string" && record.employee.trim()
+                ? record.employee.trim()
+                : undefined;
+            return employee
+              ? { statement, tags, employee }
+              : { statement, tags };
           })
-          .filter(
-            (item): item is { statement: string; tags: string[] } =>
-              item !== null,
-          );
+          .filter((item): item is OpcParsedLesson => item !== null);
         if (result.length > 0) return result;
       }
     } catch {

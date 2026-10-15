@@ -44,10 +44,16 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    - **升级上报（escalation）**：工作项可 `escalate`（记 escalatedAt + 说明，进化事件
      留痕）；升级项在看板徽标并计入「待所有者处理」；`resolveEscalation` 支持
      `resume`（解除）与 `takeover`（解除并转派给创始人执行）。
+   - **升级团队内路由（先团队后所有者）**：升级动作先给出同类目在职同事的
+     转派候选（按完成数排序，排除当前负责人与创始人）——`workitem.transfer`
+     转派并留进化事件；无合适候选或团队内解决不了，才升级给所有者。
    - **返工（rework）**：review 态工作项可退回 in_progress 并落 `reworkNotes`
      （追加式）；委派 prompt 注入「返工意见（必须逐条解决）」，闭环 rework 循环。
    - **整合（integrate）**：done 且存在被依赖项时，可一键生成整合 prompt
      （注入 composer，面向下游负责人说明产出与后续动作）。
+   - **架构-only 导出/导入**：以 OpcOrgDraft JSON（slots + hires 编制计划）为
+     载体，仅携带编制不含工作项/经验——组织页一键导出/导入（导入走
+     buildOpcOrgMutations 的 merge-fill 去重语义）。
 4. 招聘（Self-Built）：从人才市场模板一键实例化员工（含内置 24 角色 + 导入模板 +
    自定义），或先建岗位再招人；员工可暂停/离职（离职不删历史经验）。
    - **组织智能**：「按目标生成架构」——把生成 prompt 注入 composer，agent 输出
@@ -72,6 +78,9 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
 5. 执行（Self-Run）：工作项「委派」把角色模板正文 + 挂接技能 + 工作项上下文合成为
    委派 prompt，经既有 `requestComposerTextInsert` 注入 composer，由用户确认发送
    （不自动发送，不绕过既有会话准入）。完成的判定与推进由用户驱动。
+   - **项目级复盘**：复盘支持全员维度——生成 prompt 列出在职员工与近期工作项，
+     agent 输出的 opc-lessons 可带 employee 归属字段；解析后按员工分组，
+     逐人 retro.record 落账（归属不明的记到创始人）。
 6. 自进化（Self-Grown / RSI）：
    - 复盘入口产出结构化经验（statement + tags）。两种来源：手工填写；或「生成复盘」
      按钮把复盘 prompt 注入 composer，agent 输出 ```opc-lessons 围栏块，粘贴回弹窗解析。

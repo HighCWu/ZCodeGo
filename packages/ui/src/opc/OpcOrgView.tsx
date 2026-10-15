@@ -18,6 +18,8 @@ export interface OpcOrgViewProps {
   onOpenPresets: () => void;
   onExportCompany: () => void;
   onImportCompany: (file: File) => void;
+  onExportArchitecture: () => void;
+  onImportArchitecture: (file: File) => void;
   onRetrospective: (employee: OpcEmployee) => void;
   onUpdateEmployee: (
     employeeId: string,
@@ -34,6 +36,8 @@ export function OpcOrgView({
   onOpenPresets,
   onExportCompany,
   onImportCompany,
+  onExportArchitecture,
+  onImportArchitecture,
   onRetrospective,
   onUpdateEmployee,
   onDepart,

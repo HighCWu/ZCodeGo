@@ -3,6 +3,7 @@
  * 这是 RSI 闭环的可观测面：晋升历史一目了然。
  */
 import { useMemo } from "react";
+import { Button } from "@/components/ui/button.js";
 import { ScrollArea } from "@/components/ui/scroll-area.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { OpcCompanyState } from "@zcode/shared";
@@ -25,7 +26,13 @@ function formatTime(timestamp: number): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export function OpcEvolutionView({ state }: { state: OpcCompanyState }) {
+export function OpcEvolutionView({
+  state,
+  onOpenProjectRetro,
+}: {
+  state: OpcCompanyState;
+  onOpenProjectRetro: () => void;
+}) {
   const { intl } = useZCodeIntl();
   const events = useMemo(
     () => [...state.evolution].sort((a, b) => b.at - a.at).slice(0, 200),
@@ -46,9 +53,14 @@ export function OpcEvolutionView({ state }: { state: OpcCompanyState }) {
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
       <div className="flex min-h-0 flex-col rounded-xl border border-card-border bg-surface">
-        <p className="border-b border-card-border px-3 py-2 text-ui-sm font-medium text-foreground">
-          {intl.formatMessage({ id: "opc.evolution.feed" })}
-        </p>
+        <div className="flex items-center justify-between border-b border-card-border px-3 py-2">
+          <p className="text-ui-sm font-medium text-foreground">
+            {intl.formatMessage({ id: "opc.evolution.feed" })}
+          </p>
+          <Button size="xs" variant="outline" onClick={onOpenProjectRetro}>
+            {intl.formatMessage({ id: "opc.evolution.projectRetro" })}
+          </Button>
+        </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-1.5 p-3">
             {events.map((event) => (

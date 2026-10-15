@@ -24,6 +24,7 @@ import {
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOpcStore } from "@/store/opcStore.js";
 import {
+  buildOpcOrgMutations,
   buildOpcCompanyPackage,
   buildOpcDelegationPrompt,
   buildOpcIntegrationPrompt,
@@ -58,6 +59,8 @@ import {
   type OpcRetroDialogState,
   type OpcUpgradeDialogState,
 } from "./opcEvolutionDialogs.js";
+import { OpcEscalateDialog } from "./opcEscalateDialog.js";
+import { OpcProjectRetroDialog } from "./opcProjectRetroDialog.js";
 import { OpcOrgGenerateDialog, OpcOrgPresetDialog } from "./opcOrgDialogs.js";
 import { logger } from "@/logger.js";
 
@@ -88,6 +91,10 @@ export function ZcodeGoOpcPanelRoot({
     null,
   );
   const [reworkDialog, setReworkDialog] = useState<OpcWorkItem | null>(null);
+  const [escalateDialog, setEscalateDialog] = useState<OpcWorkItem | null>(
+    null,
+  );
+  const [projectRetroOpen, setProjectRetroOpen] = useState(false);
   const [orgGenerateOpen, setOrgGenerateOpen] = useState(false);
   const [orgPresetOpen, setOrgPresetOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -131,6 +138,75 @@ export function ZcodeGoOpcPanelRoot({
     [apply, state],
   );
 
+  /** 架构-only 导出（OpcOrgDraft：岗位 + 在职员工编制计划，不含工作项/经验）。 */
+  const handleExportArchitecture = useCallback(() => {
+    if (!state) return;
+    const slotTitleById = new Map(
+      state.roleSlots.map((slot) => [slot.id, slot.title]),
+    );
+    const draft = {
+      companyName: state.company.name,
+      slots: state.roleSlots.map((slot) => slot.title),
+      hires: state.employees
+        .filter(
+          (employee) => employee.status === "active" && !employee.isFallback,
+        )
+        .map((employee) => ({
+          name: employee.name,
+          template:
+            employee.templateId === "custom" ? undefined : employee.templateId,
+          slot: employee.roleId
+            ? (slotTitleById.get(employee.roleId) ?? undefined)
+            : undefined,
+          seniority: employee.seniority,
+        })),
+    };
+    const date = new Date().toISOString().slice(0, 10);
+    downloadTextFile(
+      `opc-architecture-${state.company.name}-${date}.json`.replace(
+        /\s+/g,
+        "-",
+      ),
+      JSON.stringify(draft, null, 1),
+    );
+  }, [state]);
+
+  /** 架构导入（merge-fill：岗位/招聘去重建项）。 */
+  const handleImportArchitecture = useCallback(
+    async (file: File) => {
+      let draft: unknown;
+      try {
+        draft = JSON.parse(await readFileText(file));
+      } catch {
+        logger.warn("[zcode-go][opc] 架构导入失败：非法 JSON");
+        return;
+      }
+      if (!state || typeof draft !== "object" || draft === null) return;
+      const record = draft as Record<string, unknown>;
+      const importedName =
+        typeof record.companyName === "string" ? record.companyName : undefined;
+      if (!Array.isArray(record.slots) && !Array.isArray(record.hires)) {
+        logger.warn("[zcode-go][opc] 架构导入失败：缺少 slots/hires");
+        return;
+      }
+      const outcome = buildOpcOrgMutations(
+        state,
+        {
+          companyName: importedName,
+          slots: Array.isArray(record.slots)
+            ? record.slots.filter(
+                (slot): slot is string => typeof slot === "string",
+              )
+            : [],
+          hires: Array.isArray(record.hires) ? (record.hires as never) : [],
+        },
+        Date.now(),
+      );
+      void apply(outcome.mutations);
+    },
+    [apply, state],
+  );
+
   /** 技能导出（SKILL.md 下载）。 */
   const handleExportSkill = useCallback(
     (skillId: string) => {
@@ -148,12 +224,10 @@ export function ZcodeGoOpcPanelRoot({
     [apply],
   );
 
-  const handleEscalate = useCallback(
-    (workItemId: string) => {
-      void apply([{ kind: "workitem.escalate", workItemId }]);
-    },
-    [apply],
-  );
+  // 升级动作 → 对话框（先团队内路由，后所有者）；workItem 由看板回填
+  const handleEscalate = useCallback((workItem: OpcWorkItem) => {
+    setEscalateDialog(workItem);
+  }, []);
 
   const handleResolveEscalation = useCallback(
     (workItemId: string, action: "resume" | "takeover") => {
@@ -396,6 +470,10 @@ export function ZcodeGoOpcPanelRoot({
                 onOpenPresets={() => setOrgPresetOpen(true)}
                 onExportCompany={handleExportCompany}
                 onImportCompany={(file) => void handleImportCompany(file)}
+                onExportArchitecture={handleExportArchitecture}
+                onImportArchitecture={(file) =>
+                  void handleImportArchitecture(file)
+                }
                 onRetrospective={(employee) =>
                   setRetroDialog({ employeeId: employee.id })
                 }
@@ -433,11 +511,31 @@ export function ZcodeGoOpcPanelRoot({
               />
             </TabsContent>
             <TabsContent value="evolution" className="min-h-0 flex-1">
-              <OpcEvolutionView state={state} />
+              <OpcEvolutionView
+                state={state}
+                onOpenProjectRetro={() => setProjectRetroOpen(true)}
+              />
             </TabsContent>
           </Tabs>
         </DialogContent>
       </Dialog>
+      {escalateDialog ? (
+        <OpcEscalateDialog
+          state={state}
+          workItem={escalateDialog}
+          onClose={() => setEscalateDialog(null)}
+          onSubmit={(mutations) => {
+            void apply(mutations);
+            setEscalateDialog(null);
+          }}
+        />
+      ) : null}
+      {projectRetroOpen ? (
+        <OpcProjectRetroDialog
+          onClose={() => setProjectRetroOpen(false)}
+          workspaceIdentity={workspaceIdentity}
+        />
+      ) : null}
       {orgGenerateOpen ? (
         <OpcOrgGenerateDialog
           onClose={() => setOrgGenerateOpen(false)}

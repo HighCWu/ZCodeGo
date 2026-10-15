@@ -462,6 +462,40 @@ function applyOnce(
         ],
       };
     }
+    case "workitem.transfer": {
+      const target = state.workItems.find(
+        (item) => item.id === mutation.workItemId,
+      );
+      const to = state.employees.find(
+        (item) => item.id === mutation.toEmployeeId,
+      );
+      if (
+        !target ||
+        !to ||
+        to.status !== "active" ||
+        to.id === target.assigneeId
+      ) {
+        return { state, events: [] };
+      }
+      return {
+        state: {
+          ...state,
+          workItems: state.workItems.map((item) =>
+            item.id === mutation.workItemId
+              ? { ...item, assigneeId: to.id, updatedAt: now }
+              : item,
+          ),
+        },
+        events: [
+          {
+            id: createOpcEntityId("ev", now),
+            at: now,
+            kind: "workitem",
+            summary: `转派：${target.title} → ${to.name}${mutation.note ? `（${mutation.note}）` : ""}`,
+          },
+        ],
+      };
+    }
     case "workitem.delete": {
       return {
         state: {

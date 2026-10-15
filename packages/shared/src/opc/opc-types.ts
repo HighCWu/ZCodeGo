@@ -294,6 +294,12 @@ export type OpcMutation =
     }
   | { kind: "workitem.rework"; workItemId: string; note: string }
   | {
+      kind: "workitem.transfer";
+      workItemId: string;
+      toEmployeeId: string;
+      note?: string;
+    }
+  | {
       kind: "retro.record";
       employeeId: string;
       workItemId?: string | null;

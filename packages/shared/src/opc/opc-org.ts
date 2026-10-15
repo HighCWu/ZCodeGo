@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 组织智能三类能力（生成/预设/升级路由）共用模板匹配基础设施，单文件收口（同插件宿主惯例）。 */
 /**
  * zcode-go OPC 组织智能（Self-Built 自动化）：
  * - 「按目标生成架构」：agent 输出 ```opc-org 围栏 JSON（slots/hires），本文件
@@ -390,4 +391,77 @@ export function parseOpcInboxFile(
         ? record.receivedAt
         : new Date().toISOString(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// 升级团队内路由（OpenOPC：先团队内解决，超权限才升级所有者）
+// ---------------------------------------------------------------------------
+
+export interface OpcEscalationCandidate {
+  employeeId: string;
+  name: string;
+  emoji: string;
+  /** 同类目同事优先，其次按完成数排序的依据说明。 */
+  reason: "peer-category" | "top-completed";
+  completed: number;
+}
+
+/**
+ * 升级转派候选：同类目在职同事（排除当前负责人与创始人）按完成数排序优先，
+ * 不足额时用完成数最高的其他非创始人成员补齐。
+ */
+export function findOpcEscalationCandidates(
+  state: OpcCompanyState,
+  workItem: Pick<OpcCompanyState["workItems"][number], "assigneeId">,
+  topN = 3,
+): OpcEscalationCandidate[] {
+  const currentAssignee = state.employees.find(
+    (employee) => employee.id === workItem.assigneeId,
+  );
+  const category = currentAssignee?.category;
+  const candidates = state.employees.filter(
+    (employee) =>
+      employee.status === "active" &&
+      !employee.isFallback &&
+      employee.id !== workItem.assigneeId,
+  );
+  const peers = category
+    ? candidates.filter((employee) => employee.category === category)
+    : [];
+  const others = candidates.filter(
+    (employee) => !category || employee.category !== category,
+  );
+  const byCompleted = (
+    a: OpcEscalationCandidate,
+    b: OpcEscalationCandidate,
+  ): number => b.completed - a.completed;
+  const toCandidate = (
+    employee: OpcCompanyState["employees"][number],
+    reason: OpcEscalationCandidate["reason"],
+  ): OpcEscalationCandidate => ({
+    employeeId: employee.id,
+    name: employee.name,
+    emoji: employee.emoji,
+    reason,
+    completed: employee.stats.completed,
+  });
+  const ranked = [
+    ...peers
+      .sort((a, b) =>
+        byCompleted(
+          toCandidate(a, "peer-category"),
+          toCandidate(b, "peer-category"),
+        ),
+      )
+      .map((employee) => toCandidate(employee, "peer-category")),
+    ...others
+      .sort((a, b) =>
+        byCompleted(
+          toCandidate(a, "top-completed"),
+          toCandidate(b, "top-completed"),
+        ),
+      )
+      .map((employee) => toCandidate(employee, "top-completed")),
+  ];
+  return ranked.slice(0, topN);
 }

@@ -200,3 +200,40 @@ export function buildOpcIntegrationPrompt(input: {
   }
   return sections.join("\n");
 }
+
+/** 项目级复盘 prompt：全员维度，经验逐条归属到员工（opc-lessons 扩展 employee 字段）。 */
+export function buildOpcProjectRetroPrompt(input: {
+  companyName: string;
+  employees: Array<{ name: string; category: string }>;
+  recentWorkItems: Array<{ title: string; status: string }>;
+}): string {
+  const employeeNames = input.employees
+    .map((employee) => employee.name)
+    .join("、");
+  const lines = [
+    `请对「${input.companyName}」做一次项目级复盘：回顾近期全部工作项，按以下在职员工逐人提炼经验教训。`,
+    "",
+    `在职员工：${employeeNames}`,
+  ];
+  if (input.recentWorkItems.length > 0) {
+    lines.push(
+      "",
+      "近期工作项：",
+      ...input.recentWorkItems
+        .slice(-12)
+        .map((item) => `- ${item.title}（${item.status}）`),
+    );
+  }
+  lines.push(
+    "",
+    "复盘要求：",
+    "- 每条经验标注归属员工（employee 字段，必须是上述在职员工之一；公司级流程经验归属创始人）；",
+    "- 只提炼可复用、可执行的经验，不写流水账；",
+    "- 严格只输出以下 JSON 围栏块：",
+    "",
+    "```" + OPC_LESSONS_FENCE,
+    '{ "lessons": [ { "statement": "一句话经验", "tags": ["标签"], "employee": "员工姓名" } ] }',
+    "```",
+  );
+  return lines.join("\n");
+}
