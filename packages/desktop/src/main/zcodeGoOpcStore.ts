@@ -35,6 +35,7 @@ import {
   OPC_ROLES_TEMPLATES_SUBDIR,
   OPC_SKILLS_DIR,
   OPC_TEMPLATES_DIR,
+  parseOpcInboxFile,
   parseOpcRoleTemplate,
   PlatformChannels,
   renderOpcEmployeeMemory,
@@ -404,19 +405,6 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             state = synced;
           }
           const inbox = await scanInbox(workspaceRoot);
-          // E2E 诊断锚点（info 级）：GetState 的 inbox 为空但磁盘有文件时，
-          // 从这条日志即可区分「目录视图不一致」与「扫描过滤吞条目」。
-          let rawNames = "";
-          try {
-            rawNames = (await readdir(join(workspaceRoot, OPC_INBOX_DIR))).join(
-              ",",
-            );
-          } catch (e) {
-            rawNames = `readdir err: ${(e as Error).message}`;
-          }
-          logger.info(
-            `[zcode-go] OPC GetState inbox=${inbox.length} raw=[${rawNames}] dir=${join(workspaceRoot, OPC_INBOX_DIR)}`,
-          );
           return {
             ok: true as const,
             state,
