@@ -80,6 +80,7 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.models.unconfirmed":
     "指纹与基线不一致：员工能力可能需重新拟合（改写委派 prompt / 重建技能），或确认以新模型为准",
   "opc.models.acknowledge": "确认新指纹",
+  "opc.models.affected": "受影响员工：{names}",
   "opc.category.ai": "AI",
   "opc.category.productivity": "效率",
   "opc.category.strategy": "战略",
@@ -241,6 +242,7 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.hire.reuse": "复用「{name}」上岗",
   "opc.employee.statusPaused": "暂停中",
   "opc.employee.statusDeparted": "已离职",
+  "opc.employee.model": "模型 {model}",
   // zcode-go：OPC 公司包文案
   "opc.org.exportCompany": "导出公司",
   "opc.org.reportsTo": "汇报给 {name}",

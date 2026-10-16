@@ -113,6 +113,12 @@ export interface OpcEmployee {
   status: OpcEmployeeStatus;
   /** 权限边界（缺省 workspace-write；委派 prompt 注入为硬约束章节）。 */
   permissionLevel?: OpcPermissionLevel;
+  /**
+   * 员工级模型偏好（原版「角色检查器首选 agent」思想）：编排器派发时经
+   * sendPrompt.modelSelection 传递——不同角色绑定不同模型（强模型做难活、
+   * 轻模型做日常）。与模型指纹联动：指纹条目按 modelKey 关联受影响员工。
+   */
+  modelSelection?: { providerId: string; modelId: string };
   /** 挂接技能 id 列表（.opc/skills/<id>/SKILL.md）。 */
   skillRefs: string[];
   stats: {
@@ -288,6 +294,8 @@ export interface OpcCustomEmployeeDraft {
   seniority: OpcEmployeeSeniority;
   /** 入职初始状态（公司包导入 paused 员工时保持暂停态）；缺省 active。 */
   status?: "active" | "paused";
+  /** 员工级模型偏好（可选）。 */
+  modelSelection?: { providerId: string; modelId: string };
   permissionLevel?: OpcPermissionLevel;
 }
 

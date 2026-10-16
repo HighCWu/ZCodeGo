@@ -83,6 +83,7 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.models.unconfirmed":
     "Fingerprint differs from baseline: employee capabilities may need refitting (rewrite delegation prompts / rebuild skills), or acknowledge the new model as-is",
   "opc.models.acknowledge": "Acknowledge new fingerprint",
+  "opc.models.affected": "Affected employees: {names}",
   "opc.category.ai": "AI",
   "opc.category.productivity": "Productivity",
   "opc.category.strategy": "Strategy",
@@ -253,6 +254,7 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.hire.reuse": 'Reactivate "{name}"',
   "opc.employee.statusPaused": "paused",
   "opc.employee.statusDeparted": "departed",
+  "opc.employee.model": "Model {model}",
   // zcode-go: OPC company package messages
   "opc.org.exportCompany": "Export company",
   "opc.org.reportsTo": "reports to {name}",

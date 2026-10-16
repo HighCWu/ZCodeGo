@@ -282,6 +282,28 @@ export function OpcModelsView({
                     },
                   )}
                 </p>
+                {(() => {
+                  // 与员工级模型偏好联动：该 modelKey 变动影响的在职员工
+                  const affected = state.employees.filter(
+                    (employee) =>
+                      employee.status !== "departed" &&
+                      employee.modelSelection &&
+                      `${employee.modelSelection.providerId}/${employee.modelSelection.modelId}` ===
+                        key,
+                  );
+                  return affected.length > 0 ? (
+                    <p className="mt-1 text-ui-xs text-foreground-subtle">
+                      {intl.formatMessage(
+                        { id: "opc.models.affected" },
+                        {
+                          names: affected
+                            .map((employee) => employee.name)
+                            .join("、"),
+                        },
+                      )}
+                    </p>
+                  ) : null;
+                })()}
                 {unconfirmed ? (
                   <div className="mt-2 flex items-center gap-2">
                     <p className="text-ui-xs text-foreground-subtle">

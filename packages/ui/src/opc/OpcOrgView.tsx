@@ -224,6 +224,14 @@ export function OpcOrgView({
                           { name: managerNameByEmployeeId.get(employee.id)! },
                         )}`
                       : ""}
+                    {employee.modelSelection
+                      ? ` · ${intl.formatMessage(
+                          { id: "opc.employee.model" },
+                          {
+                            model: `${employee.modelSelection.providerId}/${employee.modelSelection.modelId}`,
+                          },
+                        )}`
+                      : ""}
                     {employee.permissionLevel &&
                     employee.permissionLevel !== "workspace-write"
                       ? ` · ${intl.formatMessage({
