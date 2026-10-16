@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "chokidar";
 import { stat, watch as watchDirectory } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 
@@ -14,7 +14,10 @@ export interface SubagentConfigLoadContext {
   waitForStableFile(path: string): Promise<boolean>;
 }
 
-async function waitForStableFile(path: string, signal: AbortSignal): Promise<boolean> {
+async function waitForStableFile(
+  path: string,
+  signal: AbortSignal,
+): Promise<boolean> {
   let previous: Awaited<ReturnType<typeof stat>> | undefined;
   let stableSince = performance.now();
   while (true) {
@@ -104,7 +107,9 @@ export function createSubagentConfigScope<T>(options: {
             signal: controller.signal,
             // 新 watcher 的初次扫描不经过 awaitWriteFinish；仅目录恢复补扫显式等待稳定。
             waitForStableFile: (path) =>
-              needsStability ? waitForStableFile(path, controller.signal) : Promise.resolve(true),
+              needsStability
+                ? waitForStableFile(path, controller.signal)
+                : Promise.resolve(true),
           });
           if (disposed) return;
           if (controller.signal.aborted) continue;
@@ -115,14 +120,19 @@ export function createSubagentConfigScope<T>(options: {
           if (disposed) return;
           if (controller.signal.aborted) continue;
           if (generation !== revision) {
-            for (const [path, action] of changes) if (!pending.has(path)) pending.set(path, action);
+            for (const [path, action] of changes)
+              if (!pending.has(path)) pending.set(path, action);
             if (full) reset = true;
           } else {
             failed = true;
-            logger.warn(undefined, "Subagent 配置读取失败，使用内置定义并等待文件变化", {
-              path: root,
-              error: String(error),
-            });
+            logger.warn(
+              undefined,
+              "Subagent 配置读取失败，使用内置定义并等待文件变化",
+              {
+                path: root,
+                error: String(error),
+              },
+            );
           }
         } finally {
           // 某个候选读取失败时，同时取消该补扫中其他文件的稳定等待。
@@ -146,7 +156,10 @@ export function createSubagentConfigScope<T>(options: {
   }
   function changed(event: string, path: string) {
     const absolute = resolve(path);
-    if (absolute === root && (event === "unlinkDir" || event === "add" || event === "unlink")) {
+    if (
+      absolute === root &&
+      (event === "unlinkDir" || event === "add" || event === "unlink")
+    ) {
       void checkWatch(true);
       return;
     }
@@ -156,7 +169,8 @@ export function createSubagentConfigScope<T>(options: {
     )
       return;
     if (event === "unlink") pending.set(absolute, "remove");
-    else if (event === "add" || event === "change") pending.set(absolute, "read");
+    else if (event === "add" || event === "change")
+      pending.set(absolute, "read");
     else return;
     revision++;
     schedule();
@@ -168,11 +182,16 @@ export function createSubagentConfigScope<T>(options: {
         const stats = await stat(path);
         if (path === root || stats.isDirectory()) return { path, stats };
       } catch (error) {
-        if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
+        if (
+          !["ENOENT", "ENOTDIR"].includes(
+            (error as NodeJS.ErrnoException).code ?? "",
+          )
+        )
           throw error;
       }
       const parent = dirname(path);
-      if (parent === path) throw new Error(`Subagent watch root unavailable: ${root}`);
+      if (parent === path)
+        throw new Error(`Subagent watch root unavailable: ${root}`);
       path = parent;
     }
   }
@@ -225,15 +244,22 @@ export function createSubagentConfigScope<T>(options: {
           usePolling: false,
           followSymlinks: true,
           atomic: true,
-          awaitWriteFinish: { stabilityThreshold: WRITE_STABILITY_MS, pollInterval: WRITE_POLL_MS },
+          awaitWriteFinish: {
+            stabilityThreshold: WRITE_STABILITY_MS,
+            pollInterval: WRITE_POLL_MS,
+          },
           ignored: (path, info) => {
             const absolute = resolve(path);
             if (absolute === nextAnchor) return false;
             if (dirname(absolute) !== nextAnchor) return true;
-            if (!direct) return info ? !info.isDirectory() && !info.isSymbolicLink() : false;
+            if (!direct)
+              return info
+                ? !info.isDirectory() && !info.isSymbolicLink()
+                : false;
             return file
               ? absolute !== file
-              : Boolean(info?.isDirectory()) || !/\.(md|markdown)$/iu.test(absolute);
+              : Boolean(info?.isDirectory()) ||
+                  !/\.(md|markdown)$/iu.test(absolute);
           },
         });
         watcher = current;
@@ -246,32 +272,50 @@ export function createSubagentConfigScope<T>(options: {
           const controller = new AbortController();
           parentWatch = controller;
           void (async () => {
-            for await (const _event of watchDirectory(parent, { signal: controller.signal })) {
+            for await (const event of watchDirectory(parent, {
+              signal: controller.signal,
+            })) {
               if (disposed || watcher !== current) return;
-              await checkWatch();
+              // 仅「监听目标目录本身」的原生 rename 才强制重建：rm+mkdir 常
+              // 复用同一 inode，ino 相同短路会把内容全新的目录误判为未变化
+              // （旧 watcher 继续监听死 inode）。无关父事件保持非强制路径，
+              // 不打断文件批次的合并窗口。
+              const replacedTarget =
+                event.eventType === "rename" &&
+                event.filename === basename(anchor);
+              await checkWatch(replacedTarget);
             }
           })().catch((error) => {
             if (!controller.signal.aborted && !disposed)
-              logger.warn(undefined, "Subagent 父目录监听异常，显式重载可重建监听", {
-                path: parent,
-                error: String(error),
-              });
+              logger.warn(
+                undefined,
+                "Subagent 父目录监听异常，显式重载可重建监听",
+                {
+                  path: parent,
+                  error: String(error),
+                },
+              );
           });
         }
         current.on("all", (event, path) => {
           if (disposed || watcher !== current) return;
           if (direct) changed(event, path);
-          else if (event === "addDir" || event === "unlinkDir") void checkWatch();
+          else if (event === "addDir" || event === "unlinkDir")
+            void checkWatch();
         });
         await new Promise<void>((ready) => {
           releaseReady = ready;
           current.once("ready", ready);
           current.on("error", (error) => {
             if (disposed || watcher !== current) return;
-            logger.warn(undefined, "Subagent 文件监听异常，显式重载可重建监听", {
-              path: root,
-              error: String(error),
-            });
+            logger.warn(
+              undefined,
+              "Subagent 文件监听异常，显式重载可重建监听",
+              {
+                path: root,
+                error: String(error),
+              },
+            );
             ready();
           });
         });
@@ -282,10 +326,14 @@ export function createSubagentConfigScope<T>(options: {
     })()
       .catch((error) => {
         if (!disposed)
-          logger.warn(undefined, "Subagent 文件监听初始化失败，显式重载可重建监听", {
-            path: root,
-            error: String(error),
-          });
+          logger.warn(
+            undefined,
+            "Subagent 文件监听初始化失败，显式重载可重建监听",
+            {
+              path: root,
+              error: String(error),
+            },
+          );
       })
       .finally(() => {
         binding = undefined;
@@ -320,7 +368,11 @@ export function createSubagentConfigScope<T>(options: {
     get busy() {
       return (
         !disposed &&
-        (!initialized || Boolean(binding) || Boolean(draining) || reset || pending.size > 0)
+        (!initialized ||
+          Boolean(binding) ||
+          Boolean(draining) ||
+          reset ||
+          pending.size > 0)
       );
     },
     dispose() {

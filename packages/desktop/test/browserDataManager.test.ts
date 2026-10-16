@@ -7,8 +7,15 @@ import { backup, DatabaseSync } from "node:sqlite";
 
 const lockedChromeSidecars = vi.hoisted(() => new Set<string>());
 
+vi.mock("../src/main/chromeProfileDiscovery.js", () => ({
+  resolveChromeExecutablePath: vi.fn(async () => null),
+}));
+
 vi.mock("node:fs/promises", async () => {
-  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  const actual =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
   return {
     ...actual,
     stat: async (path: Parameters<typeof actual.stat>[0]) =>
@@ -21,7 +28,9 @@ vi.mock("node:fs/promises", async () => {
       mode?: Parameters<typeof actual.copyFile>[2],
     ) => {
       if (lockedChromeSidecars.has(String(source))) {
-        throw Object.assign(new Error("Chrome sidecar is locked"), { code: "EBUSY" });
+        throw Object.assign(new Error("Chrome sidecar is locked"), {
+          code: "EBUSY",
+        });
       }
       return actual.copyFile(source, destination, mode);
     },
@@ -77,7 +86,11 @@ afterEach(async () => {
 });
 
 function createChromeProfile(
-  options: { encryptedValue?: Buffer; modernCookiePath?: boolean; value?: string } = {},
+  options: {
+    encryptedValue?: Buffer;
+    modernCookiePath?: boolean;
+    value?: string;
+  } = {},
 ): string {
   const profilePath = join(tempRoot, "Default");
   const cookieDatabasePath = options.modernCookiePath
@@ -120,7 +133,11 @@ function createChromeProfile(
 function encryptLinuxV10Cookie(value: string): Buffer {
   const key = pbkdf2Sync("peanuts", "saltysalt", 1, 16, "sha1");
   const cipher = createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 0x20));
-  return Buffer.concat([Buffer.from("v10"), cipher.update(value), cipher.final()]);
+  return Buffer.concat([
+    Buffer.from("v10"),
+    cipher.update(value),
+    cipher.final(),
+  ]);
 }
 
 function createFailingSourceBackup(): {
@@ -147,8 +164,16 @@ function createFailingSourceBackup(): {
 function encryptWindowsCookieV20(value: string, key: Buffer): Buffer {
   const nonce = Buffer.alloc(12, 7);
   const cipher = createCipheriv("aes-256-gcm", key, nonce);
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return Buffer.concat([Buffer.from("v20"), nonce, ciphertext, cipher.getAuthTag()]);
+  const ciphertext = Buffer.concat([
+    cipher.update(value, "utf8"),
+    cipher.final(),
+  ]);
+  return Buffer.concat([
+    Buffer.from("v20"),
+    nonce,
+    ciphertext,
+    cipher.getAuthTag(),
+  ]);
 }
 
 describe("browserDataManager", () => {
@@ -170,10 +195,13 @@ describe("browserDataManager", () => {
       maxRetries: 5,
       retryDelay: 100,
     });
-    expect(logger.warn).toHaveBeenCalledWith("[browser-data] Chrome helper 临时目录清理失败", {
-      name: "Error",
-      code: "ENOTEMPTY",
-    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "[browser-data] Chrome helper 临时目录清理失败",
+      {
+        name: "Error",
+        code: "ENOTEMPTY",
+      },
+    );
   });
 
   it("使用 createRequire 加载 node:sqlite，避免桌面 bundle 丢失 node: 前缀", async () => {
@@ -195,7 +223,16 @@ describe("browserDataManager", () => {
         platform: "darwin",
         homeDir: "/Users/demo",
       }),
-    ).toBe(join("/Users/demo", "Library", "Application Support", "Google", "Chrome", "Default"));
+    ).toBe(
+      join(
+        "/Users/demo",
+        "Library",
+        "Application Support",
+        "Google",
+        "Chrome",
+        "Default",
+      ),
+    );
     expect(
       resolveChromeDefaultProfilePath({
         platform: "win32",
@@ -247,13 +284,18 @@ describe("browserDataManager", () => {
       }),
     );
     const cookieDetails = set.mock.calls[0]?.[0];
-    expect(cookieDetails?.expirationDate).toBeGreaterThan(importedAt + 399 * 24 * 60 * 60);
+    expect(cookieDetails?.expirationDate).toBeGreaterThan(
+      importedAt + 399 * 24 * 60 * 60,
+    );
     expect(flushStore).toHaveBeenCalledOnce();
-    expect(logger.info).toHaveBeenCalledWith("[browser-data] Chrome Cookie 写入完成", {
-      importedCount: 1,
-      skippedCount: 0,
-      failedCount: 0,
-    });
+    expect(logger.info).toHaveBeenCalledWith(
+      "[browser-data] Chrome Cookie 写入完成",
+      {
+        importedCount: 1,
+        skippedCount: 0,
+        failedCount: 0,
+      },
+    );
   });
 
   it("兼容新版 Chrome 的 Network/Cookies 数据库路径", async () => {
@@ -316,7 +358,17 @@ describe("browserDataManager", () => {
     database.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;");
     database
       .prepare("INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run("wal.example.com", "wal-session", "/", 0n, 1n, 0n, 0n, "wal-value", Buffer.alloc(0));
+      .run(
+        "wal.example.com",
+        "wal-session",
+        "/",
+        0n,
+        1n,
+        0n,
+        0n,
+        "wal-value",
+        Buffer.alloc(0),
+      );
     const failingBackup = createFailingSourceBackup();
     const set = vi.fn(async () => {});
 
@@ -410,7 +462,10 @@ describe("browserDataManager", () => {
     });
     const set = vi.fn(async () => {});
     const flushStore = vi.fn(async () => {});
-    const deniedError = Object.assign(new Error("User canceled the operation"), { code: 128 });
+    const deniedError = Object.assign(
+      new Error("User canceled the operation"),
+      { code: 128 },
+    );
     const macChromeSafeStorageSecretReader = vi.fn(async () => {
       throw deniedError;
     });
@@ -476,7 +531,9 @@ describe("browserDataManager", () => {
       cookies: { imported: 1, skipped: 0, failed: 0 },
     });
     expect(chromeCookieHelper).not.toHaveBeenCalled();
-    expect(set).toHaveBeenCalledWith(expect.objectContaining({ value: "linux-v10-value" }));
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "linux-v10-value" }),
+    );
   });
 
   it("Linux v11 Cookie 由同品牌 Chrome helper 解密并转发 KWallet 后端", async () => {
@@ -540,7 +597,9 @@ describe("browserDataManager", () => {
       success: true,
       cookies: { imported: 1, skipped: 0, failed: 0 },
     });
-    expect(set).toHaveBeenCalledWith(expect.objectContaining({ value: "linux-v11-value" }));
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "linux-v11-value" }),
+    );
   });
 
   it("Linux v11 helper 不可用时保留 LocalStorage 并返回保护提示", async () => {
@@ -595,7 +654,8 @@ describe("browserDataManager", () => {
       logger,
       platform: "win32",
       profilePath,
-      chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      chromeExecutablePath:
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       windowsChromeAppBoundKeyReader,
       localStorageImporter,
       targetSession: {
@@ -609,7 +669,8 @@ describe("browserDataManager", () => {
     expect(failingBackup.getCallCount()).toBe(2);
     expect(windowsChromeAppBoundKeyReader).toHaveBeenCalledWith(
       expect.objectContaining({
-        chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        chromeExecutablePath:
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
         userDataDir: tempRoot,
       }),
     );
@@ -618,7 +679,10 @@ describe("browserDataManager", () => {
       cookies: { imported: 1, skipped: 0, failed: 0 },
     });
     expect(set).toHaveBeenCalledWith(
-      expect.objectContaining({ value: "helper-value", url: "https://example.com/" }),
+      expect.objectContaining({
+        value: "helper-value",
+        url: "https://example.com/",
+      }),
     );
     expect(helperResult.every((value) => value === 0)).toBe(true);
   });
@@ -635,9 +699,12 @@ describe("browserDataManager", () => {
       logger,
       platform: "win32",
       profilePath,
-      chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      chromeExecutablePath:
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       windowsChromeAppBoundKeyReader: vi.fn(async () => {
-        throw new WindowsChromeAppBoundImportError("chrome_cookie_helper_verification_failed");
+        throw new WindowsChromeAppBoundImportError(
+          "chrome_cookie_helper_verification_failed",
+        );
       }),
       localStorageImporter,
       targetSession: {
@@ -654,7 +721,9 @@ describe("browserDataManager", () => {
       success: true,
       cookies: { imported: 0, skipped: 1 },
       localStorage: localStorageResult,
-      issues: expect.arrayContaining(["chrome_cookie_helper_verification_failed"]),
+      issues: expect.arrayContaining([
+        "chrome_cookie_helper_verification_failed",
+      ]),
     });
   });
 
@@ -667,7 +736,17 @@ describe("browserDataManager", () => {
     const cookieDatabase = new DatabaseSync(join(profilePath, "Cookies"));
     cookieDatabase
       .prepare("INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run("plain.example.com", "plain", "/", 0n, 1n, 1n, 1n, "plain-value", Buffer.alloc(0));
+      .run(
+        "plain.example.com",
+        "plain",
+        "/",
+        0n,
+        1n,
+        1n,
+        1n,
+        "plain-value",
+        Buffer.alloc(0),
+      );
     cookieDatabase.close();
     const set = vi.fn(async () => {});
 
@@ -676,9 +755,12 @@ describe("browserDataManager", () => {
       logger,
       platform: "win32",
       profilePath,
-      chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      chromeExecutablePath:
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       windowsChromeAppBoundKeyReader: vi.fn(async () => {
-        throw new WindowsChromeAppBoundImportError("chrome_cookie_elevation_cancelled");
+        throw new WindowsChromeAppBoundImportError(
+          "chrome_cookie_elevation_cancelled",
+        );
       }),
       localStorageImporter,
       targetSession: {
@@ -709,13 +791,17 @@ describe("browserDataManager", () => {
       logger,
       platform: "win32",
       profilePath,
-      chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      chromeExecutablePath:
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
       windowsChromeAppBoundKeyReader,
       localStorageImporter,
       targetSession: {
         clearCache: vi.fn(async () => {}),
         clearStorageData: vi.fn(async () => {}),
-        cookies: { set: vi.fn(async () => {}), flushStore: vi.fn(async () => {}) },
+        cookies: {
+          set: vi.fn(async () => {}),
+          flushStore: vi.fn(async () => {}),
+        },
       },
     });
 
@@ -764,10 +850,9 @@ describe("browserDataManager", () => {
       ),
     );
 
-    await expect(discoverChromeLocalStorageOrigins(localStoragePath)).resolves.toEqual([
-      "http://localhost:3000",
-      "https://chat.z.ai",
-    ]);
+    await expect(
+      discoverChromeLocalStorageOrigins(localStoragePath),
+    ).resolves.toEqual(["http://localhost:3000", "https://chat.z.ai"]);
   });
 
   it("先复制 LocalStorage 快照，再从快照发现 origin", async () => {
@@ -779,6 +864,9 @@ describe("browserDataManager", () => {
       Buffer.from("binary\0META:https://chat.z.ai", "latin1"),
     );
 
+    // resolveChromeExecutablePath 已被模块级 mock 为 null：种子 LDB 的
+    // META origin 能被发现，但 helper executable 缺失 → 该格 originsFailed
+    // 与 not_found 断言不依赖宿主机是否装了 Chrome
     const result = await importChromeLocalStorage({
       profilePath,
       platform: "aix",
@@ -821,11 +909,18 @@ describe("browserDataManager", () => {
     const targetSession = {
       clearCache,
       clearStorageData,
-      cookies: { set: vi.fn(async () => {}), flushStore: vi.fn(async () => {}) },
+      cookies: {
+        set: vi.fn(async () => {}),
+        flushStore: vi.fn(async () => {}),
+      },
     };
     resetEmbeddedBrowserSitePermissionsForTest();
     await initEmbeddedBrowserSitePermissions({ logger });
-    await writeEmbeddedBrowserSitePermission("https://example.com", "media", "allow");
+    await writeEmbeddedBrowserSitePermission(
+      "https://example.com",
+      "media",
+      "allow",
+    );
 
     await clearEmbeddedBrowserData({ logger, mode: "cache", targetSession });
     expect(snapshotSitePermissions()).toEqual({
