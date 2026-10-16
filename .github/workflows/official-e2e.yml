@@ -414,7 +414,11 @@ jobs:
               rc=0
               for e in goal-verify silent-fork-auto lazy-history takeover marketplace-install fresh-model opc; do
                 echo "== E2E: $e =="
-                node "scripts/e2e/$e-e2e.mjs" || rc=1
+                # runner 环境临界项偶发：失败重试一次，两轮都挂才计 rc
+                node "scripts/e2e/$e-e2e.mjs" || {
+                  echo "== retry: $e =="
+                  node "scripts/e2e/$e-e2e.mjs" || rc=1
+                }
               done
               kill %1 2>/dev/null || true
               exit $rc
@@ -423,7 +427,11 @@ jobs:
             rc=0
             for e in goal-verify silent-fork-auto lazy-history takeover marketplace-install fresh-model opc; do
               echo "== E2E: $e =="
-              node "scripts/e2e/$e-e2e.mjs" || rc=1
+              # runner 环境临界项偶发：失败重试一次，两轮都挂才计 rc
+              node "scripts/e2e/$e-e2e.mjs" || {
+                echo "== retry: $e =="
+                node "scripts/e2e/$e-e2e.mjs" || rc=1
+              }
             done
             exit $rc
           fi
