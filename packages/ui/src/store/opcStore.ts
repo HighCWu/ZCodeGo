@@ -85,6 +85,10 @@ interface ZcodeGoOpcBridge {
     skillBodies?: Record<string, string>;
     error?: string;
   }>;
+  zcodeGoOpcReadFingerprintSample?: (payload: {
+    workspacePath: string;
+    fileName: string;
+  }) => Promise<{ ok: boolean; content: string | null; error?: string }>;
   onZcodeGoOpcStateChanged?: (
     handler: (payload: { workspacePath: string }) => void,
   ) => () => void;

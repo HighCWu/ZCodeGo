@@ -24,7 +24,7 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    - 草稿空态以「公司驾驶舱」替代问候语空态（公司概览 + 看板摘要 + 快捷操作）；
    - 办公模式推荐提示区不再渲染（OPC 有自己的行动入口）；
    - 全局「公司面板」可随时打开（App 挂载一次，事件 `zcode-go:opc-open` 唤起），
-     含五个标签页：看板 / 组织 / 人才市场 / 技能 / 进化。
+     含七个标签页：看板 / 组织 / 人才市场 / 技能 / 进化 / 办公室地图 / 模型。
 2. 公司状态是**每工作区**一份，持久化在 `<workspacePath>/.opc/`：
    ```
    .opc/
@@ -244,6 +244,42 @@ preload 增补落在 zcode-go 自己的 `zcodeGoEntries.ts`（非上游文件）
 8. 持久化：重启后状态完整；company.json 损坏时面板报错可重建，不崩溃主流程。
 9. 纯函数单元测试：frontmatter 解析（两种格式 + 容错）、状态机、晋升引擎
    （2 次阈值、版本递增、挂接）、委派/复盘/升级 prompt 构造。
+
+## 模型指纹（Model Fingerprint）：同 ID 模型变动的检测与提醒
+
+**问题**：同一模型 ID 下，提供商可能按算力/用量静默路由到不同底层模型
+（"挂羊头卖狗肉"）。OPC 员工的能力/委派 prompt 是对当时模型拟合的——
+模型换了，旧 prompt 的产出质量可能静默劣化。方法吸收
+ToseaAI/llm-fingerprint-detector（一词回答分布 + JSD 三带判定，论文
+"One Token Is Enough" 的独立实现）与 xqy2006/ModelTrace（长整数挑战、
+闭集归因——自比对场景不引入其候选库）。
+
+1. **探测电池（probe battery）**：8 个核心格（任务×语言）：1–100 随机数
+   （en/zh）、随机颜色、随机字母、抛硬币、随机城市、随机动物、最爱数字。
+   每格内置改写池（en/zh 各若干变体），采集时轮换改写——没有可被网关
+   特判的魔法字符串。**不依赖模型自述身份**（不可靠），只用行为统计。
+2. **采集**：桌面 main 经 IZCodeTaskService 无界面派发（编排器同款执行器）——
+   每格一个会话，会话内顺序提出 10 个改写变体、要求「每行只回答一个词」；
+   assistant 回复按行解析（剥序号前缀/滤空行）→ normalizeAnswer 归一化
+   （NFC、去标点、首词、seven/七→7、颜色与硬币词规范化）→ 该格 10 样本的
+   经验答案分布。system prompt 一致性由「基线与复测同配置采集」保证
+   （自带前缀不影响自比对，只影响跨端点对照——本设计只做自比对）。
+3. **比对与判定**：逐格 Jensen-Shannon 散度（base 2），只对两侧有效样本
+   ≥6 的格取平均 → meanJsd：≤0.25 match / 0.25–0.35 uncertain / >0.35
+   mismatch（detector 论文口径）。10 样本/格置信度有限（论文 25 样本），
+   verdict 是提醒信号而非结论——如实展示格数与样本量。
+4. **存档与提醒**：公司状态 `modelFingerprints[modelKey]`（modelKey =
+   `providerId/modelId` 或裸 modelId）：`{ baseline, last, lastVerdict,
+lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定）；
+   复测产出 verdict，mismatch/uncertain 时产生进化事件（「模型 X 指纹变动，
+   员工能力可能需重新拟合」）并在面板/驾驶舱出现未确认徽标。用户处置二选一：
+   「确认新指纹」（fingerprint.acknowledge——last 升为 baseline，从今起以
+   新模型为准）或坚持观察（不确认，徽标保留）；「重新拟合」= 用户按既有
+   流程改写委派 prompt/重建技能，平台不自动改写。
+5. **入口与门控**：公司面板「模型」标签（第七标签）：输入/选择 modelKey →
+   「采集指纹」→ 条目列表（基线时间/复测时间/verdict/未确认徽标）→
+   「确认新指纹」。采集串行执行（格间串行，避免并发采样互扰）。
+6. **成本**：每个 modelKey 8 会话（每会话 10 题）——手动触发，不自动轮询。
 
 ## 已知边界（review 收录，不修）
 

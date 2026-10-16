@@ -10,6 +10,8 @@ import {
   recordOpcRetro,
 } from "./opc-evolution.js";
 import { opcStableId, parseOpcRoleTemplate } from "./opc-template-format.js";
+import { compareOpcFingerprints } from "./opc-fingerprint.js";
+import type { OpcModelFingerprintEntry } from "./opc-types.js";
 import {
   isOpcWorkItemRunnable,
   isOpcWorkItemTransition,
@@ -650,6 +652,76 @@ function applyOnce(
             }`,
           },
         ],
+      };
+    }
+    case "fingerprint.capture": {
+      const fingerprint = mutation.fingerprint;
+      const existing = state.modelFingerprints?.[fingerprint.modelKey];
+      if (!existing) {
+        return {
+          state: {
+            ...state,
+            modelFingerprints: {
+              ...state.modelFingerprints,
+              [fingerprint.modelKey]: {
+                baseline: fingerprint,
+                last: fingerprint,
+              },
+            },
+          },
+          events: [],
+        };
+      }
+      const comparison = compareOpcFingerprints(existing.baseline, fingerprint);
+      const changed = comparison.verdict !== "match";
+      const events: OpcEvolutionEvent[] = changed
+        ? [
+            {
+              id: createOpcEntityId("ev", now),
+              at: now,
+              kind: "workitem",
+              summary: `模型 ${fingerprint.modelKey} 指纹${comparison.verdict === "mismatch" ? "变动" : "疑似变动"}（meanJsd ${comparison.meanJsd.toFixed(3)}，${comparison.comparedCells} 格可比）——员工能力可能需重新拟合，或确认新指纹`,
+            },
+          ]
+        : [];
+      return {
+        state: {
+          ...state,
+          ...(changed
+            ? {
+                evolution: [...state.evolution, ...events],
+              }
+            : {}),
+          modelFingerprints: {
+            ...state.modelFingerprints,
+            [fingerprint.modelKey]: {
+              baseline: existing.baseline,
+              last: fingerprint,
+              lastVerdict: comparison.verdict,
+              ...(changed ? { lastChangedAt: now } : {}),
+            },
+          },
+        },
+        events,
+      };
+    }
+    case "fingerprint.acknowledge": {
+      const entry = state.modelFingerprints?.[mutation.modelKey];
+      if (!entry) return { state, events: [] };
+      return {
+        state: {
+          ...state,
+          modelFingerprints: {
+            ...state.modelFingerprints,
+            [mutation.modelKey]: {
+              ...entry,
+              baseline: entry.last,
+              lastVerdict: undefined,
+              acknowledgedAt: now,
+            },
+          },
+        },
+        events: [],
       };
     }
     case "skill.remove": {

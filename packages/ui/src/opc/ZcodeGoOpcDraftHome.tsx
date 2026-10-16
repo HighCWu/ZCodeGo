@@ -35,7 +35,14 @@ export function ZcodeGoOpcDraftHome({
   }, [initialize, workspacePath, workspaceIdentity]);
 
   const openPanel = (
-    tab?: "kanban" | "org" | "market" | "skills" | "evolution" | "office",
+    tab?:
+      | "kanban"
+      | "org"
+      | "market"
+      | "skills"
+      | "evolution"
+      | "office"
+      | "models",
   ) => {
     window.dispatchEvent(
       new CustomEvent(OPC_OPEN_PANEL_EVENT, { detail: { tab } }),
@@ -65,6 +72,17 @@ export function ZcodeGoOpcDraftHome({
     }
     return counts;
   }, [state?.workItems]);
+  // 模型指纹变动（未确认）提醒（spec「模型指纹」节）
+  const changedModels = useMemo(
+    () =>
+      Object.entries(state?.modelFingerprints ?? {}).filter(
+        ([, entry]) =>
+          entry.lastVerdict !== undefined &&
+          entry.lastVerdict !== "match" &&
+          entry.acknowledgedAt === undefined,
+      ),
+    [state?.modelFingerprints],
+  );
 
   if (error === "ipc-unavailable") {
     return (
@@ -118,6 +136,21 @@ export function ZcodeGoOpcDraftHome({
           </p>
         </div>
       </div>
+      {changedModels.length > 0 ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-ui-xs text-foreground-subtle">
+          {intl.formatMessage(
+            { id: "opc.home.fingerprintChanged" },
+            { models: changedModels.map(([key]) => key).join("、") },
+          )}{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => openPanel("models")}
+          >
+            {intl.formatMessage({ id: "opc.home.fingerprintGo" })}
+          </button>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={() => openPanel()}>
           <Building2 className="size-4" />

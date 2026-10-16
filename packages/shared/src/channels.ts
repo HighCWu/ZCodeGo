@@ -24,7 +24,11 @@ import type {
   OpcInboxItem,
   OpcMutation,
 } from "./opc/opc-types.js";
-import type { StorageCleanRequest, StorageCleanResult, StorageUsageSnapshot } from "./storage.js";
+import type {
+  StorageCleanRequest,
+  StorageCleanResult,
+  StorageUsageSnapshot,
+} from "./storage.js";
 import type {
   ArmsCustomEventPayload,
   ConfigureFinalArmsCustomEventE2ERequest,
@@ -183,7 +187,8 @@ export const ServiceChannels = {
   OnboardingRecord: "onboarding-record",
 } as const;
 
-export type ServiceChannelName = (typeof ServiceChannels)[keyof typeof ServiceChannels];
+export type ServiceChannelName =
+  (typeof ServiceChannels)[keyof typeof ServiceChannels];
 
 // ============================================================================
 // 平台频道 —— 仅 Desktop main 进程能处理的操作（Electron IPC）
@@ -225,7 +230,8 @@ export const PlatformChannels = {
   /** 取消当前窗口正在进行中的远程连接 */
   CancelPendingRemoteConnection: "zcode:cancel-pending-remote-connection",
   /** Renderer → Main：绑定远程 logical session 的 canonical workspace context */
-  BindRemoteWorkspaceSessionContext: "zcode:bind-remote-workspace-session-context",
+  BindRemoteWorkspaceSessionContext:
+    "zcode:bind-remote-workspace-session-context",
   /** 为当前 workspace 开启 Web 远程控制 */
   StartWebRemoteControl: "zcode:start-web-remote-control",
   ResetWebRemoteControlPairing: "zcode:reset-web-remote-control-pairing",
@@ -260,7 +266,8 @@ export const PlatformChannels = {
   /** Renderer → Main：同步当前窗口可供 Web 远程控制展示的 task 快照 */
   SyncWebRemoteControlTasks: "zcode:sync-web-remote-control-tasks",
   /** Main → Renderer：手机端请求重连当前窗口里的远程 workspace */
-  WebRemoteControlReconnectWorkspace: "zcode:web-remote-control-reconnect-workspace",
+  WebRemoteControlReconnectWorkspace:
+    "zcode:web-remote-control-reconnect-workspace",
   /** Renderer → Main：同步当前窗口的未读 task 数 */
   SyncWindowUnreadCount: "zcode:sync-window-unread-count",
   /** Renderer → Main：当前窗口 active task，只更新 Main 的临时焦点映射。 */
@@ -290,11 +297,14 @@ export const PlatformChannels = {
   /** Main → Renderer：Agent 设置/重置目标 tab viewport */
   BrowserViewViewportChanged: "zcode:browser-view-viewport-changed",
   /** Main → Renderer：截图前请求 owner renderer 准备后台 guest 合成表面。 */
-  BrowserViewScreenshotSurfacePrepare: "zcode:browser-view-screenshot-surface-prepare",
+  BrowserViewScreenshotSurfacePrepare:
+    "zcode:browser-view-screenshot-surface-prepare",
   /** Renderer → Main：目标 guest 连续两个 animation frame 的 viewport 已稳定。 */
-  BrowserViewScreenshotSurfaceReady: "zcode:browser-view-screenshot-surface-ready",
+  BrowserViewScreenshotSurfaceReady:
+    "zcode:browser-view-screenshot-surface-ready",
   /** Main → Renderer：截图结束或准备失败，释放临时后台合成层。 */
-  BrowserViewScreenshotSurfaceRelease: "zcode:browser-view-screenshot-surface-release",
+  BrowserViewScreenshotSurfaceRelease:
+    "zcode:browser-view-screenshot-surface-release",
   /** Main → Renderer：agent close 命令 detach 受控 guest 后，通知 renderer 卸载对应 tab */
   BrowserViewCloseTab: "zcode:browser-view-close-tab",
   /** Main → Renderer：预算淘汰时卸载 guest，但保留 logical tab shell。 */
@@ -365,7 +375,8 @@ export const PlatformChannels = {
    * 在 dragstart 里就收窗：startDrag 只是把 drag session 交给 OS，非阻塞，drag source
    * 立刻消失可能打断正在进行的拖拽。
    */
-  NotifyCuaHelperPermissionDragEnded: "zcode:notify-cua-helper-permission-drag-ended",
+  NotifyCuaHelperPermissionDragEnded:
+    "zcode:notify-cua-helper-permission-drag-ended",
   /** Renderer → Main：上报 OAuth state 用于 deep link 路由 */
   OAuthRegisterState: "zcode:oauth-register-state",
   /** Main → Renderer：转发 deep link URL */
@@ -387,7 +398,8 @@ export const PlatformChannels = {
   /** Renderer → Main：读取 Renderer 用户操作 Trace 灰度配置。 */
   GetRendererActionTraceConfig: "zcode:get-renderer-action-trace-config",
   /** Main → Renderer：Renderer 用户操作 Trace 灰度配置变化。 */
-  RendererActionTraceConfigChanged: "zcode:renderer-action-trace-config-changed",
+  RendererActionTraceConfigChanged:
+    "zcode:renderer-action-trace-config-changed",
   /** Renderer → Main：发送已结束的 ui_action batch。 */
   ReportRendererActionTraceBatch: "zcode:report-renderer-action-trace-batch",
   /** Renderer → Main：主窗口 renderer 每 60 秒的 heap 读数，单向 send，不需要回执。 */
@@ -398,7 +410,8 @@ export const PlatformChannels = {
   /** E2E preload → Main：清空 sendCustom 最终参数的内存 ring。 */
   ClearFinalArmsCustomEventsE2E: "zcode:e2e:clear-final-arms-custom-events",
   /** E2E preload → Main：配置只针对目标 event name 的真实网络抑制。 */
-  ConfigureFinalArmsCustomEventsE2E: "zcode:e2e:configure-final-arms-custom-events",
+  ConfigureFinalArmsCustomEventsE2E:
+    "zcode:e2e:configure-final-arms-custom-events",
   /** Renderer → Main：触发任务完成/失败的系统通知 */
   ShowTaskNotification: "zcode:show-task-notification",
   /** Main → Preload：通知 renderer 播放任务通知提示音 */
@@ -435,13 +448,17 @@ export const PlatformChannels = {
   /** Renderer → Main：清理内置浏览器缓存或全部站点数据。 */
   ClearEmbeddedBrowserData: "zcode:clear-embedded-browser-data",
   /** Renderer → Main：读取内置浏览器站点权限记录（设置页「网站权限」） */
-  GetEmbeddedBrowserSitePermissions: "zcode:get-embedded-browser-site-permissions",
+  GetEmbeddedBrowserSitePermissions:
+    "zcode:get-embedded-browser-site-permissions",
   /** Renderer → Main：修改/删除单条站点权限（state="ask" 表示删除） */
-  SetEmbeddedBrowserSitePermission: "zcode:set-embedded-browser-site-permission",
+  SetEmbeddedBrowserSitePermission:
+    "zcode:set-embedded-browser-site-permission",
   /** Renderer → Main：清空全部站点权限记录 */
-  ClearEmbeddedBrowserSitePermissions: "zcode:clear-embedded-browser-site-permissions",
+  ClearEmbeddedBrowserSitePermissions:
+    "zcode:clear-embedded-browser-site-permissions",
   /** Renderer → Main：重置单个站点的全部权限记录（站点权限设置标签页「重置」） */
-  ResetEmbeddedBrowserSitePermission: "zcode:reset-embedded-browser-site-permission",
+  ResetEmbeddedBrowserSitePermission:
+    "zcode:reset-embedded-browser-site-permission",
   /** Main → Renderer：通知有新版本已下载完毕，可以重启安装 */
   UpdateReady: "zcode:update-ready",
   /** Main → Renderer：用户手动点击"检查更新"后的结果反馈（toast 用） */
@@ -459,7 +476,8 @@ export const PlatformChannels = {
   /** Renderer → Main：读取自动更新偏好 */
   GetAutoUpdatePreferences: "zcode:get-auto-update-preferences",
   /** Renderer → Main：写入“自动下载并安装更新”偏好 */
-  SetAutoDownloadAndInstallUpdates: "zcode:set-auto-download-and-install-updates",
+  SetAutoDownloadAndInstallUpdates:
+    "zcode:set-auto-download-and-install-updates",
   /** Renderer → Main：查询桌面端正在运行的会话数量 */
   GetDesktopSessionActivity: "zcode:get-desktop-session-activity",
   /** Renderer → Main：读取当前窗口页面缩放档位 */
@@ -502,15 +520,19 @@ export const PlatformChannels = {
   ZcodeGoTakeSessionInitial: "zcode:zcode-go-take-session-initial",
   /** Renderer → Main：移动端远程控制——开始配对（生成二维码/链接并连信令） */
   ZcodeGoMobileBridgeStart: "zcode:zcode-go-mobile-bridge-start",
-  ZcodeGoMobileBridgeSetDialogVisible: "zcode:zcode-go-mobile-bridge-set-dialog-visible",
+  ZcodeGoMobileBridgeSetDialogVisible:
+    "zcode:zcode-go-mobile-bridge-set-dialog-visible",
   /** Renderer → Main：移动端远程控制——停止配对/断开 */
   ZcodeGoMobileBridgeStop: "zcode:zcode-go-mobile-bridge-stop",
   /** Renderer → Main：移动端远程控制——查询当前状态 */
   ZcodeGoMobileBridgeGetStatus: "zcode:zcode-go-mobile-bridge-get-status",
-  ZcodeGoMobileBridgeGetSignalingOrigin: "zcode:zcode-go-mobile-bridge-get-signaling-origin",
-  ZcodeGoMobileBridgeSetSignalingOrigin: "zcode:zcode-go-mobile-bridge-set-signaling-origin",
+  ZcodeGoMobileBridgeGetSignalingOrigin:
+    "zcode:zcode-go-mobile-bridge-get-signaling-origin",
+  ZcodeGoMobileBridgeSetSignalingOrigin:
+    "zcode:zcode-go-mobile-bridge-set-signaling-origin",
   /** Main → Renderer：移动端远程控制状态变化（配对 URL / 连接状态） */
-  ZcodeGoMobileBridgeStatusChanged: "zcode:zcode-go-mobile-bridge-status-changed",
+  ZcodeGoMobileBridgeStatusChanged:
+    "zcode:zcode-go-mobile-bridge-status-changed",
   // zcode-go：OPC 模式（AI 原生公司）通道——读取/应用/导入/广播
   /** Renderer → Main：读取工作区 OPC 公司状态（缺失时初始化默认公司） */
   ZcodeGoOpcGetState: "zcode:zcode-go-opc-get-state",
@@ -524,6 +546,8 @@ export const PlatformChannels = {
   ZcodeGoOpcStateChanged: "zcode:zcode-go-opc-state-changed",
   /** Renderer → Main：消费入站队列条目（转工作项或忽略；文件名须纯 basename） */
   ZcodeGoOpcConsumeInbox: "zcode:zcode-go-opc-consume-inbox",
+  /** Renderer → Main：读模型指纹采集样本（.opc/fingerprint/<纯 basename>.json） */
+  ZcodeGoOpcReadFingerprintSample: "zcode:zcode-go-opc-read-fingerprint-sample",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
@@ -534,7 +558,8 @@ export const PlatformChannels = {
   GetDeviceId: "zcode:get-device-id",
 } as const;
 
-export type PlatformChannelName = (typeof PlatformChannels)[keyof typeof PlatformChannels];
+export type PlatformChannelName =
+  (typeof PlatformChannels)[keyof typeof PlatformChannels];
 
 // ============================================================================
 // 内置 WebView 频道 —— 固定 guest preload ↔ embedder renderer
@@ -657,7 +682,8 @@ export const HostMessageTypes = {
   /** main → host：Bot 远端 workspace 重连结果 */
   BotRemoteWorkspaceReconnectResult: "bot-remote-workspace-reconnect-result",
   /** main → host：Bot 远端 workspace 连接状态查询结果 */
-  BotRemoteWorkspaceConnectionStatusResult: "bot-remote-workspace-connection-status-result",
+  BotRemoteWorkspaceConnectionStatusResult:
+    "bot-remote-workspace-connection-status-result",
   /** main → host：Bot 远端 workspace runtime RPC 端口 */
   BotRemoteWorkspaceRuntimePort: "bot-remote-workspace-runtime-port",
   /** main → host：把 session message 投递到该 host 管理的目标 session */
@@ -673,7 +699,8 @@ export const HostMessageTypes = {
   /** main → host：browser-use 命令执行结果（CDP 执行完回传，按 requestId 关联） */
   BrowserExecuteResult: "browser-execute-result",
   /** main → host：本地视频 canonical path 授权结果 */
-  LocalMediaPreviewPathAuthorizeResult: "local-media-preview-path-authorize-result",
+  LocalMediaPreviewPathAuthorizeResult:
+    "local-media-preview-path-authorize-result",
   /** main → host：插件 UI 沙箱登记结果（PluginSandboxRegisterResultPayload） */
   PluginSandboxRegisterResult: "plugin-sandbox-register-result",
   /** Main → Host：全局前台 ZCode 窗口派生的 producer focus fact。 */
@@ -752,9 +779,11 @@ export const HostResponseTypes = {
   /** host → main：Bot 请求创建远端 workspace session */
   BotRemoteWorkspaceReconnectRequest: "bot-remote-workspace-reconnect-request",
   /** host → main：Bot 查询当前窗口是否已有远端 workspace session */
-  BotRemoteWorkspaceConnectionStatusRequest: "bot-remote-workspace-connection-status-request",
+  BotRemoteWorkspaceConnectionStatusRequest:
+    "bot-remote-workspace-connection-status-request",
   /** host → main：Bot 请求远端 workspace runtime RPC 端口 */
-  BotRemoteWorkspaceRuntimePortRequest: "bot-remote-workspace-runtime-port-request",
+  BotRemoteWorkspaceRuntimePortRequest:
+    "bot-remote-workspace-runtime-port-request",
   /** host → main：Agent 请求向另一个 session 发送消息 */
   SessionMessageSendRequested: "session-message-send-requested",
   /** host → main：声明一个 ZCode Agent session 当前归属该 host */
@@ -774,7 +803,8 @@ export const HostResponseTypes = {
   /** host → main：执行一条 browser-use 命令（main 用 WebContentsView+CDP 执行，按 requestId 关联） */
   BrowserExecuteRequest: "browser-execute-request",
   /** host → main：请求授权 Agent 已精确校验的本地视频路径 */
-  LocalMediaPreviewPathAuthorizeRequest: "local-media-preview-path-authorize-request",
+  LocalMediaPreviewPathAuthorizeRequest:
+    "local-media-preview-path-authorize-request",
   /** host → main：登记已校验的插件 UI HTML 与 CSP，换取 sandbox 句柄（PluginSandboxRegisterRequestPayload） */
   PluginSandboxRegisterRequest: "plugin-sandbox-register-request",
   /** host → main：RPC 网络遥测批次（channel.command 成功率/耗时） */
@@ -1369,17 +1399,31 @@ export interface PlatformChannelMap {
     response: { from: string; to: string };
   };
   [PlatformChannels.ZcodeGoOpenSessionInNewWindow]: {
-    request: { taskId: string; workspacePath: string; workspaceIdentity?: string };
+    request: {
+      taskId: string;
+      workspacePath: string;
+      workspaceIdentity?: string;
+    };
     response: { ok: boolean; error?: string };
   };
   [PlatformChannels.ZcodeGoTakeSessionInitial]: {
     request: void;
-    response: { taskId: string; workspacePath: string; workspaceIdentity?: string } | null;
+    response: {
+      taskId: string;
+      workspacePath: string;
+      workspaceIdentity?: string;
+    } | null;
   };
   [PlatformChannels.ZcodeGoMobileBridgeStart]: {
     request: void;
     response: {
-      state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+      state:
+        | "idle"
+        | "signaling"
+        | "waiting-mobile"
+        | "connecting"
+        | "connected"
+        | "error";
       pairingUrl?: string;
       qrUrl?: string;
       token?: string;
@@ -1397,7 +1441,13 @@ export interface PlatformChannelMap {
   [PlatformChannels.ZcodeGoMobileBridgeGetStatus]: {
     request: void;
     response: {
-      state: "idle" | "signaling" | "waiting-mobile" | "connecting" | "connected" | "error";
+      state:
+        | "idle"
+        | "signaling"
+        | "waiting-mobile"
+        | "connecting"
+        | "connected"
+        | "error";
       pairingUrl?: string;
       qrUrl?: string;
       token?: string;
@@ -1485,6 +1535,11 @@ export interface PlatformChannelMap {
       inbox?: OpcInboxItem[];
       error?: string;
     };
+  };
+  [PlatformChannels.ZcodeGoOpcReadFingerprintSample]: {
+    request: { workspacePath: string; fileName: string };
+    /** content 为 null = 文件尚不存在（采集端轮询等待） */
+    response: { ok: boolean; content: string | null; error?: string };
   };
   [PlatformChannels.SetApplicationLocale]: {
     request: Locale;

@@ -706,6 +706,64 @@ const tgFiles = existsSync(tgInboxDir)
 assert(tgFiles.length === 1, "Telegram 渠道桥投递入站（1 条）");
 assert(telegramHits > 0, "mock API 收到 getUpdates");
 
+// ── 8. 模型指纹：capture → mismatch verdict → acknowledge ──────────────────
+{
+  const fpCell = {
+    domain: "number100",
+    valid: 10,
+    invalid: 0,
+    raw: 10,
+  };
+  const mkFp = (prefer42) => ({
+    modelKey: "glm/glm-4.7",
+    capturedAt: Date.now(),
+    cells: {
+      "random-number-1-100:en": {
+        ...fpCell,
+        counts: prefer42 ? { 42: 10 } : { 73: 10 },
+      },
+    },
+    sessionCount: 1,
+    validTotal: 10,
+  });
+  const fpBase = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "fingerprint.capture", fingerprint: ${JSON.stringify(mkFp(true))} }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const baseEntry = fpBase.state?.modelFingerprints?.["glm/glm-4.7"];
+  assert(
+    fpBase.ok &&
+      baseEntry &&
+      baseEntry.baseline === baseEntry.last &&
+      !baseEntry.lastVerdict,
+    "指纹：首次采集建 baseline 无判定",
+  );
+  const fpFlip = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "fingerprint.capture", fingerprint: ${JSON.stringify(mkFp(false))} }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const flipEntry = fpFlip.state?.modelFingerprints?.["glm/glm-4.7"];
+  assert(
+    flipEntry.lastVerdict === "mismatch" &&
+      flipEntry.lastChangedAt !== undefined,
+    "指纹：复测分布翻转 → mismatch verdict + 变更时间",
+  );
+  const ack = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "fingerprint.acknowledge", modelKey: "glm/glm-4.7" }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const ackEntry = ack.state?.modelFingerprints?.["glm/glm-4.7"];
+  assert(
+    ackEntry.baseline === ackEntry.last &&
+      !ackEntry.lastVerdict &&
+      ackEntry.acknowledgedAt !== undefined,
+    "指纹：确认新指纹（last 升 baseline）",
+  );
+}
+
 // ── 清理 ──────────────────────────────────────────────────────────────────
 mockApi.close();
 appProc.kill();

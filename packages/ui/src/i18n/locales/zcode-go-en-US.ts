@@ -59,6 +59,28 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.seniority.senior": "Senior",
   "opc.seniority.lead": "Lead",
   "opc.category.general": "General",
+  "opc.tab.models": "Models",
+  "opc.home.fingerprintChanged":
+    "Model fingerprint changed: {models} — employee capabilities may need refitting, or acknowledge the new model.",
+  "opc.home.fingerprintGo": "View fingerprints →",
+  "opc.models.hint":
+    "Providers may silently route a model ID to different underlying models — employee prompts were fitted to the model at hire time. Captures a behavioral fingerprint (one-word answer distribution) for baseline self-comparison and alerts on change. 8 probe sessions per model.",
+  "opc.models.placeholder": "model key, e.g. glm/glm-4.7",
+  "opc.models.capture": "Capture fingerprint",
+  "opc.models.capturing": "Capturing…",
+  "opc.models.probing": "Probing {cell} …",
+  "opc.models.captureDone": "Capture complete, fingerprint archived",
+  "opc.models.captureFailed": "Capture failed (no valid samples or timeout)",
+  "opc.models.empty":
+    "No fingerprints yet — enter a model key and capture a baseline",
+  "opc.models.verdict.match": "fingerprint match",
+  "opc.models.verdict.uncertain": "possible change",
+  "opc.models.verdict.mismatch": "fingerprint changed",
+  "opc.models.baselineOnly": "baseline only",
+  "opc.models.times": "baseline {baseline} · last {last}",
+  "opc.models.unconfirmed":
+    "Fingerprint differs from baseline: employee capabilities may need refitting (rewrite delegation prompts / rebuild skills), or acknowledge the new model as-is",
+  "opc.models.acknowledge": "Acknowledge new fingerprint",
   "opc.category.ai": "AI",
   "opc.category.productivity": "Productivity",
   "opc.category.strategy": "Strategy",

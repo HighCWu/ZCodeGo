@@ -41,6 +41,7 @@ import { OpcTalentMarket } from "./OpcTalentMarket.js";
 import { OpcSkillsView } from "./OpcSkillsView.js";
 import { OpcEvolutionView } from "./OpcEvolutionView.js";
 import { OpcOfficeMap } from "./OpcOfficeMap.js";
+import { OpcModelsView } from "./OpcModelsView.js";
 import { insertOpcPrompt } from "./opcComposerBridge.js";
 import { downloadTextFile, readFileText } from "./opcFiles.js";
 import {
@@ -73,7 +74,14 @@ import { logger } from "@/logger.js";
 
 export const OPC_OPEN_PANEL_EVENT = "zcode-go:opc-open";
 
-type PanelTab = "kanban" | "office" | "org" | "market" | "skills" | "evolution";
+type PanelTab =
+  | "kanban"
+  | "office"
+  | "models"
+  | "org"
+  | "market"
+  | "skills"
+  | "evolution";
 
 export function ZcodeGoOpcPanelRoot({
   workspaceIdentity,
@@ -511,9 +519,12 @@ export function ZcodeGoOpcPanelRoot({
               <TabsTrigger value="evolution">
                 {intl.formatMessage({ id: "opc.tab.evolution" })}
               </TabsTrigger>
-              {/* spec「产品规则」六标签：缺此触发器则办公室地图永久不可达 */}
+              {/* spec「产品规则」七标签：缺触发器则对应面板不可达 */}
               <TabsTrigger value="office">
                 {intl.formatMessage({ id: "opc.tab.office" })}
+              </TabsTrigger>
+              <TabsTrigger value="models">
+                {intl.formatMessage({ id: "opc.tab.models" })}
               </TabsTrigger>
             </TabsList>
             <TabsContent value="office" className="min-h-0 flex-1">
@@ -522,6 +533,12 @@ export function ZcodeGoOpcPanelRoot({
                 onRetrospective={(employee) =>
                   setRetroDialog({ employeeId: employee.id })
                 }
+              />
+            </TabsContent>
+            <TabsContent value="models" className="min-h-0 flex-1">
+              <OpcModelsView
+                state={state}
+                workspaceIdentity={workspaceIdentity}
               />
             </TabsContent>
             <TabsContent value="kanban" className="min-h-0 flex-1">

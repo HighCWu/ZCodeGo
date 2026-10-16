@@ -597,6 +597,35 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
   );
 
   ipcMain.handle(
+    PlatformChannels.ZcodeGoOpcReadFingerprintSample,
+    async (
+      _event,
+      payload: { workspacePath: string; fileName: string },
+    ): Promise<{ ok: boolean; content: string | null; error?: string }> => {
+      try {
+        // 纯 basename 校验（同 consumeInbox 的防穿越纪律）；只读 .opc/fingerprint/
+        if (
+          !payload.fileName ||
+          payload.fileName !== basename(payload.fileName) ||
+          !payload.fileName.endsWith(".json")
+        ) {
+          return { ok: false, content: null, error: "invalid fileName" };
+        }
+        const sampleFile = join(
+          opcRoot(payload.workspacePath),
+          "fingerprint",
+          payload.fileName,
+        );
+        const content = await readFile(sampleFile, "utf8");
+        return { ok: true, content };
+      } catch {
+        // ENOENT = 采集端继续轮询；其余错误同形返回
+        return { ok: true, content: null };
+      }
+    },
+  );
+
+  ipcMain.handle(
     PlatformChannels.ZcodeGoOpcConsumeInbox,
     async (
       _event,

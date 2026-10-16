@@ -219,6 +219,59 @@ export interface OpcCompanyState {
    * 可选字段，旧状态文件无需迁移。
    */
   promotedSkillTombstones?: string[];
+  /**
+   * 模型指纹档案（spec「模型指纹」节）：modelKey → 基线/最近一次采集与
+   * 判定。可选字段，旧状态文件无需迁移。
+   */
+  modelFingerprints?: Record<string, OpcModelFingerprintEntry>;
+}
+
+// ---------------------------------------------------------------------------
+// 模型指纹（spec「模型指纹」节）：同 ID 模型变动的检测与提醒
+// ---------------------------------------------------------------------------
+
+export type OpcFingerprintVerdict = "match" | "uncertain" | "mismatch";
+
+export interface OpcProbeCellStats {
+  domain: OpcProbeDomain;
+  /** 归一化答案 → 计数（仅有效样本）。 */
+  counts: Record<string, number>;
+  valid: number;
+  invalid: number;
+  /** 本次会话采到的原始样本数（应 ≈ prompts 数）。 */
+  raw: number;
+}
+
+export type OpcProbeDomain =
+  | "number100"
+  | "favoriteNumber"
+  | "color"
+  | "letter"
+  | "coin"
+  | "city"
+  | "animal";
+
+export interface OpcModelFingerprint {
+  /** providerId/modelId 或裸 modelId。 */
+  modelKey: string;
+  capturedAt: number;
+  /** 格键 → 分布统计。 */
+  cells: Record<string, OpcProbeCellStats>;
+  sessionCount: number;
+  /** 全格有效样本总数（诊断用）。 */
+  validTotal: number;
+}
+
+/** state.modelFingerprints 的条目：基线 + 最近采集 + 判定与处置时间。 */
+export interface OpcModelFingerprintEntry {
+  baseline: OpcModelFingerprint;
+  last: OpcModelFingerprint;
+  /** 最近一次比对判定；首次采集（last 即 baseline）时无。 */
+  lastVerdict?: OpcFingerprintVerdict;
+  /** 最近一次比对出非 match verdict 的时间。 */
+  lastChangedAt?: number;
+  /** 用户「确认新指纹」的时间（last 已升为 baseline）。 */
+  acknowledgedAt?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +391,16 @@ export type OpcMutation =
     }
   | { kind: "skill.upgrade"; skillId: string; body: string; note?: string }
   | { kind: "skill.remove"; skillId: string }
+  | {
+      /** 确认新指纹：last 升为 baseline（spec「模型指纹」节的用户处置）。 */
+      kind: "fingerprint.acknowledge";
+      modelKey: string;
+    }
+  | {
+      /** 采集结果落档：首次建 baseline，复测与 baseline 比对出 verdict。 */
+      kind: "fingerprint.capture";
+      fingerprint: OpcModelFingerprint;
+    }
   | { kind: "template.importRole"; markdown: string };
 
 export interface OpcMutationResult {
