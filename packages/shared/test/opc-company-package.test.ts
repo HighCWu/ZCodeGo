@@ -4,8 +4,12 @@ import {
   buildOpcCompanyPackage,
   parseOpcCompanyPackage,
 } from "../src/opc/opc-company-package.js";
-import { createEmptyOpcCompanyState, applyOpcMutation } from "../src/opc/opc-reducer.js";
 import {
+  createEmptyOpcCompanyState,
+  applyOpcMutation,
+} from "../src/opc/opc-reducer.js";
+import {
+  extractOpcDoneMarkers,
   buildOpcDelegationPrompt,
   buildOpcDoneMarker,
   extractOpcDoneMarkerIds,
@@ -14,11 +18,18 @@ import {
 const NOW = 1_700_000_000_000;
 
 describe("完成标记（opc-done）", () => {
-  it("构建与提取往返一致；多标记全收集", () => {
+  it("构建与提取往返一致；多标记全收集；轮次后缀兼容", () => {
     const marker = buildOpcDoneMarker("wi_abc");
-    expect(marker).toBe("<!-- zcode-go:opc-done wi_abc -->");
+    expect(marker).toBe("<!-- zcode-go:opc-done wi_abc:r0 -->");
     const text = `第一行\n${marker}\n中间 ${buildOpcDoneMarker("wi_def")}\n尾部`;
     expect(extractOpcDoneMarkerIds(text)).toEqual(["wi_abc", "wi_def"]);
+    // 旧格式（无轮次）兼容提取；轮次随返工递增
+    expect(extractOpcDoneMarkers("<!-- zcode-go:opc-done wi_old -->")).toEqual([
+      { id: "wi_old", round: 0 },
+    ]);
+    expect(extractOpcDoneMarkers(buildOpcDoneMarker("wi_x", 2))).toEqual([
+      { id: "wi_x", round: 2 },
+    ]);
   });
 
   it("普通文本与残缺标记不误报", () => {
@@ -71,7 +82,11 @@ describe("完成标记（opc-done）", () => {
 describe("公司包（导出/导入）", () => {
   function makeSourceState() {
     let state = createEmptyOpcCompanyState(NOW);
-    state = applyOpcMutation(state, { kind: "role-slot.create", title: "研发负责人" }, NOW + 1).state;
+    state = applyOpcMutation(
+      state,
+      { kind: "role-slot.create", title: "研发负责人" },
+      NOW + 1,
+    ).state;
     const roleId = state.roleSlots[0]!.id;
     state = applyOpcMutation(
       state,
@@ -79,13 +94,27 @@ describe("公司包（导出/导入）", () => {
         kind: "employee.hire",
         templateId: "全栈开发工程师",
         roleId,
-        custom: { name: "老王", category: "engineering", emoji: "🧑‍💻", color: "blue", vibe: "稳", description: "", seniority: "lead" },
+        custom: {
+          name: "老王",
+          category: "engineering",
+          emoji: "🧑‍💻",
+          color: "blue",
+          vibe: "稳",
+          description: "",
+          seniority: "lead",
+        },
       },
       NOW + 2,
     ).state;
     state = applyOpcMutation(
       state,
-      { kind: "skill.import", skillId: "demo", name: "演示技能", description: "d", body: "# 正文" },
+      {
+        kind: "skill.import",
+        skillId: "demo",
+        name: "演示技能",
+        description: "d",
+        body: "# 正文",
+      },
       NOW + 3,
     ).state;
     return state;
@@ -98,8 +127,12 @@ describe("公司包（导出/导入）", () => {
       skillBodies: { demo: "# 正文" },
       roleTemplateBodies: {},
     });
-    const parsed = parseOpcCompanyPackage(JSON.stringify(JSON.parse(JSON.stringify(pkg))));
-    expect(parsed?.state.employees.map((employee) => employee.name)).toContain("老王");
+    const parsed = parseOpcCompanyPackage(
+      JSON.stringify(JSON.parse(JSON.stringify(pkg))),
+    );
+    expect(parsed?.state.employees.map((employee) => employee.name)).toContain(
+      "老王",
+    );
     expect(parsed?.skillBodies.demo).toBe("# 正文");
   });
 
@@ -128,6 +161,8 @@ describe("公司包（导出/导入）", () => {
 
   it("非法文档返回 null", () => {
     expect(parseOpcCompanyPackage("not json")).toBeNull();
-    expect(parseOpcCompanyPackage(JSON.stringify({ kind: "other" }))).toBeNull();
+    expect(
+      parseOpcCompanyPackage(JSON.stringify({ kind: "other" })),
+    ).toBeNull();
   });
 });

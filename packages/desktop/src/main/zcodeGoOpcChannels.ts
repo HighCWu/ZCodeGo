@@ -13,7 +13,13 @@
  * 官方 zcode 的 bots 基建（services/bots）路由的是 bot 会话；本桥只喂 OPC 入站，
  * 两者独立。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseOpcInboxFile } from "@zcode/shared";
@@ -97,7 +103,7 @@ export function selectAllowedTexts(
     if (chatId === undefined || !text) continue;
     // deny-by-default：allowFrom 空数组 = 拒绝一切入站
     if (!allowed.has(String(chatId))) continue;
-    results.push({ chatId: String(chatId), text });
+    results.push({ chatId: String(chatId), text, updateId: update.update_id });
   }
   return results;
 }
@@ -118,11 +124,10 @@ export function writeTelegramOffset(offset: number): void {
     mkdirSync(CHANNELS_STATE_FILE.replace(/[/\\][^/\\]+$/, ""), {
       recursive: true,
     });
-    writeFileSync(
-      CHANNELS_STATE_FILE,
-      JSON.stringify({ offset }, null, 1),
-      "utf8",
-    );
+    // tmp + rename：直写在崩溃时可能留半文件，下次启动解析失败归 0 → 全量重放
+    const tmp = `${CHANNELS_STATE_FILE}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify({ offset }, null, 1), "utf8");
+    renameSync(tmp, CHANNELS_STATE_FILE);
   } catch {
     /* 尽力而为 */
   }
@@ -173,7 +178,8 @@ export async function pollTelegramOnce(
     maxUpdateId = Math.max(maxUpdateId, update.update_id + 1);
   }
   for (const message of messages) {
-    const fileName = `${Date.now()}-telegram-${Math.abs(hashString(message.text + message.chatId))}.json`;
+    // update_id 唯一化文件名：时间戳 + 内容哈希在同毫秒同文本时互相覆盖丢消息
+    const fileName = `${Date.now()}-telegram-u${message.updateId}-${Math.abs(hashString(message.text + message.chatId))}.json`;
     const item = parseOpcInboxFile(
       fileName,
       JSON.stringify({
@@ -211,10 +217,18 @@ export function startTelegramChannelPolling(
 ): (() => void) | null {
   const config = readTelegramChannelConfig();
   if (!config) return null; // 零配置零足迹
+  // 防重入：上轮 fetch 挂起超过轮询间隔时，并发轮询拿同一 offset 会重复投递
+  let polling = false;
   const timer = setInterval(() => {
-    void pollTelegramOnce({ ...deps, config }).catch(() => {
-      /* 轮询失败静默（下轮重试） */
-    });
+    if (polling) return;
+    polling = true;
+    void pollTelegramOnce({ ...deps, config })
+      .catch(() => {
+        /* 轮询失败静默（下轮重试） */
+      })
+      .finally(() => {
+        polling = false;
+      });
   }, POLL_INTERVAL_MS);
   deps.onStarted?.();
   return () => clearInterval(timer);

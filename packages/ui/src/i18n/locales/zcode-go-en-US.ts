@@ -227,6 +227,8 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.employee.statusDeparted": "departed",
   // zcode-go: OPC company package messages
   "opc.org.exportCompany": "Export company",
+  "opc.org.exportArchitecture": "Export org",
+  "opc.org.importArchitecture": "Import org",
   "opc.org.importCompany": "Import company",
   "opc.skills.export": "Export",
   // zcode-go: OPC office map & permission messages
@@ -252,6 +254,9 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.inbox.convert": "Convert",
   "opc.inbox.dismiss": "Dismiss",
   "opc.inbox.empty": "Inbound queue is empty (see the ingest contract in spec)",
+  "opc.orchestrate.button": "🚀 Orchestrate",
+  "opc.orchestrate.hint":
+    "Ready & assigned work items: {count} (dispatched as headless sessions)",
   "opc.common.close": "Close",
   // zcode-go: OPC orchestrator messages
   "settings.zcodeGo.opcAutoOrchestrate": "OPC auto-orchestrate",

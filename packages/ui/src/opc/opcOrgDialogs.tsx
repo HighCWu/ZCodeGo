@@ -114,6 +114,8 @@ export function OpcOrgGenerateDialog({
                   workspaceIdentity: workspaceIdentity ?? undefined,
                   text: buildOpcOrgGeneratePrompt({ goal }),
                 });
+                // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                onClose();
               }}
             >
               {intl.formatMessage({ id: "opc.org.generatePrompt" })}

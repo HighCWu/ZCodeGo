@@ -14,21 +14,39 @@ import {
 
 const MAX_SKILL_BODIES = 4;
 
-/** 完成标记：agent 验收自查通过后在回复末尾单独一行输出（委派 prompt 注入约定）。 */
-export function buildOpcDoneMarker(workItemId: string): string {
-  return `<!-- zcode-go:opc-done ${workItemId} -->`;
+/**
+ * 完成标记：agent 验收自查通过后在回复末尾单独一行输出（委派 prompt 注入约定）。
+ * round = 返工轮次（reworkNotes.length）：标记携带轮次后缀，done watcher 的
+ * 去重键才能在「返工后旧标记仍在扫描窗」时正确等待新一轮的完成——
+ * 不带轮次的固定标记会让返工刚发出就被旧标记推回 review（闭环失效）。
+ */
+export function buildOpcDoneMarker(workItemId: string, round = 0): string {
+  return `<!-- zcode-go:opc-done ${workItemId}:r${round} -->`;
+}
+
+export interface OpcDoneMarkerHit {
+  id: string;
+  /** 返工轮次；旧格式（无后缀）为 0。 */
+  round: number;
+}
+
+/** 从文本中提取完成标记（重复/多个标记都收集，兼容无轮次的旧格式）。 */
+export function extractOpcDoneMarkers(text: string): OpcDoneMarkerHit[] {
+  const hits: OpcDoneMarkerHit[] = [];
+  const pattern = /<!--\s*zcode-go:opc-done\s+([\w-]+?)(?::r(\d+))?\s*-->/g;
+  let match = pattern.exec(text);
+  while (match !== null) {
+    if (match[1]) {
+      hits.push({ id: match[1], round: match[2] ? Number(match[2]) : 0 });
+    }
+    match = pattern.exec(text);
+  }
+  return hits;
 }
 
 /** 从文本中提取完成标记的工作项 id（重复/多个标记都收集）。 */
 export function extractOpcDoneMarkerIds(text: string): string[] {
-  const ids: string[] = [];
-  const pattern = /<!--\s*zcode-go:opc-done\s+([\w:-]+)\s*-->/g;
-  let match = pattern.exec(text);
-  while (match !== null) {
-    if (match[1]) ids.push(match[1]);
-    match = pattern.exec(text);
-  }
-  return ids;
+  return [...new Set(extractOpcDoneMarkers(text).map((hit) => hit.id))];
 }
 
 export function buildOpcDelegationPrompt(
@@ -78,10 +96,14 @@ export function buildOpcDelegationPrompt(
     sections.push("", "### 背景与验收标准", "", workItem.detail.trim());
   }
   if (workItem.dependsOn.length > 0) {
-    sections.push(
-      "",
-      `注意：本任务依赖以下前置工作项的产出：${workItem.dependsOn.join("、")}。`,
+    // 裸 id 对 agent 无意义：带标题映射（allWorkItems 由调用方传入，缺省退化为裸 id）
+    const titleById = new Map(
+      (input.allWorkItems ?? []).map((item) => [item.id, item.title]),
     );
+    const deps = workItem.dependsOn
+      .map((id) => (titleById.get(id) ? `${titleById.get(id)}（${id}）` : id))
+      .join("、");
+    sections.push("", `注意：本任务依赖以下前置工作项的产出：${deps}。`);
   }
   const permission = input.permissionLevel ?? "workspace-write";
   const permissionText =
@@ -112,7 +134,7 @@ export function buildOpcDelegationPrompt(
     "- 以角色说明书的方法论完成任务，交付物直接给出（文档/代码/方案等）。",
     "- 结束前自查验收标准逐条是否满足，并在回复末尾给出「完成情况核对清单」。",
     "- 若发现超出你权限的事项，明确列出并升级给所有者决策，不要自行扩大范围。",
-    `- 完成判定：仅当上述验收标准全部满足时，在回复的最后一行单独输出标记 ${buildOpcDoneMarker(workItem.id)}；未完全满足则不要输出该标记，改为列出缺口清单。该标记会驱动看板自动把本项转入待验收。`,
+    `- 完成判定：仅当上述验收标准全部满足时，在回复的最后一行单独输出标记 ${buildOpcDoneMarker(workItem.id, input.reworkNotes?.length ?? 0)}；未完全满足则不要输出该标记，改为列出缺口清单。该标记会驱动看板自动把本项转入待验收。`,
   );
   return sections.join("\n");
 }

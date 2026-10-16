@@ -15,6 +15,19 @@ import {
 } from "@zcode/shared";
 import { logger } from "@/logger.js";
 
+/** 导入 frontmatter 的 category 直通非枚举值——非枚举时原样展示而非渲染坏 key。 */
+function categoryLabel(
+  intl: { formatMessage: (opts: { id: string }) => string },
+  category: string,
+): string {
+  const id = `opc.category.${category}`;
+  // react-intl 缺 id 时返回 id 本身；此时回退 general 的文案
+  const text = intl.formatMessage({ id });
+  return text === id
+    ? intl.formatMessage({ id: "opc.category.general" })
+    : text;
+}
+
 export interface OpcTalentMarketProps {
   state: OpcCompanyState;
   /** 招聘：传模板草稿（内置或导入，含正文供 prompt 构造）。 */
@@ -159,7 +172,7 @@ export function OpcTalentMarket({
           {groups.map(([category, drafts]) => (
             <div key={category}>
               <p className="mb-2 text-ui-xs font-medium uppercase tracking-wide text-foreground-faint">
-                {intl.formatMessage({ id: `opc.category.${category}` })}
+                {categoryLabel(intl, category)}
               </p>
               <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                 {drafts.map((draft) => (

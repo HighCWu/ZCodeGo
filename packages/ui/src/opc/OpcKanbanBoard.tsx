@@ -153,9 +153,9 @@ export function OpcKanbanBoard({
                     );
                     const canDelegate =
                       assignee !== null &&
-                      item.status !== "done" &&
-                      item.status !== "cancelled" &&
-                      item.status !== "review" &&
+                      // spec「委派按钮同规则门控」：仅 ready（runnable 已含依赖门控）。
+                      // 此前放行 backlog，委派只注入 prompt 不改状态 → 「派发即开跑」不成立
+                      item.status === "ready" &&
                       runnable;
                     return (
                       <div
@@ -298,19 +298,27 @@ export function OpcKanbanBoard({
                                 ⬆
                               </Button>
                             ) : null}
-                            {transitions.map((next) => (
-                              <Button
-                                key={next}
-                                size="xs"
-                                variant="ghost"
-                                onClick={() => onStatusChange(item.id, next)}
-                              >
-                                →
-                                {intl.formatMessage({
-                                  id: opcStatusMessageId(next),
-                                })}
-                              </Button>
-                            ))}
+                            {transitions
+                              .filter(
+                                (next) =>
+                                  !(
+                                    item.status === "review" &&
+                                    next === "in_progress"
+                                  ),
+                              )
+                              .map((next) => (
+                                <Button
+                                  key={next}
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={() => onStatusChange(item.id, next)}
+                                >
+                                  →
+                                  {intl.formatMessage({
+                                    id: opcStatusMessageId(next),
+                                  })}
+                                </Button>
+                              ))}
                             {item.status !== "done" ? (
                               <Button
                                 size="xs"

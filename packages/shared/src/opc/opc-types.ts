@@ -83,7 +83,7 @@ export interface OpcWorkItem {
   sessionId?: string;
   /** 升级上报时间（OpenOPC escalation 语义：超权限/阻塞，待所有者处理）。 */
   escalatedAt?: number | null;
-  escalationNote?: string;
+  escalationNote?: string | null;
   /** 返工意见（review 退回时追加；委派 prompt 注入，必须逐条解决）。 */
   reworkNotes?: string[];
 }
@@ -213,6 +213,12 @@ export interface OpcCompanyState {
   evolution: OpcEvolutionEvent[];
   /** 已同步的模板包版本戳（packId → commit sha）；可选字段，旧状态文件无需迁移。 */
   packImports?: Record<string, string>;
+  /**
+   * 被用户显式删除的晋升技能 id（tombstone）：没有它，任何一次无关的
+   * retro.record 都会凭历史批次立即重建已删除的 playbook（删除不持久）。
+   * 可选字段，旧状态文件无需迁移。
+   */
+  promotedSkillTombstones?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +238,16 @@ export interface OpcCustomEmployeeDraft {
 
 export type OpcMutation =
   | { kind: "company.rename"; name: string }
-  | { kind: "role-slot.create"; title: string }
+  | {
+      kind: "role-slot.create";
+      title: string;
+      /**
+       * 显式 id：组织生成/预设/公司导入在批内预生成 slotIdByTitle 映射并让
+       * 同批 employee.hire 的 roleId 指向它——reducer 若自造 id 会与映射
+       * 脱节，岗位绑定静默失败（幽灵 roleId）。
+       */
+      id?: string;
+    }
   | { kind: "role-slot.remove"; roleId: string }
   | {
       kind: "employee.hire";
@@ -375,6 +390,8 @@ export interface OpcDelegationPromptInput {
   /** 该员工最近的私人经验（新→旧，最多 10 条）。 */
   recentLessons: string[];
   memoryFilePath: string;
+  /** 全部工作项（供依赖列表带标题映射；可选，缺省退化为裸 id）。 */
+  allWorkItems?: OpcWorkItem[];
   /** 返工意见（上一轮验收退回，必须逐条解决）。 */
   reworkNotes?: string[];
   /** 权限边界（缺省 workspace-write）。 */

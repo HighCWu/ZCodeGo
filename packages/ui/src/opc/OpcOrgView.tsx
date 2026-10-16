@@ -66,6 +66,29 @@ export function OpcOrgView({
           <Button size="sm" variant="outline" onClick={onOpenPresets}>
             {intl.formatMessage({ id: "opc.org.presets" })}
           </Button>
+          <Button size="sm" variant="outline" onClick={onExportArchitecture}>
+            {intl.formatMessage({ id: "opc.org.exportArchitecture" })}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              document.getElementById("opc-import-architecture")?.click()
+            }
+          >
+            {intl.formatMessage({ id: "opc.org.importArchitecture" })}
+          </Button>
+          <input
+            id="opc-import-architecture"
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onImportArchitecture(file);
+              event.target.value = "";
+            }}
+          />
           <Button size="sm" variant="outline" onClick={onOpenGenerate}>
             {intl.formatMessage({ id: "opc.org.generate" })}
           </Button>

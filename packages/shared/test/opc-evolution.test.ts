@@ -295,3 +295,111 @@ describe("createOpcEntityId", () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe("晋升版本目标制与 tombstone（复核修复回归）", () => {
+  const KEY_STATEMENT = "先止血再归因";
+
+  function twoRetros() {
+    const state = makeState();
+    const employee = state.employees.find(
+      (item) => item.templateId === "custom",
+    )!;
+    const r1 = applyOpcMutation(
+      state,
+      {
+        kind: "retro.record",
+        employeeId: employee.id,
+        lessons: [{ statement: KEY_STATEMENT, tags: ["incident"] }],
+      },
+      NOW + 2,
+    );
+    const r2 = applyOpcMutation(
+      r1.state,
+      {
+        kind: "retro.record",
+        employeeId: employee.id,
+        lessons: [{ statement: "先止血。再归因。", tags: ["incident"] }],
+      },
+      NOW + 3,
+    );
+    return { employee, r2 };
+  }
+
+  it("无关复盘（批次不增长）不再令晋升技能无限升版", () => {
+    const { employee, r2 } = twoRetros();
+    const skillId = promotionSkillId(
+      normalizeOpcStatementKey(KEY_STATEMENT, ["incident"]),
+    );
+    const versionAtTarget = r2.state.skills.find(
+      (item) => item.id === skillId,
+    )!.version;
+    // 三次无关复盘（不含该指纹）后版本必须停在目标值
+    let current = r2.state;
+    for (let i = 0; i < 3; i += 1) {
+      current = applyOpcMutation(
+        current,
+        {
+          kind: "retro.record",
+          employeeId: employee.id,
+          lessons: [{ statement: `完全无关的经验 ${i}`, tags: ["other"] }],
+        },
+        NOW + 10 + i,
+      ).state;
+    }
+    expect(current.skills.find((item) => item.id === skillId)!.version).toBe(
+      versionAtTarget,
+    );
+  });
+
+  it("删除晋升技能后凭历史批次不再复活（tombstone）", () => {
+    const { r2 } = twoRetros();
+    const skillId = promotionSkillId(
+      normalizeOpcStatementKey(KEY_STATEMENT, ["incident"]),
+    );
+    const removed = applyOpcMutation(
+      r2.state,
+      {
+        kind: "skill.remove",
+        skillId,
+      },
+      NOW + 20,
+    );
+    expect(
+      removed.state.skills.find((item) => item.id === skillId),
+    ).toBeUndefined();
+    // 第三次含该指纹的复盘（批次增长）也不重建已删除技能
+    const employee = r2.state.employees.find(
+      (item) => item.templateId === "custom",
+    )!;
+    const r3 = applyOpcMutation(
+      removed.state,
+      {
+        kind: "retro.record",
+        employeeId: employee.id,
+        lessons: [{ statement: KEY_STATEMENT, tags: ["incident"] }],
+      },
+      NOW + 21,
+    );
+    expect(r3.state.skills.find((item) => item.id === skillId)).toBeUndefined();
+    expect(r3.state.promotedSkillTombstones).toContain(skillId);
+  });
+
+  it("第三批含指纹复盘 → 版本升至 v2", () => {
+    const { employee, r2 } = twoRetros();
+    const skillId = promotionSkillId(
+      normalizeOpcStatementKey(KEY_STATEMENT, ["incident"]),
+    );
+    const r3 = applyOpcMutation(
+      r2.state,
+      {
+        kind: "retro.record",
+        employeeId: employee.id,
+        lessons: [{ statement: KEY_STATEMENT, tags: ["incident"] }],
+      },
+      NOW + 30,
+    );
+    expect(r3.state.skills.find((item) => item.id === skillId)!.version).toBe(
+      2,
+    );
+  });
+});

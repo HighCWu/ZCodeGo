@@ -133,7 +133,7 @@ export function buildOpcCompanyImportMutations(
     if (slotIdByTitle.has(slot.title)) continue;
     const id = createOpcEntityId("slot", now);
     slotIdByTitle.set(slot.title, id);
-    mutations.push({ kind: "role-slot.create", title: slot.title });
+    mutations.push({ kind: "role-slot.create", title: slot.title, id });
     summary.slots += 1;
   }
 

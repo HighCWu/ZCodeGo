@@ -34,8 +34,12 @@ export function ZcodeGoOpcDraftHome({
     }
   }, [initialize, workspacePath, workspaceIdentity]);
 
-  const openPanel = () => {
-    window.dispatchEvent(new CustomEvent(OPC_OPEN_PANEL_EVENT));
+  const openPanel = (
+    tab?: "kanban" | "org" | "market" | "skills" | "evolution" | "office",
+  ) => {
+    window.dispatchEvent(
+      new CustomEvent(OPC_OPEN_PANEL_EVENT, { detail: { tab } }),
+    );
   };
 
   const activeWorkItems = useMemo(
@@ -115,15 +119,15 @@ export function ZcodeGoOpcDraftHome({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={openPanel}>
+        <Button size="sm" onClick={() => openPanel()}>
           <Building2 className="size-4" />
           {intl.formatMessage({ id: "opc.home.openPanel" })}
         </Button>
-        <Button size="sm" variant="outline" onClick={openPanel}>
+        <Button size="sm" variant="outline" onClick={() => openPanel("kanban")}>
           <ClipboardList className="size-4" />
           {intl.formatMessage({ id: "opc.home.newWorkItem" })}
         </Button>
-        <Button size="sm" variant="outline" onClick={openPanel}>
+        <Button size="sm" variant="outline" onClick={() => openPanel("org")}>
           <UserPlus className="size-4" />
           {intl.formatMessage({ id: "opc.home.hire" })}
         </Button>
@@ -151,7 +155,7 @@ export function ZcodeGoOpcDraftHome({
                 <button
                   key={item.id}
                   type="button"
-                  onClick={openPanel}
+                  onClick={() => openPanel("kanban")}
                   className="flex items-center gap-2 rounded-lg border border-card-border bg-card px-2.5 py-1.5 text-left transition-colors hover:border-border-hover"
                 >
                   <OpcEmployeeAvatar

@@ -52,6 +52,7 @@ import {
   persistSkillBodies,
   readBodies,
   resolveSkillBodySource,
+  writeTextAtomic,
 } from "./zcodeGoOpcFiles.js";
 import { syncOpcPacks } from "./zcodeGoOpcPacks.js";
 
@@ -76,9 +77,12 @@ function opcLoggerWarn(message: string, error: unknown): void {
 const workspaceQueues = new Map<string, Promise<unknown>>();
 
 function enqueue<T>(workspacePath: string, task: () => Promise<T>): Promise<T> {
-  const previous = workspaceQueues.get(workspacePath) ?? Promise.resolve();
+  // 键必须 resolve：同一目录以不同字符串形式（尾斜杠/相对路径）到达时，
+  // 未归一会分出两条并行队列，读改写并发丢 company.json 更新
+  const key = resolve(workspacePath);
+  const previous = workspaceQueues.get(key) ?? Promise.resolve();
   const next = previous.then(task, task);
-  workspaceQueues.set(workspacePath, next);
+  workspaceQueues.set(key, next);
   return next;
 }
 
@@ -109,10 +113,22 @@ async function readCompanyState(
   }
 }
 
+/** 损坏现场备份：重建默认公司前把坏文件挪开，用户数据永不静默销毁。 */
+async function backupCorruptState(workspaceRoot: string): Promise<void> {
+  const corrupt = join(workspaceRoot, OPC_COMPANY_FILE);
+  try {
+    await rename(corrupt, `${corrupt}.corrupt-${Date.now()}`);
+  } catch {
+    /* 已不存在或已备份 */
+  }
+}
+
 /** 首发初始化：默认公司（创始人）+ 内置技能落盘（角色模板保留在内置包，不入盘）。 */
 async function initializeWorkspace(
   workspaceRoot: string,
 ): Promise<OpcCompanyState> {
+  // 损坏现场先备份再重建（首次初始化时文件不存在，rename 静默无操作）
+  await backupCorruptState(workspaceRoot);
   const now = Date.now();
   const state = createEmptyOpcCompanyState(now);
   for (const skillDraft of OPC_BUILTIN_SKILL_DRAFTS) {
@@ -193,10 +209,11 @@ async function persistDerivedFiles(
       previous?.lessons.filter((lesson) => lesson.employeeId === employee.id)
         .length ?? 0;
     if (lessons.length === previousCount) continue;
-    await writeFile(
+    // memory 是覆盖写路径：半写会把员工私人记忆截断且无自愈（其余正文路径
+    // 均 existsSync 幂等重建，裸写可接受）
+    await writeTextAtomic(
       join(workspaceRoot, OPC_MEMORY_DIR, `${employee.id}.md`),
       renderOpcEmployeeMemory(employee, lessons, Date.now()),
-      "utf8",
     );
   }
   const previousEventIds = new Set(
@@ -293,12 +310,14 @@ async function consumeInbox(
   const inboxFile = join(opcRoot(workspacePath), OPC_INBOX_DIR, fileName);
   // inbox 文件不是状态事实，删除无需队列保护（避免嵌套 enqueue 死锁——
   // consumeInbox 曾在队列任务内再次调用 withState，串行链自等永久挂起）。
-  try {
-    await rm(inboxFile, { force: true });
-  } catch {
-    /* 文件不存在即已被消费 */
-  }
+  // dismiss 分支直接删；convert 分支必须在建项成功后才删——先删后建在
+  // reducer 失败时入站消息永久丢失。
   if (!convert) {
+    try {
+      await rm(inboxFile, { force: true });
+    } catch {
+      /* 文件不存在即已被消费 */
+    }
     const workspaceRoot = opcRoot(workspacePath);
     return {
       ok: true,
@@ -320,10 +339,16 @@ async function consumeInbox(
     );
     return applied.state;
   });
-  const inbox = await scanInbox(opcRoot(workspacePath));
+  // 建项成功才删文件（失败保留现场供重试/人工处理）
   if (result.ok && result.state) {
+    try {
+      await rm(inboxFile, { force: true });
+    } catch {
+      /* 已不存在 */
+    }
     broadcastStateChanged(opcLogger ?? silentOpcLogger, workspacePath);
   }
+  const inbox = await scanInbox(opcRoot(workspacePath));
   return {
     ok: result.ok,
     state: result.state,

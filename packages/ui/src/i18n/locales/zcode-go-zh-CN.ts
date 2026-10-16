@@ -216,6 +216,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.employee.statusDeparted": "已离职",
   // zcode-go：OPC 公司包文案
   "opc.org.exportCompany": "导出公司",
+  "opc.org.exportArchitecture": "导出架构",
+  "opc.org.importArchitecture": "导入架构",
   "opc.org.importCompany": "导入公司",
   "opc.skills.export": "导出",
   // zcode-go：OPC 办公室地图与权限文案
@@ -241,6 +243,9 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.inbox.convert": "转为工作项",
   "opc.inbox.dismiss": "忽略",
   "opc.inbox.empty": "入站队列为空（外部投递契约见 spec「入站队列」节）",
+  "opc.orchestrate.button": "🚀 一键编排",
+  "opc.orchestrate.hint":
+    "就绪且已分配的工作项：{count} 个（经无界面后台会话派发）",
   "opc.common.close": "关闭",
   // zcode-go：OPC 编排器文案
   "settings.zcodeGo.opcAutoOrchestrate": "OPC 自动编排",

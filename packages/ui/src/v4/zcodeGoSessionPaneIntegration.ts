@@ -10,7 +10,7 @@ import type {
   ConversationRowTarget,
   ConversationSnapshot,
 } from "@zcode/shared/zcode-protocol-v4";
-import { extractOpcDoneMarkerIds } from "@zcode/shared";
+import { extractOpcDoneMarkers } from "@zcode/shared";
 import { useOpcStore } from "@/store/opcStore.js";
 
 type Logger = {
@@ -235,25 +235,28 @@ export function useZcodeGoOpcDoneWatcher({
     if (!sessionId || rows.length === 0) return;
     const { state: company, apply } = useOpcStore.getState();
     if (!company) return;
-    const foundIds = new Set<string>();
+    const foundMarkers: Array<{ id: string; round: number }> = [];
     for (const row of rows.slice(-OPC_DONE_SCAN_WINDOW)) {
       if (row.kind !== "assistantText") continue;
-      for (const workItemId of extractOpcDoneMarkerIds(row.text)) {
-        foundIds.add(workItemId);
-      }
+      foundMarkers.push(...extractOpcDoneMarkers(row.text));
     }
-    if (foundIds.size === 0) return;
-    for (const workItemId of foundIds) {
+    if (foundMarkers.length === 0) return;
+    for (const marker of foundMarkers) {
       const item = company.workItems.find(
-        (workItem) => workItem.id === workItemId,
+        (workItem) => workItem.id === marker.id,
       );
       if (!item) continue;
       // 仅执行/就绪态可被完成标记推进；review/done 保持人工掌控。
       if (item.status !== "in_progress" && item.status !== "ready") continue;
-      const dedupeKey = `${sessionId}:${workItemId}:${item.reworkNotes?.length ?? 0}`;
+      // 去重键由标记自带的返工轮次决定（委派 prompt 构造时注入当前轮次）：
+      // 此前键含 reworkNotes.length——返工 +1 后旧标记立即重新命中，把刚
+      // 返工的项又推回 review，返工闭环失效。
+      const dedupeKey = `${sessionId}:${marker.id}:r${marker.round}`;
       if (processedRef.current.has(dedupeKey)) continue;
       processedRef.current.add(dedupeKey);
-      void apply([{ kind: "workitem.status", workItemId, status: "review" }]);
+      void apply([
+        { kind: "workitem.status", workItemId: marker.id, status: "review" },
+      ]);
     }
   }, [sessionId, rows]);
 }

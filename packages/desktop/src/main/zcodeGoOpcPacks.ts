@@ -5,7 +5,7 @@
  */
 import { app } from "electron";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -109,13 +109,15 @@ export async function syncOpcPacks(
       const files: OpcPackSourceFile[] = [];
       await collectPackFiles(packDir, "", files);
       const outcome = applyOpcPackFiles(current, manifest, files, Date.now());
-      current = outcome.state;
-      // 待落盘正文：只写缺失文件（与幂等填充语义一致，绝不覆盖已存在内容）
+      // 待落盘正文：只写缺失文件（与幂等填充语义一致，绝不覆盖已存在内容）。
+      // 全部写成功才接受 state（含 packImports 戳）——先盖戳后写盘会在中途
+      // 失败时留下「缺正文且永不重试」的残缺状态。
       const templatesDir = join(
         workspaceRoot,
         OPC_TEMPLATES_DIR,
         OPC_ROLES_TEMPLATES_SUBDIR,
       );
+      const writtenBodies: Array<[string, string]> = [];
       for (const [templateId, markdown] of Object.entries(
         outcome.roleTemplateFiles,
       )) {
@@ -123,13 +125,29 @@ export async function syncOpcPacks(
         if (existsSync(target)) continue;
         await mkdir(templatesDir, { recursive: true });
         await writeFile(target, markdown, "utf8");
+        writtenBodies.push([target, markdown]);
       }
-      for (const [skillId, body] of Object.entries(outcome.skillBodies)) {
-        const target = join(workspaceRoot, OPC_SKILLS_DIR, skillId, "SKILL.md");
-        if (existsSync(target)) continue;
-        await mkdir(dirname(target), { recursive: true });
-        await writeFile(target, body, "utf8");
+      try {
+        for (const [skillId, body] of Object.entries(outcome.skillBodies)) {
+          const target = join(
+            workspaceRoot,
+            OPC_SKILLS_DIR,
+            skillId,
+            "SKILL.md",
+          );
+          if (existsSync(target)) continue;
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, body, "utf8");
+          writtenBodies.push([target, body]);
+        }
+      } catch (error) {
+        // 回滚已写的正文（缺失文件重写无副作用），戳不盖 → 下次重试
+        for (const [target] of writtenBodies) {
+          await rm(target, { force: true }).catch(() => {});
+        }
+        throw error;
       }
+      current = outcome.state;
       logger.info(
         `[zcode-go] OPC 模板包 ${manifest.id}@${manifest.version.slice(0, 8)} 同步：+${outcome.importedRoles} 角色 / +${outcome.importedSkills} 技能`,
       );

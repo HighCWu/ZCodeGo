@@ -66,6 +66,7 @@ import {
   type OpcUpgradeDialogState,
 } from "./opcEvolutionDialogs.js";
 import { OpcEscalateDialog } from "./opcEscalateDialog.js";
+import { OpcInboxDialog } from "./opcInboxDialog.js";
 import { OpcProjectRetroDialog } from "./opcProjectRetroDialog.js";
 import { OpcOrgGenerateDialog, OpcOrgPresetDialog } from "./opcOrgDialogs.js";
 import { logger } from "@/logger.js";
@@ -114,7 +115,12 @@ export function ZcodeGoOpcPanelRoot({
     useState<OpcUpgradeDialogState | null>(null);
 
   useEffect(() => {
-    const handleOpen = () => setOpen(true);
+    // detail.tab 允许快捷入口直达指定标签（驾驶舱快捷操作等）
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: PanelTab }>).detail;
+      if (detail?.tab) setTab(detail.tab);
+      setOpen(true);
+    };
     window.addEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
     return () => window.removeEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);
   }, []);
@@ -125,10 +131,15 @@ export function ZcodeGoOpcPanelRoot({
   const workspacePathFromStore = useOpcStore((s) => s.workspacePath);
   useEffect(() => {
     if (!open || !workspacePathFromStore) return;
-    void initialize(workspacePathFromStore).catch(() => {
+    // 键约定 workspaceIdentity?.trim() || workspacePath——漏传会与 Mount 的
+    // 预热键不一致，触发多余 GetState
+    void initialize(
+      workspacePathFromStore,
+      workspaceIdentity ?? undefined,
+    ).catch(() => {
       /* 初始化失败由面板内错误态呈现 */
     });
-  }, [open, initialize, workspacePathFromStore]);
+  }, [open, initialize, workspacePathFromStore, workspaceIdentity]);
 
   /** 导出公司包（状态 + 技能/模板正文 → JSON 下载）。 */
   const handleExportCompany = useCallback(() => {
@@ -256,6 +267,7 @@ export function ZcodeGoOpcPanelRoot({
       taskService,
       resolveRoleBody,
       resolveSkillBody,
+      onMutations: (mutations) => void apply(mutations),
     })
       .then((outcome) => {
         if (outcome.mutations.length > 0) void apply(outcome.mutations);
@@ -490,6 +502,10 @@ export function ZcodeGoOpcPanelRoot({
               <TabsTrigger value="evolution">
                 {intl.formatMessage({ id: "opc.tab.evolution" })}
               </TabsTrigger>
+              {/* spec「产品规则」六标签：缺此触发器则办公室地图永久不可达 */}
+              <TabsTrigger value="office">
+                {intl.formatMessage({ id: "opc.tab.office" })}
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="office" className="min-h-0 flex-1">
               <OpcOfficeMap
@@ -500,6 +516,28 @@ export function ZcodeGoOpcPanelRoot({
               />
             </TabsContent>
             <TabsContent value="kanban" className="min-h-0 flex-1">
+              <div className="flex shrink-0 items-center justify-between gap-2 pb-2">
+                <span className="text-ui-sm text-foreground-subtle">
+                  {intl.formatMessage(
+                    {
+                      id: "opc.orchestrate.hint",
+                    },
+                    { count: orchestratableCount },
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="rounded-md border border-border px-2 py-1 text-ui-sm enabled:hover:bg-background-muted disabled:opacity-50"
+                  disabled={
+                    !orchestrateEnabled ||
+                    orchestrating ||
+                    orchestratableCount === 0
+                  }
+                  onClick={handleOrchestrate}
+                >
+                  {intl.formatMessage({ id: "opc.orchestrate.button" })}
+                </button>
+              </div>
               <OpcKanbanBoard
                 state={state}
                 onCreateWorkItem={() =>
@@ -602,6 +640,9 @@ export function ZcodeGoOpcPanelRoot({
       ) : null}
       {orgPresetOpen ? (
         <OpcOrgPresetDialog onClose={() => setOrgPresetOpen(false)} />
+      ) : null}
+      {inboxOpen ? (
+        <OpcInboxDialog onClose={() => setInboxOpen(false)} />
       ) : null}
       {reworkDialog ? (
         <OpcReworkDialog

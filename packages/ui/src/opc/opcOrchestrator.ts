@@ -26,6 +26,12 @@ export interface OpcOrchestratorDeps {
   resolveSkillBody: (skillId: string) => string | null;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
+  /**
+   * 逐项落账回调：每项派发成功立即写 in_progress + sessionId。批量返回的
+   * mutations 仍在 outcome 里，但逐项即时落账防「全部派发完才落账」的窗口
+   * ——期间崩溃/apply 失败会让 ready 项带着已跑会话再次被派发（双跑）。
+   */
+  onMutations?: (mutations: OpcMutation[]) => void;
 }
 
 export interface OpcOrchestrationOutcome {
@@ -79,9 +85,10 @@ function buildDelegationPromptFor(
 }
 
 /**
- * 派发全部就绪项：ready + runnable + 已分配 + 未在执行中。逐项无界面建会话并
- * 发送委派 prompt（并发上限 cap）；全部派发完成后批量推 in_progress。
- * 单项失败不中断批（失败项留待下一轮）。
+ * 派发全部就绪项：ready + runnable + 已分配 + 未派发过（sessionId 幂等锚）。
+ * 逐项无界面建会话并发送委派 prompt；并发门控按「在跑 headless 会话数」
+ * （in_progress 且有 sessionId）计算剩余配额。逐项派发成功即经 onMutations
+ * 落账；单项失败不中断批（失败项留待下一轮）。
  */
 export async function dispatchReadyWorkItems(
   deps: OpcOrchestratorDeps,
@@ -93,12 +100,21 @@ export async function dispatchReadyWorkItems(
     taskService,
     cap = 3,
   } = deps;
-  const dispatchable = state.workItems.filter(
-    (item) =>
-      item.status === "ready" &&
-      item.assigneeId !== null &&
-      isOpcWorkItemRunnable(item, state.workItems),
-  );
+  const runningCount = state.workItems.filter(
+    (item) => item.status === "in_progress" && item.sessionId,
+  ).length;
+  const remaining = Math.max(0, cap - runningCount);
+  const dispatchable = state.workItems
+    .filter(
+      (item) =>
+        item.status === "ready" &&
+        item.assigneeId !== null &&
+        isOpcWorkItemRunnable(item, state.workItems) &&
+        // 幂等锚：派发过（sessionId 已回写）的项永不重派——状态落账失败也
+        // 不会双跑
+        !item.sessionId,
+    )
+    .slice(0, remaining);
   const outcome: OpcOrchestrationOutcome = {
     dispatched: [],
     failed: [],
@@ -134,17 +150,23 @@ export async function dispatchReadyWorkItems(
         workItemId: workItem.id,
         taskId: created.taskId,
       });
-      outcome.mutations.push({
-        kind: "workitem.status",
-        workItemId: workItem.id,
-        status: "in_progress",
-      });
-      // 派发留痕：taskId 写回工作项，任务列表可从看板双向追溯
-      outcome.mutations.push({
-        kind: "workitem.update",
-        workItemId: workItem.id,
-        patch: { sessionId: created.taskId },
-      });
+      const itemMutations: OpcMutation[] = [
+        {
+          kind: "workitem.status",
+          workItemId: workItem.id,
+          status: "in_progress",
+        },
+        // 派发留痕：taskId 写回工作项，任务列表可从看板双向追溯
+        {
+          kind: "workitem.update",
+          workItemId: workItem.id,
+          patch: { sessionId: created.taskId },
+        },
+      ];
+      outcome.mutations.push(...itemMutations);
+      // 逐项即时落账：批量落账前的崩溃窗口会留下「会话在跑、项仍 ready」
+      // 的双跑态
+      deps.onMutations?.(itemMutations);
     } catch (error) {
       outcome.failed.push({
         workItemId: workItem.id,

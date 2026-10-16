@@ -192,7 +192,8 @@ export function buildOpcOrgMutations(
     if (slotIdByTitle.has(title)) continue;
     const id = createOpcEntityId("slot", now);
     slotIdByTitle.set(title, id);
-    mutations.push({ kind: "role-slot.create", title });
+    // 显式携带预生成 id：reducer 自造 id 与批内 roleId 映射脱节 → 幽灵绑定
+    mutations.push({ kind: "role-slot.create", title, id });
     slotsCreated += 1;
   }
 
@@ -208,12 +209,18 @@ export function buildOpcOrgMutations(
       continue;
     }
     const roleId = hire.slot ? (slotIdByTitle.get(hire.slot) ?? null) : null;
-    // 复用：同模板的暂停/离职员工 → 恢复 + 换岗，而非新招
+    // 复用：同模板的暂停/离职员工 → 恢复 + 换岗，而非新招。
+    // hire.template 是模板名（或 id）；员工存的是模板 id——直接比名字只有
+    // CJK 模板（slug=名称）碰巧命中，ASCII 名永不复用。先解析成 id 再比。
+    const reuseTemplateId = hire.template
+      ? (matchOpcRoleTemplate(hire.template, state.roleTemplates)?.id ??
+        hire.template)
+      : null;
     const reusable = state.employees.find(
       (employee) =>
         employee.status !== "active" &&
-        hire.template !== undefined &&
-        employee.templateId === hire.template &&
+        reuseTemplateId !== null &&
+        employee.templateId === reuseTemplateId &&
         !employee.isFallback,
     );
     if (reusable) {

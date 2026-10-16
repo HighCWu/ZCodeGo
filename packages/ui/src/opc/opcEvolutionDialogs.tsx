@@ -158,6 +158,8 @@ export function OpcRetroDialog({
                       workItemTitle: workItem?.title ?? null,
                     }),
                   });
+                  // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                  onClose();
                 }}
               >
                 {intl.formatMessage({ id: "opc.retro.generatePrompt" })}
@@ -291,6 +293,8 @@ export function OpcUpgradeDialog({
                   logger.debug("[zcode-go][opc] 升级 prompt 已注入 composer", {
                     skillId,
                   });
+                  // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                  onClose();
                 }}
               >
                 <Copy className="size-3.5" />

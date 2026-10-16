@@ -153,6 +153,8 @@ export function evaluateOpcPromotions(
     );
     if (!employee) continue;
     const skillId = promotionSkillId(statementKey);
+    // 用户显式删除过的晋升技能不再重建（tombstone；新证据需重新导入）。
+    if (state.promotedSkillTombstones?.includes(skillId)) continue;
     const existingIndex = skills.findIndex((skill) => skill.id === skillId);
     if (existingIndex < 0) {
       skills = [
@@ -181,15 +183,16 @@ export function evaluateOpcPromotions(
     } else {
       const existing = skills[existingIndex];
       if (!existing) continue;
-      // 同批次内多 hitting 只升一次版：以 changelog 是否已记录该批次时间片近似去重。
-      const batchStamp = `v${existing.version + 1}`;
-      const alreadyStamped = existing.changelog.some((line) =>
-        line.startsWith(batchStamp),
-      );
-      if (alreadyStamped) continue;
+      // 版本目标制：每多一个含本指纹的独立复盘批次 → 版本 +1（v1 对应
+      // 达阈值的 2 个批次，故目标 = batches.size - 1）。此前用「changelog
+      // 是否已有 v(n+1) 行」判重——批次不增长的无关复盘会永远放行，版本
+      // 无限膨胀并伪造「经验再次被复盘确认」changelog（CI 复核实证）。
+      const targetVersion = Math.max(1, batches.size - 1);
+      if (existing.version >= targetVersion) continue;
+      const batchStamp = `v${targetVersion}`;
       skills[existingIndex] = {
         ...existing,
-        version: existing.version + 1,
+        version: targetVersion,
         changelog: [
           ...existing.changelog,
           `${batchStamp} ${formatOpcDate(now)}：经验再次被复盘确认，版本升级。`,

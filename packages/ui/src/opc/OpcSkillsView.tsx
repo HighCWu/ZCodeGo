@@ -10,6 +10,19 @@ import { ScrollArea } from "@/components/ui/scroll-area.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { OpcCompanyState } from "@zcode/shared";
 
+/** 导入 frontmatter 的 category 直通非枚举值——非枚举时原样展示而非渲染坏 key。 */
+function categoryLabel(
+  intl: { formatMessage: (opts: { id: string }) => string },
+  category: string,
+): string {
+  const id = `opc.category.${category}`;
+  // react-intl 缺 id 时返回 id 本身；此时回退 general 的文案
+  const text = intl.formatMessage({ id });
+  return text === id
+    ? intl.formatMessage({ id: "opc.category.general" })
+    : text;
+}
+
 export interface OpcSkillsViewProps {
   state: OpcCompanyState;
   onUpgrade: (skillId: string) => void;
@@ -31,6 +44,7 @@ const ORIGIN_MESSAGE_ID: Record<string, string> = {
 export function OpcSkillsView({
   state,
   onUpgrade,
+  onExportSkill,
   onToggleAttach,
   onImportFolder,
 }: OpcSkillsViewProps) {
@@ -115,9 +129,7 @@ export function OpcSkillsView({
                         })}
                       </span>
                       <span className="text-ui-xs text-foreground-faint">
-                        {intl.formatMessage({
-                          id: `opc.category.${skill.category}`,
-                        })}
+                        {categoryLabel(intl, skill.category)}
                       </span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-ui-xs text-foreground-subtle">
@@ -136,6 +148,13 @@ export function OpcSkillsView({
                   >
                     <ArrowUpCircle className="size-3" />
                     {intl.formatMessage({ id: "opc.skills.upgrade" })}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => onExportSkill(skill.id)}
+                  >
+                    {intl.formatMessage({ id: "opc.skills.export" })}
                   </Button>
                 </div>
                 {expanded ? (

@@ -107,7 +107,7 @@ function applyOnce(
           roleSlots: [
             ...state.roleSlots,
             {
-              id: createOpcEntityId("slot", now),
+              id: mutation.id ?? createOpcEntityId("slot", now),
               title,
               parentRoleId: null,
               employeeId: null,
@@ -330,6 +330,11 @@ function applyOnce(
               status: mutation.status,
               updatedAt: now,
               completedAt: mutation.status === "done" ? now : null,
+              // 终态即解除升级：不清则 done 项仍显示「升级中」徽标、
+              // 计入待所有者处理，且 resolveEscalation 可把创始人指派到已终态项
+              ...(mutation.status === "done" || mutation.status === "cancelled"
+                ? { escalatedAt: null, escalationNote: null }
+                : {}),
             }
           : item,
       );
@@ -633,6 +638,20 @@ function applyOnce(
       };
     }
     case "skill.remove": {
+      const removed = state.skills.find(
+        (skill) => skill.id === mutation.skillId,
+      );
+      // 晋升技能删除留 tombstone：否则任何一次无关 retro.record 凭历史
+      // 批次立即重建已删 playbook（删除不持久）。
+      const tombstones =
+        removed?.origin === "promoted"
+          ? Array.from(
+              new Set([
+                ...(state.promotedSkillTombstones ?? []),
+                mutation.skillId,
+              ]),
+            )
+          : state.promotedSkillTombstones;
       return {
         state: {
           ...state,
@@ -641,6 +660,7 @@ function applyOnce(
             ...item,
             skillRefs: item.skillRefs.filter((id) => id !== mutation.skillId),
           })),
+          ...(tombstones ? { promotedSkillTombstones: tombstones } : {}),
         },
         events: [],
       };

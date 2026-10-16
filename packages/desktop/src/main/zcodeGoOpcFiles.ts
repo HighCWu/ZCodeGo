@@ -2,7 +2,17 @@
  * zcode-go OPC 文件助手：技能正文来源解析、目录扫描、技能正文落盘、
  * prompt 正文映射读取。从 zcodeGoOpcStore.ts 拆出以控制文件行数。
  */
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+
+/** 原子写文本：tmp + rename。半写文件会被 readBodies 当正文喂进委派 prompt。 */
+export async function writeTextAtomic(
+  path: string,
+  content: string,
+): Promise<void> {
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  await writeFile(tmp, content, "utf8");
+  await rename(tmp, path);
+}
 import { join, resolve } from "node:path";
 import {
   OPC_BUILTIN_SKILL_DRAFTS,
@@ -78,7 +88,7 @@ export async function persistSkillBodies(
     if (!skillId) continue;
     const skillDir = join(workspaceRoot, OPC_SKILLS_DIR, skillId);
     await mkdir(skillDir, { recursive: true });
-    await writeFile(join(skillDir, "SKILL.md"), mutation.body, "utf8");
+    await writeTextAtomic(join(skillDir, "SKILL.md"), mutation.body);
   }
 }
 /** 读取 prompt 构造所需的正文映射（导入角色模板 + 技能正文）。 */
@@ -133,8 +143,15 @@ export async function persistRoleTemplateBodies(
     if (mutation.kind !== "template.importRole") continue;
     const parsed = parseOpcRoleTemplate(mutation.markdown);
     if (!parsed) continue;
-    const templatesDir = join(workspaceRoot, OPC_TEMPLATES_DIR, OPC_ROLES_TEMPLATES_SUBDIR);
+    const templatesDir = join(
+      workspaceRoot,
+      OPC_TEMPLATES_DIR,
+      OPC_ROLES_TEMPLATES_SUBDIR,
+    );
     await mkdir(templatesDir, { recursive: true });
-    await writeFile(join(templatesDir, `${parsed.id}.md`), mutation.markdown, "utf8");
+    await writeTextAtomic(
+      join(templatesDir, `${parsed.id}.md`),
+      mutation.markdown,
+    );
   }
 }

@@ -23,8 +23,13 @@ const FILE_WRITE_TOOLS = ZCODE_KNOWN_TOOL_NAMES.filter((name) =>
 const SHELL_TOOLS = ZCODE_KNOWN_TOOL_NAMES.filter((name) =>
   isZCodeToolFamily(name, "shell"),
 );
-const TODO_WRITE_TOOLS = ZCODE_KNOWN_TOOL_NAMES.filter((name) =>
-  isZCodeToolFamily(name, "todo"),
+// node_repl 可任意 eval + 文件/网络 IO，是与 shell 等同的越界执行通道
+const NODE_REPL_TOOLS = ZCODE_KNOWN_TOOL_NAMES.filter((name) =>
+  isZCodeToolFamily(name, "node-repl"),
+);
+// spec 只说「todo 写」：TodoRead 是只读操作，read-only 员工需要读 todo 了解上下文
+const TODO_WRITE_TOOLS = ZCODE_KNOWN_TOOL_NAMES.filter(
+  (name) => isZCodeToolFamily(name, "todo") && name !== "TodoRead",
 );
 
 export function buildOpcToolDenylist(
@@ -35,6 +40,6 @@ export function buildOpcToolDenylist(
   if (level === "read-only") {
     return [...FILE_WRITE_TOOLS, ...SHELL_TOOLS, ...TODO_WRITE_TOOLS];
   }
-  // workspace-write：shell 是越出工作区边界的主要通道，予以拒绝
-  return [...SHELL_TOOLS];
+  // workspace-write：shell 与 node_repl 是越出工作区边界的任意执行通道，均拒绝
+  return [...SHELL_TOOLS, ...NODE_REPL_TOOLS];
 }

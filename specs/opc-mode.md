@@ -38,7 +38,7 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    状态流转由 reducer 校验，任意跳转仅允许沿状态机或回退到 `backlog`。
    - **依赖就绪门控（runnability）**：`ready → in_progress` 仅当全部 `dependsOn`
      前置为 done/cancelled（悬空 id 视为已解决，避免删除依赖造成死锁）；backlog→ready
-     不受限（规划自由）。委派按钮同规则门控。
+     不受限（规划自由）。委派按钮同规则门控（仅 ready 态可委派）。
    - **依赖传播**：前置项变为 done 时，`backlog` 中的被依赖项若已全部就绪，自动升到
      `ready`（静默，无事件），实现「独立项并行、依赖项等待」的最小语义。
    - **升级上报（escalation）**：工作项可 `escalate`（记 escalatedAt + 说明，进化事件
@@ -67,8 +67,9 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      章节——read-only 禁止任何写操作、workspace-write 限定工作区内、
      full-access 的破坏性动作仍须升级所有者。
      **会话级硬约束（编排器路径）**：无界面派发是我们创建的会话——sendPrompt
-     按 permissionLevel 注入 toolDenylist（read-only 拒文件写家族+shell+todo 写、
-     workspace-write 拒 shell、full-access 不拒；工具家族取自 shared
+     按 permissionLevel 注入 toolDenylist（read-only 拒文件写家族+shell+todo
+     写（TodoRead 只读豁免）、workspace-write 拒 shell 与 node-repl 家族
+     （任意 eval 等同越界执行通道）、full-access 不拒；工具家族取自 shared
      tool-identity），agent 侧物理不可调用被拒工具。手动 composer 路径归用户
      控制，仍为 prompt 级——两条路径的双层边界如实记录。
    - **Office 办公室地图**：公司面板第六标签——在职员工以桌位卡呈现（创始人
@@ -158,7 +159,10 @@ talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」
     把全部就绪且已分配的工作项经 IZCodeTaskService 无界面派发为后台会话
     （createTask v4Create + deferPersistenceUntilFirstPrompt + sendPrompt——
     bots/automation 同款执行器；并发上限 3，desktop-continuous 链路），
-    派发即 in_progress。门控：AppSettings.zcodeGoOpcAutoOrchestrate（默认启用，
+    派发即 in_progress（逐项即时落账；sessionId 幂等锚——已派发项永不重派；
+    并发按「in_progress 且有 sessionId」计数门控）。opc-done 完成标记携带
+    返工轮次后缀（`:r<n>`），watcher 去重键由标记轮次决定——返工后旧标记
+    不再误推。门控：AppSettings.zcodeGoOpcAutoOrchestrate（默认启用，
     ZCode Go 设置页开关）。如实边界：opc-done 完成检测只覆盖有面板的会话，
     headless 会话的完成判定仍为人工（任务列表验收）。
 
@@ -235,6 +239,18 @@ preload 增补落在 zcode-go 自己的 `zcodeGoEntries.ts`（非上游文件）
 8. 持久化：重启后状态完整；company.json 损坏时面板报错可重建，不崩溃主流程。
 9. 纯函数单元测试：frontmatter 解析（两种格式 + 容错）、状态机、晋升引擎
    （2 次阈值、版本递增、挂接）、委派/复盘/升级 prompt 构造。
+
+## 已知边界（本轮 review 收录，不修）
+
+- 公司包导入的 paused 员工落为 active（hire 的 id 由 reducer 生成，批内
+  无法预测、无法追加 update 恢复暂停态）；departed 已正确跳过。
+- `requestComposerTextInsert` 只入队即返回，无法感知草稿 composer 是否
+  挂载——会话进行中点「生成 prompt」类按钮时文本可能静默丢失（注入即
+  关闭缓解可见性问题，根治需 bridge 语义升级）。
+- main 侧 IPC 的 workspacePath 无归属校验（本地桌面威胁模型下低危；收敛
+  到已打开工作区需要跨模块查询，侵入大）。
+- OpcEvolutionView 的晋升徽标用 statement 前缀启发式比对，同指纹不同措辞
+  的复盘可能漏标（展示层，不影响晋升引擎）。
 
 ## 明确不做（本轮）
 
