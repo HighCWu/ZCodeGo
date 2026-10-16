@@ -264,6 +264,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.permission.workspace-write": "工作区写",
   "opc.permission.full-access": "完全访问",
   "opc.hire.permission": "权限级别",
+  "opc.hire.model": "模型偏好（可选）",
+  "opc.hire.modelPlaceholder": "providerId/modelId，如 glm/glm-4.7",
   // zcode-go：OPC 入站队列文案
   "opc.kanban.inboxFilter": "待处理入站 {count}",
   "opc.inbox.title": "入站队列",

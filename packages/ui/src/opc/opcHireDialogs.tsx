@@ -57,6 +57,7 @@ export function OpcHireDialog({
     useState<OpcCustomEmployeeDraft["seniority"]>("senior");
   const [permissionLevel, setPermissionLevel] =
     useState<OpcCustomEmployeeDraft["permissionLevel"]>("workspace-write");
+  const [modelKey, setModelKey] = useState("");
   const emptySlots = state.roleSlots.filter((slot) => slot.employeeId === null);
   // 复用建议（Self-Built）：同模板的暂停/离职员工可恢复上岗而非重复招聘
   const reusable = state.employees.find(
@@ -76,6 +77,17 @@ export function OpcHireDialog({
     description: template.description,
     seniority,
     permissionLevel,
+    // 员工级模型偏好（可选）：providerId/modelId（spec「设计思想吸收」4）
+    ...(modelKey.trim().includes("/")
+      ? {
+          modelSelection: (() => {
+            const parts = modelKey.trim().split("/");
+            const providerId = parts[0];
+            const modelId = parts.slice(1).join("/");
+            return providerId && modelId ? { providerId, modelId } : undefined;
+          })(),
+        }
+      : {}),
   };
 
   return (
@@ -144,6 +156,17 @@ export function OpcHireDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>{intl.formatMessage({ id: "opc.hire.model" })}</Label>
+              <Input
+                value={modelKey}
+                onChange={(event) => setModelKey(event.target.value)}
+                placeholder={intl.formatMessage({
+                  id: "opc.hire.modelPlaceholder",
+                })}
+                className="h-8"
+              />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>{intl.formatMessage({ id: "opc.hire.roleSlot" })}</Label>

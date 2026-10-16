@@ -326,6 +326,14 @@ function applyOnce(
               assigneeId: mutation.assigneeId ?? null,
               priority: mutation.priority ?? "medium",
               dependsOn: mutation.dependsOn ? [...mutation.dependsOn] : [],
+              // 任务分解树：父项由 UI 传（管理者拆解动作）；悬空父引用落 null
+              parentWorkItemId:
+                mutation.parentWorkItemId &&
+                state.workItems.some(
+                  (item) => item.id === mutation.parentWorkItemId,
+                )
+                  ? mutation.parentWorkItemId
+                  : null,
               createdAt: timestamp,
               updatedAt: timestamp,
               completedAt: null,

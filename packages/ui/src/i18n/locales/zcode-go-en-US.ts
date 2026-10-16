@@ -276,6 +276,8 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.permission.workspace-write": "Workspace write",
   "opc.permission.full-access": "Full access",
   "opc.hire.permission": "Permission level",
+  "opc.hire.model": "Model preference (optional)",
+  "opc.hire.modelPlaceholder": "providerId/modelId, e.g. glm/glm-4.7",
   // zcode-go: OPC inbound queue messages
   "opc.kanban.inboxFilter": "{count} inbound",
   "opc.inbox.title": "Inbound queue",

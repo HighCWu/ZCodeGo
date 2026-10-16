@@ -76,6 +76,8 @@ export interface OpcWorkItem {
   assigneeId: string | null;
   priority: OpcWorkItemPriority;
   dependsOn: string[];
+  /** 父工作项（任务分解树：管理者拆解为子项，子项完成后父项人工收口）。 */
+  parentWorkItemId?: string | null;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
@@ -355,6 +357,8 @@ export type OpcMutation =
       assigneeId?: string | null;
       priority?: OpcWorkItemPriority;
       dependsOn?: string[];
+      /** 父工作项 id（任务分解树：子项完成后父项人工收口）。 */
+      parentWorkItemId?: string | null;
     }
   | {
       kind: "workitem.update";
@@ -364,6 +368,7 @@ export type OpcMutation =
           OpcWorkItem,
           | "title"
           | "detail"
+          | "parentWorkItemId"
           | "assigneeId"
           | "priority"
           | "dependsOn"

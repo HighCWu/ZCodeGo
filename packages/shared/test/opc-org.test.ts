@@ -4,6 +4,7 @@ import {
   buildOpcOrgMutations,
   findOpcEscalationCandidates,
   matchOpcRoleTemplate,
+  recommendOpcAssignees,
   OPC_ORG_PRESETS,
   parseOpcOrgBlock,
 } from "../src/opc/opc-org.js";
@@ -280,5 +281,78 @@ describe("升级路由按汇报线（五轮 review 补齐）", () => {
     expect(candidates.some((c) => c.id ?? c.employeeId === founder.id)).toBe(
       candidates.some((c) => c.employeeId === founder.id),
     );
+  });
+});
+
+describe("运行时委派推荐（绩效影响委派思想）", () => {
+  it("类目匹配 + 高完成数排序在前；自身排除", () => {
+    const state = createEmptyOpcCompanyState(NOW);
+    let current = state;
+    for (const [name, category, completed] of [
+      ["甲", "engineering", 5],
+      ["乙", "engineering", 0],
+      ["丙", "design", 9],
+    ] as const) {
+      current = applyOpcMutation(
+        current,
+        {
+          kind: "employee.hire",
+          templateId: "custom",
+          roleId: null,
+          custom: { name, category },
+        },
+        NOW + 1,
+      ).state;
+      const hired = current.employees.at(-1)!;
+      for (let i = 0; i < completed; i += 1) {
+        const item = applyOpcMutation(
+          current,
+          { kind: "workitem.create", title: `任务${i}`, assigneeId: hired.id },
+          NOW + 2 + i,
+        ).state;
+        const created = item.workItems.at(-1)!.id;
+        // 状态机：backlog→in_progress→done（ready 语义上需要规划，直派
+        // in_progress 同为合法转移）
+        for (const status of ["in_progress", "done"] as const) {
+          current = applyOpcMutation(
+            current,
+            { kind: "workitem.status", workItemId: created, status },
+            NOW + 100 + i * 10 + (status === "done" ? 1 : 0),
+          ).state;
+        }
+        // stats.completed 的来源：带 workItemId 的复盘（工作项收口语义）
+        current = applyOpcMutation(
+          current,
+          {
+            kind: "retro.record",
+            employeeId: hired.id,
+            workItemId: created,
+            lessons: [{ statement: `${name} 收口 ${i}`, tags: [] }],
+          },
+          NOW + 300 + i,
+        ).state;
+        current = applyOpcMutation(
+          current,
+          {
+            kind: "retro.record",
+            employeeId: hired.id,
+            lessons: [{ statement: `${name} 复盘 ${i}`, tags: [] }],
+          },
+          NOW + 200 + i,
+        ).state;
+      }
+    }
+    const recommendations = recommendOpcAssignees(
+      current,
+      { dependsOn: [], assigneeId: null, category: "engineering" },
+      3,
+    );
+    expect(recommendations[0]?.name).toBe("甲");
+    expect(recommendations.find((r) => r.name === "丙")?.reasons).toContain(
+      "high-completion",
+    );
+    expect(
+      recommendations.find((r) => r.name === "乙")?.score ?? 0,
+    ).toBeLessThan(recommendations[0]!.score);
   });
 });

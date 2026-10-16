@@ -113,6 +113,61 @@ export function buildOpcOrgGeneratePrompt(input: { goal: string }): string {
   ].join("\n");
 }
 
+export interface OpcAssigneeRecommendation {
+  employeeId: string;
+  name: string;
+  emoji: string;
+  /** 推荐得分构成：类目匹配 + 完成数 + 技能覆盖（归一化前的原始信号）。 */
+  score: number;
+  reasons: Array<"category-match" | "skill-match" | "high-completion">;
+}
+
+/**
+ * 运行时委派推荐（OpenOPC「绩效影响委派」思想）：按类目匹配 + 挂接技能
+ * 覆盖 + 完成数为候选在职员工打分。纯函数，UI 的「推荐负责人」直接消费。
+ */
+export function recommendOpcAssignees(
+  state: OpcCompanyState,
+  workItem: Pick<
+    OpcCompanyState["workItems"][number],
+    "dependsOn" | "assigneeId"
+  > & { category?: string },
+  topN = 3,
+): OpcAssigneeRecommendation[] {
+  const candidates = state.employees.filter(
+    (employee) =>
+      employee.status === "active" &&
+      !employee.isFallback &&
+      employee.id !== workItem.assigneeId,
+  );
+  const scored = candidates.map((employee) => {
+    const reasons: OpcAssigneeRecommendation["reasons"] = [];
+    let score = 0;
+    if (workItem.category && employee.category === workItem.category) {
+      score += 2;
+      reasons.push("category-match");
+    }
+    const skillHits = employee.skillRefs.length;
+    score += Math.min(skillHits, 5) * 0.2;
+    if (skillHits > 0) reasons.push("skill-match");
+    if (employee.stats.completed >= 3) {
+      score += Math.min(employee.stats.completed, 10) * 0.1;
+      reasons.push("high-completion");
+    }
+    return {
+      employeeId: employee.id,
+      name: employee.name,
+      emoji: employee.emoji,
+      score: Math.round(score * 100) / 100,
+      reasons,
+    };
+  });
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topN)
+    .filter((item) => item.score > 0);
+}
+
 // ---------------------------------------------------------------------------
 // 模板匹配 + mutation 构造
 // ---------------------------------------------------------------------------
