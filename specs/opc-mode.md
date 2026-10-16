@@ -348,6 +348,12 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   html/csv/xml/ini/cfg），二进制资产（图片等）不随包。
 - 编排 done 标记的轮次取委派 prompt 构建时快照——rework 落账回流 UI 前
   立即委派的极端窗口内，完成信号可能被去重键忽略（人工验收兜底）。
+- **CLI headless（zcode -p）秒退待查**：headless 一次问一次答在本机
+  （takeover 环境）1 秒静默退出（exit 0、无事件、模型未调用），试验脚本
+  的 CLI 通路被阻塞。已排除：参数路由（-p 注册正常）、输出格式（json/
+  stream-json 均无事件）、stdin 形态。剩余嫌疑：全局 hooks（zcode-go 接管
+  装入的 hook 在 headless 会话同样加载）或单实例/登录态 gate。多模型对照
+  与记忆压缩试验的自动化调用被此阻塞；手动路径（桌面会话）不受影响。
 - **探测会话保留 Write 权限**（写指纹样本文件所必需，prompt 契约限定
   单文件）：被测模型理论上可写其他文件——与 workspace-write 员工同级
   的威胁口径，依赖会话隔离边界。
