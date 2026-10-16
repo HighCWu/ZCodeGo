@@ -732,10 +732,21 @@ assert(telegramHits > 0, "mock API 收到 getUpdates");
     ),
   );
   const baseEntry = fpBase.state?.modelFingerprints?.["glm/glm-4.7"];
+  // JSON 序列化往返后对象引用不同——比较内容而非引用
+  if (
+    !(
+      fpBase.ok &&
+      baseEntry &&
+      JSON.stringify(baseEntry.baseline) === JSON.stringify(baseEntry.last) &&
+      !baseEntry.lastVerdict
+    )
+  ) {
+    console.log(`  [dump] fpBase=${JSON.stringify(fpBase).slice(0, 600)}`);
+  }
   assert(
     fpBase.ok &&
       baseEntry &&
-      baseEntry.baseline === baseEntry.last &&
+      JSON.stringify(baseEntry.baseline) === JSON.stringify(baseEntry.last) &&
       !baseEntry.lastVerdict,
     "指纹：首次采集建 baseline 无判定",
   );
