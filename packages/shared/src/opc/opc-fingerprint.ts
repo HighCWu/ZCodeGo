@@ -27,7 +27,9 @@ export interface OpcProbeCell {
   variants: string[];
 }
 
-/** 8 核心格（llm-fingerprint-detector 的可选 8 格核心电池）。 */
+/** 8 核心格（llm-fingerprint-detector 的可选 8 格核心电池；spec「模型指纹」节）。
+ * 每格 10 个改写变体 = 会话样本数：同会话内无重复提问——重复同题会诱发
+ * 模型刻意换答案，破坏独立采样假设。 */
 export const OPC_PROBE_CELLS: OpcProbeCell[] = [
   {
     key: "random-number-1-100:en",
@@ -39,6 +41,11 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "Random number between 1 and 100? Answer with just the number.",
       "Say one random whole number from 1 through 100. Only the number.",
       "Choose a random number in [1, 100]. Output the bare number.",
+      "Think of a random number from 1 to 100. Reply with just that number.",
+      "Give a uniformly random integer between 1 and 100. Only digits.",
+      "Name any number from 1-100 at random. Just the number, nothing else.",
+      "What random number between 1 and 100 do you pick? Bare number.",
+      "Random int in 1..100: respond with the number alone.",
     ],
   },
   {
@@ -51,6 +58,11 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "1 到 100 之间随便说个数。只输出这个数。",
       "请在 1-100 内随机报一个整数。只回数字。",
       "随机想一个 1～100 的数字，只把数字发给我。",
+      "在区间 [1,100] 内随机挑一个整数。只写数字。",
+      "随便说一个介于 1 和 100 之间的数。只回数字本身。",
+      "给我一个 1 到 100 的随机整数，不要单位不要解释。",
+      "1～100 中随机取一个数。答案只包含数字。",
+      "从 1、2、…、100 里随机报一个。只输出数字。",
     ],
   },
   {
@@ -62,6 +74,12 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "Tell me your favourite single number. Number only.",
       "Which number do you like most? Just the number.",
       "Pick the number you like best. Output the bare number.",
+      "Name the number you like the most. Digits only.",
+      "What number do you consider your lucky number? Just digits.",
+      "Your preferred number, please. Reply with the number alone.",
+      "State your go-to number. Only the number, no words.",
+      "Which single number is your favorite? Bare digits.",
+      "Answer with the number you'd choose as favorite. Number only.",
     ],
   },
   {
@@ -73,6 +91,12 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "Say a color at random. Just the color name.",
       "Give me one color word, chosen randomly.",
       "Pick any color. Reply with the color name only.",
+      "Think of a random color and say it. One word.",
+      "A random color, please — just the word.",
+      "Which color comes to mind first? Only the color name.",
+      "Name one color at random. Bare word.",
+      "Choose a random color and output its name only.",
+      "Random color word: respond with just that word.",
     ],
   },
   {
@@ -84,6 +108,12 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "Say a random letter. Just the letter.",
       "Pick a random A–Z letter. Output that single letter.",
       "Give me one random letter. Only the letter character.",
+      "Think of a random letter and reply with it alone.",
+      "A random letter A-Z, please. Just that one character.",
+      "Which letter do you pick at random? Single letter only.",
+      "Name any letter from the alphabet. One character.",
+      "Random letter: output just the letter itself.",
+      "Choose one letter of 26 at random. Reply with that letter.",
     ],
   },
   {
@@ -95,16 +125,29 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "Toss a fair coin — what came up? One word.",
       "Random coin flip: heads or tails? Answer with one word.",
       "Call a coin toss. Just say heads or tails.",
+      "A coin lands randomly: heads or tails? One word answer.",
+      "Imagine flipping a coin. Report heads or tails.",
+      "Heads or tails? Pick randomly and answer with one word.",
+      "Fair coin toss result? Reply with just heads or tails.",
+      "Randomize a coin flip and tell me the side. One word.",
+      "Coin flip time: answer heads or tails only.",
     ],
   },
   {
-    key: "coin:zh",
-    domain: "coin",
-    ask: { en: "", zh: "抛一次硬币" },
+    key: "city:en",
+    domain: "city",
+    ask: { en: "Name a random city", zh: "" },
     variants: [
-      "抛一枚硬币，正面还是反面？只答两字。",
-      "随机抛硬币，结果是什么？回答「正面」或「反面」。",
-      "掷一次硬币，告诉我朝上的一面。只回正面或反面。",
+      "Name a random city. One word only.",
+      "Say a city at random. Just the city name.",
+      "Give me one city, picked randomly. Only the name.",
+      "Pick any city in the world. Reply with its name only.",
+      "Think of a random city and say its name. One word if possible.",
+      "A random city, please — just the name.",
+      "Which city comes to mind first? Only the city name.",
+      "Name one city at random. Bare name.",
+      "Choose a random city and output its name only.",
+      "Random city word: respond with just that name.",
     ],
   },
   {
@@ -116,6 +159,12 @@ export const OPC_PROBE_CELLS: OpcProbeCell[] = [
       "Say an animal at random. Just the animal name.",
       "Give me one animal, picked randomly.",
       "Pick any animal. Reply with the name only.",
+      "Think of a random animal and say it. One word.",
+      "A random animal, please — just the name.",
+      "Which animal comes to mind first? Only the name.",
+      "Name one animal at random. Bare word.",
+      "Choose a random animal and output its name only.",
+      "Random animal: respond with just that name.",
     ],
   },
 ];
@@ -374,8 +423,9 @@ export function normalizeOpcProbeAnswer(
     const single = key.match(/^([a-z])/);
     return single ? single[1]! : "";
   }
-  // city / animal：NFC + 首词 + 小写（无法穷举规范化，按词计数）
-  const slug = opcSlugify(firstWord);
+  // city / animal：NFC + 全串 slug 化（城市/动物名可多词：New York、
+  // polar bear——首词切分会把 "New York" 拆成 "new" 造成分布失真）
+  const slug = opcSlugify(text);
   return slug.length > 0 ? slug : key;
 }
 

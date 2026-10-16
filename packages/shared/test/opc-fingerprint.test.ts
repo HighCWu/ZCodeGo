@@ -39,10 +39,14 @@ describe("答案归一化", () => {
     const color = OPC_PROBE_CELLS.find((c) => c.key === "color:en")!;
     expect(normalizeOpcProbeAnswer("Red.", color.domain)).toBe("red");
     expect(normalizeOpcProbeAnswer("蓝色", color.domain)).toBe("blue");
-    const coinZh = OPC_PROBE_CELLS.find((c) => c.key === "coin:zh")!;
-    expect(normalizeOpcProbeAnswer("正面", coinZh.domain)).toBe("heads");
-    expect(normalizeOpcProbeAnswer("tails", coinZh.domain)).toBe("tails");
-    expect(normalizeOpcProbeAnswer("也许吧", coinZh.domain)).toBe("");
+    const coin = OPC_PROBE_CELLS.find((c) => c.key === "coin:en")!;
+    expect(normalizeOpcProbeAnswer("正面", coin.domain)).toBe("heads");
+    expect(normalizeOpcProbeAnswer("tails", coin.domain)).toBe("tails");
+    expect(normalizeOpcProbeAnswer("也许吧", coin.domain)).toBe("");
+    // city 格（spec 核心电池；此前实现缺失用 coin:zh 补位——已对齐）
+    const city = OPC_PROBE_CELLS.find((c) => c.key === "city:en")!;
+    expect(normalizeOpcProbeAnswer("Tokyo", city.domain)).toBe("tokyo");
+    expect(normalizeOpcProbeAnswer("New York.", city.domain)).toBe("new-york");
   });
 
   it("字母域取单字母；城市域按词 slug", () => {

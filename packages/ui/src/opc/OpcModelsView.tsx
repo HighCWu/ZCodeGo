@@ -10,7 +10,6 @@ import {
   compareOpcFingerprints,
   OPC_PROBE_CELLS,
   opcAnswerDistribution,
-  parseOpcProbeAnswers,
   planOpcProbeSession,
   type OpcFingerprintVerdict,
   type OpcMutation,
@@ -85,11 +84,20 @@ export function OpcModelsView({
     try {
       const cells: OpcModelFingerprint["cells"] = {};
       let failedCells = 0;
+      // 采集批次时间戳：文件名带它——上一轮/另一 modelKey 遗留的样本文件
+      // 不会被本轮轮询误读（串档会拿基线自己的样本 → verdict 恒 match）
+      const captureStamp = Date.now();
       // 格间串行（spec「模型指纹」节：避免并发采样互扰）
       for (const cell of OPC_PROBE_CELLS) {
-        const cellFile = `${cell.key.replace(/:/g, "-")}.json`;
+        const cellFile = `${cell.key.replace(/:/g, "-")}-${captureStamp}.json`;
         const outputPath = `.opc/fingerprint/${cellFile}`;
-        const plan = planOpcProbeSession(cell, SAMPLES_PER_CELL);
+        // 随机起点轮换改写（spec「采集时轮换改写」兑现）：不同采集轮看不同
+        // 改写子序列，防网关对固定 10 题序列特判
+        const plan = planOpcProbeSession(
+          cell,
+          SAMPLES_PER_CELL,
+          Math.floor(Math.random() * cell.variants.length),
+        );
         const prompt = buildOpcProbeSessionPrompt(plan, outputPath);
         const created = await taskService.createTask({
           workspacePath,
@@ -107,8 +115,12 @@ export function OpcModelsView({
           content: prompt,
           // 探测会话需 Write（写样本文件到 .opc/fingerprint/）；拒越界执行
           // 通道（shell / node-repl / todo 写）——prompt 契约限定只写该文件
+          // 探测只需 Write（写样本文件）：改已有文件/子代理/工作流通道
+          // 全部拒绝——被测模型不可借道改工作区或绕回 shell
           toolDenylist: [
             "Bash",
+            "Edit",
+            "ApplyPatch",
             "js",
             "js_reset",
             "js_add_node_module_dir",
@@ -116,6 +128,12 @@ export function OpcModelsView({
             "mcp__node_repl__js_reset",
             "mcp__node_repl__js_add_node_module_dir",
             "TodoWrite",
+            "Agent",
+            "Task",
+            "CreateWorkflow",
+            "AmendWorkflow",
+            "FillWorkflowHole",
+            "Skill",
           ],
         });
         // 轮询样本文件（sendPrompt 是异步投递，等待 agent 写盘；120s 熔断）
@@ -140,7 +158,9 @@ export function OpcModelsView({
             /* 半写 JSON：继续轮询 */
           }
         }
-        if (answers === null || answers.length === 0) {
+        // 长度严格对齐：answers 数与变体数不一致 = agent 输出不规范，
+        // 该格计失败（宽松收录会把错位答案混进分布）
+        if (answers === null || answers.length !== plan.prompts.length) {
           failedCells += 1;
           continue;
         }

@@ -78,6 +78,24 @@ export function applyOpcMutation(
       promotedSkillIds: promotion.promotedSkillIds,
     };
   }
+  // 进化事件统一合并进 state.evolution（spec「所有权与边界」：evolution-log
+  // 是事件镜像）。此前各 case 分裂：retro/promote 自行写入、escalate/
+  // transfer/rework 等只回响应——后者从未落 evolution-log（留痕承诺未兑现）。
+  // 按事件 id 去重，两种形态（自行写入/只返回）都恰好落一次。
+  if (applied.events.length > 0) {
+    const merged = [...applied.state.evolution];
+    const seen = new Set(merged.map((event) => event.id));
+    for (const event of applied.events) {
+      if (!seen.has(event.id)) merged.push(event);
+    }
+    if (merged.length !== applied.state.evolution.length) {
+      return {
+        state: { ...applied.state, evolution: merged },
+        events: applied.events,
+        promotedSkillIds: [],
+      };
+    }
+  }
   return { state: applied.state, events: applied.events, promotedSkillIds: [] };
 }
 
