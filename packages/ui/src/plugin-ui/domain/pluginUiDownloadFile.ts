@@ -58,10 +58,14 @@ export function resolvePluginUiDownloadFileName(
   index: number,
 ): string {
   const base = sanitizePluginUiDownloadFileName(
-    input.name?.trim() || (input.uri ? lastPathSegment(input.uri) : "") || `download-${index + 1}`,
+    input.name?.trim() ||
+      (input.uri ? lastPathSegment(input.uri) : "") ||
+      `download-${index + 1}`,
   );
   const extension = MIME_EXTENSIONS[essence(input.mimeType) ?? ""];
-  return extension && !/\.[A-Za-z0-9]{1,8}$/.test(base) ? `${base}.${extension}` : base;
+  return extension && !/\.[A-Za-z0-9]{1,8}$/.test(base)
+    ? `${base}.${extension}`
+    : base;
 }
 
 export function planPluginUiDownload(
@@ -81,13 +85,25 @@ export function planPluginUiDownload(
     index,
   );
   if (typeof resource.text === "string") {
-    return { name, mimeType: resource.mimeType, source: { kind: "text", text: resource.text } };
+    return {
+      name,
+      mimeType: resource.mimeType,
+      source: { kind: "text", text: resource.text },
+    };
   }
   if (typeof resource.blob === "string") {
-    return { name, mimeType: resource.mimeType, source: { kind: "blob", blob: resource.blob } };
+    return {
+      name,
+      mimeType: resource.mimeType,
+      source: { kind: "blob", blob: resource.blob },
+    };
   }
   // 只有 uri 的内联项按链接处理：宿主先读同插件资源。
-  return { name, mimeType: resource.mimeType, source: { kind: "uri", uri: resource.uri } };
+  return {
+    name,
+    mimeType: resource.mimeType,
+    source: { kind: "uri", uri: resource.uri },
+  };
 }
 
 /** base64 解码后的字节数（忽略空白与 padding），不真正解码。 */

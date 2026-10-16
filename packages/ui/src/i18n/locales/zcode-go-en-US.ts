@@ -70,6 +70,8 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.models.capturing": "Capturing…",
   "opc.models.probing": "Probing {cell} …",
   "opc.models.captureDone": "Capture complete, fingerprint archived",
+  "opc.models.captureDoneChanged":
+    "Capture complete: {verdict} — consider refitting employee capabilities or acknowledging the new model",
   "opc.models.captureFailed": "Capture failed (no valid samples or timeout)",
   "opc.models.empty":
     "No fingerprints yet — enter a model key and capture a baseline",
@@ -301,6 +303,8 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
     "No active teammates to route to — escalate to the owner directly.",
   "opc.escalate.peer": "same category · {completed} done",
   "opc.escalate.manager": "Direct manager",
+  "opc.injectFailed":
+    "Session active or not in draft state — prompt not inserted. Switch to a draft session and retry.",
   "opc.escalate.top": "{completed} done",
   "opc.escalate.transferNote": "escalation routing",
   "opc.escalate.ownerNote": "Escalate to owner (with note)",

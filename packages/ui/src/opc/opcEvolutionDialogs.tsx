@@ -34,7 +34,7 @@ import {
   OPC_SKILL_FENCE,
   type OpcCompanyState,
 } from "@zcode/shared";
-import { insertOpcPrompt } from "./opcComposerBridge.js";
+import { insertOpcPromptWithReceipt } from "./opcComposerBridge.js";
 import { logger } from "@/logger.js";
 
 export interface OpcRetroDialogState {
@@ -61,6 +61,7 @@ export function OpcRetroDialog({
   workspaceIdentity?: string | null;
 }) {
   const { intl } = useZCodeIntl();
+  const [injectWarning, setInjectWarning] = useState<string | null>(null);
   const apply = useOpcStore((s) => s.apply);
   const workspacePath = useOpcStore((s) => s.workspacePath);
   const [employeeId, setEmployeeId] = useState(
@@ -89,6 +90,9 @@ export function OpcRetroDialog({
             {intl.formatMessage({ id: "opc.retro.description" })}
           </DialogDescription>
         </DialogHeader>
+        {injectWarning ? (
+          <p className="text-ui-xs text-red-500">{injectWarning}</p>
+        ) : null}
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
@@ -148,9 +152,9 @@ export function OpcRetroDialog({
                 size="xs"
                 variant="outline"
                 disabled={!employee || !workspacePath}
-                onClick={() => {
+                onClick={async () => {
                   if (!employee || !workspacePath) return;
-                  insertOpcPrompt({
+                  const inserted = await insertOpcPromptWithReceipt({
                     workspacePath,
                     workspaceIdentity: workspaceIdentity ?? undefined,
                     text: buildOpcRetroPrompt({
@@ -158,8 +162,14 @@ export function OpcRetroDialog({
                       workItemTitle: workItem?.title ?? null,
                     }),
                   });
-                  // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
-                  onClose();
+                  if (inserted) {
+                    // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                    onClose();
+                  } else {
+                    setInjectWarning(
+                      intl.formatMessage({ id: "opc.injectFailed" }),
+                    );
+                  }
                 }}
               >
                 {intl.formatMessage({ id: "opc.retro.generatePrompt" })}
@@ -197,7 +207,7 @@ export function OpcRetroDialog({
           <Button
             size="sm"
             disabled={!employee || parsedLessons.length === 0}
-            onClick={() => {
+            onClick={async () => {
               if (!employee) return;
               void apply([
                 {
@@ -234,6 +244,7 @@ export function OpcUpgradeDialog({
   workspaceIdentity?: string | null;
 }) {
   const { intl } = useZCodeIntl();
+  const [injectWarning, setInjectWarning] = useState<string | null>(null);
   const apply = useOpcStore((s) => s.apply);
   const resolveSkillBody = useOpcStore((s) => s.resolveSkillBody);
   const workspacePath = useOpcStore((s) => s.workspacePath);
@@ -261,6 +272,9 @@ export function OpcUpgradeDialog({
             {intl.formatMessage({ id: "opc.upgrade.description" })}
           </DialogDescription>
         </DialogHeader>
+        {injectWarning ? (
+          <p className="text-ui-xs text-red-500">{injectWarning}</p>
+        ) : null}
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="opc-upgrade-goal">
@@ -279,9 +293,9 @@ export function OpcUpgradeDialog({
                 size="sm"
                 variant="outline"
                 disabled={!workspacePath}
-                onClick={() => {
+                onClick={async () => {
                   if (!workspacePath) return;
-                  insertOpcPrompt({
+                  const inserted = await insertOpcPromptWithReceipt({
                     workspacePath,
                     workspaceIdentity: workspaceIdentity ?? undefined,
                     text: buildOpcSkillUpgradePrompt({
@@ -293,8 +307,14 @@ export function OpcUpgradeDialog({
                   logger.debug("[zcode-go][opc] 升级 prompt 已注入 composer", {
                     skillId,
                   });
-                  // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
-                  onClose();
+                  if (inserted) {
+                    // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                    onClose();
+                  } else {
+                    setInjectWarning(
+                      intl.formatMessage({ id: "opc.injectFailed" }),
+                    );
+                  }
                 }}
               >
                 <Copy className="size-3.5" />
@@ -324,7 +344,7 @@ export function OpcUpgradeDialog({
           <Button
             size="sm"
             disabled={!parsedBody}
-            onClick={() => {
+            onClick={async () => {
               if (!parsedBody) return;
               void apply([
                 {

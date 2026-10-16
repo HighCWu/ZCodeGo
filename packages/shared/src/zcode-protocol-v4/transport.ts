@@ -13,11 +13,20 @@ import {
 } from "./core.js";
 import { conversationDeltaSchema } from "./delta.js";
 import { conversationRowSchema, toolCallRowSchema } from "./rows.js";
-import { sessionsIndexDeltaSchema, sessionsIndexSnapshotSchema } from "./sessions-index.js";
+import {
+  sessionsIndexDeltaSchema,
+  sessionsIndexSnapshotSchema,
+} from "./sessions-index.js";
 import { WORKFLOW_RUN_STOP_REASONS } from "./workflow-observation-display.js";
 import { conversationSnapshotSchema } from "./snapshot.js";
-import { workspaceConfigDeltaSchema, workspaceConfigSnapshotSchema } from "./workspace-config.js";
-import { createTopicWireFrameSchema, topicWireFrameCandidateSchema } from "./wire.js";
+import {
+  workspaceConfigDeltaSchema,
+  workspaceConfigSnapshotSchema,
+} from "./workspace-config.js";
+import {
+  createTopicWireFrameSchema,
+  topicWireFrameCandidateSchema,
+} from "./wire.js";
 
 // ── 连接与握手 ──
 export const hostCapabilitiesSchema = z.object({
@@ -53,7 +62,8 @@ export const helloMessageSchema = z
   })
   .strict()
   .superRefine((hello, context) => {
-    const expectedProfile = hello.clientMode === "desktop-continuous" ? "continuous" : "replayable";
+    const expectedProfile =
+      hello.clientMode === "desktop-continuous" ? "continuous" : "replayable";
     if (hello.deliveryProfile !== expectedProfile) {
       context.addIssue({
         code: "custom",
@@ -70,7 +80,9 @@ export const clientHelloSchema = z
     kind: z.literal("clientHello"),
     protocolVersion: z.literal(V4_WIRE_PROTOCOL_VERSION),
     clientId: z.string(),
-    clientKind: z.enum(["desktop", "web", "mobileRemote", "mobileApp"]).optional(),
+    clientKind: z
+      .enum(["desktop", "web", "mobileRemote", "mobileApp"])
+      .optional(),
     appVersion: z.string(),
     // 缺失代表旧客户端，不具备 Settings-centered review UI。
     capabilities: z
@@ -89,19 +101,27 @@ export const clientHelloSchema = z
   .strict();
 export type ClientHello = z.infer<typeof clientHelloSchema>;
 
-export function hostSupportsWorkspaceHookReview(capabilities: HostCapabilities): boolean {
+export function hostSupportsWorkspaceHookReview(
+  capabilities: HostCapabilities,
+): boolean {
   return capabilities.workspaceHookReview === true;
 }
 
-export function clientSupportsWorkspaceHookReview(clientHello: ClientHello): boolean {
+export function clientSupportsWorkspaceHookReview(
+  clientHello: ClientHello,
+): boolean {
   return clientHello.capabilities?.workspaceHookReviewUi === true;
 }
 
-export function hostSupportsWorkflowRunDeltas(capabilities: HostCapabilities): boolean {
+export function hostSupportsWorkflowRunDeltas(
+  capabilities: HostCapabilities,
+): boolean {
   return capabilities.workflowRunDeltas === true;
 }
 
-export function clientSupportsWorkflowRunDeltas(clientHello: ClientHello): boolean {
+export function clientSupportsWorkflowRunDeltas(
+  clientHello: ClientHello,
+): boolean {
   return clientHello.capabilities?.workflowRunDeltas === true;
 }
 
@@ -148,7 +168,9 @@ export const conversationOpenTimingSchema = z
     snapshotRowCount: openTimingCountSchema,
   })
   .strict();
-export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema>;
+export type ConversationOpenTiming = z.infer<
+  typeof conversationOpenTimingSchema
+>;
 
 const conversationSubscribeAckSchema = subscribeAckSchema.extend({
   openTiming: conversationOpenTimingSchema.optional(),
@@ -160,13 +182,15 @@ const conversationSubscribeAckSchema = subscribeAckSchema.extend({
    */
   runtimeTopic: z.string().optional(),
 });
-export type ConversationSubscribeAck = z.infer<typeof conversationSubscribeAckSchema>;
+export type ConversationSubscribeAck = z.infer<
+  typeof conversationSubscribeAckSchema
+>;
 
 // ── 帧信封（泛型帧用工厂构造具体 topic 的 schema）──
-export function createTopicFrameSchema<S extends z.ZodTypeAny, D extends z.ZodTypeAny>(
-  snapshotSchema: S,
-  deltaSchema: D,
-) {
+export function createTopicFrameSchema<
+  S extends z.ZodTypeAny,
+  D extends z.ZodTypeAny,
+>(snapshotSchema: S, deltaSchema: D) {
   return z.object({
     topic: z.string(),
     // 代际标识，防旧流交错。
@@ -204,27 +228,53 @@ export const conversationTopicFrameSchema = createTopicFrameSchema(
     ttftRelated: z.array(localTtftFactsSchema).max(16).optional(),
   })
   .superRefine((frame, context) => {
-    if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
-      context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
+    if (
+      !frame.topic.startsWith("conversation/") ||
+      frame.topic.length === "conversation/".length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "invalid conversation topic",
+        path: ["topic"],
+      });
     }
   });
-export type ConversationTopicFrame = z.infer<typeof conversationTopicFrameSchema>;
+export type ConversationTopicFrame = z.infer<
+  typeof conversationTopicFrameSchema
+>;
 export const conversationTopicWireFrameSchema = createTopicWireFrameSchema(
   conversationTopicFrameSchema,
 ).superRefine((wire, context) => {
-  if (!wire.topic.startsWith("conversation/") || wire.topic.length === "conversation/".length) {
-    context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
+  if (
+    !wire.topic.startsWith("conversation/") ||
+    wire.topic.length === "conversation/".length
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "invalid conversation topic",
+      path: ["topic"],
+    });
   }
 });
-export type ConversationTopicWireFrame = z.infer<typeof conversationTopicWireFrameSchema>;
-export const conversationTopicWireCandidateSchema = topicWireFrameCandidateSchema.superRefine(
-  (wire, context) => {
-    if (!wire.topic.startsWith("conversation/") || wire.topic.length === "conversation/".length) {
-      context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
+export type ConversationTopicWireFrame = z.infer<
+  typeof conversationTopicWireFrameSchema
+>;
+export const conversationTopicWireCandidateSchema =
+  topicWireFrameCandidateSchema.superRefine((wire, context) => {
+    if (
+      !wire.topic.startsWith("conversation/") ||
+      wire.topic.length === "conversation/".length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "invalid conversation topic",
+        path: ["topic"],
+      });
     }
-  },
-);
-export type ConversationTopicWireCandidate = z.infer<typeof conversationTopicWireCandidateSchema>;
+  });
+export type ConversationTopicWireCandidate = z.infer<
+  typeof conversationTopicWireCandidateSchema
+>;
 
 // sessions-index topic 的具体帧 schema（五件套实例化；侧栏列表活性数据源）。
 export const sessionsIndexTopicFrameSchema = createTopicFrameSchema(
@@ -235,20 +285,35 @@ export const sessionsIndexTopicFrameSchema = createTopicFrameSchema(
     !frame.topic.startsWith("sessions-index/") ||
     frame.topic.length === "sessions-index/".length
   ) {
-    context.addIssue({ code: "custom", message: "invalid sessions-index topic", path: ["topic"] });
+    context.addIssue({
+      code: "custom",
+      message: "invalid sessions-index topic",
+      path: ["topic"],
+    });
   }
 });
-export type SessionsIndexTopicFrame = z.infer<typeof sessionsIndexTopicFrameSchema>;
+export type SessionsIndexTopicFrame = z.infer<
+  typeof sessionsIndexTopicFrameSchema
+>;
 export const sessionsIndexTopicWireFrameSchema = createTopicWireFrameSchema(
   sessionsIndexTopicFrameSchema,
 ).superRefine((wire, context) => {
-  if (!wire.topic.startsWith("sessions-index/") || wire.topic.length === "sessions-index/".length) {
-    context.addIssue({ code: "custom", message: "invalid sessions-index topic", path: ["topic"] });
+  if (
+    !wire.topic.startsWith("sessions-index/") ||
+    wire.topic.length === "sessions-index/".length
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "invalid sessions-index topic",
+      path: ["topic"],
+    });
   }
 });
-export type SessionsIndexTopicWireFrame = z.infer<typeof sessionsIndexTopicWireFrameSchema>;
-export const sessionsIndexTopicWireCandidateSchema = topicWireFrameCandidateSchema.superRefine(
-  (wire, context) => {
+export type SessionsIndexTopicWireFrame = z.infer<
+  typeof sessionsIndexTopicWireFrameSchema
+>;
+export const sessionsIndexTopicWireCandidateSchema =
+  topicWireFrameCandidateSchema.superRefine((wire, context) => {
     if (
       !wire.topic.startsWith("sessions-index/") ||
       wire.topic.length === "sessions-index/".length
@@ -259,9 +324,10 @@ export const sessionsIndexTopicWireCandidateSchema = topicWireFrameCandidateSche
         path: ["topic"],
       });
     }
-  },
-);
-export type SessionsIndexTopicWireCandidate = z.infer<typeof sessionsIndexTopicWireCandidateSchema>;
+  });
+export type SessionsIndexTopicWireCandidate = z.infer<
+  typeof sessionsIndexTopicWireCandidateSchema
+>;
 
 // workspace-config topic 的具体帧 schema（additive 变更；配置目录活性数据源）。
 export const workspaceConfigTopicFrameSchema = createTopicFrameSchema(
@@ -279,7 +345,9 @@ export const workspaceConfigTopicFrameSchema = createTopicFrameSchema(
     });
   }
 });
-export type WorkspaceConfigTopicFrame = z.infer<typeof workspaceConfigTopicFrameSchema>;
+export type WorkspaceConfigTopicFrame = z.infer<
+  typeof workspaceConfigTopicFrameSchema
+>;
 export const workspaceConfigTopicWireFrameSchema = createTopicWireFrameSchema(
   workspaceConfigTopicFrameSchema,
 ).superRefine((wire, context) => {
@@ -294,9 +362,11 @@ export const workspaceConfigTopicWireFrameSchema = createTopicWireFrameSchema(
     });
   }
 });
-export type WorkspaceConfigTopicWireFrame = z.infer<typeof workspaceConfigTopicWireFrameSchema>;
-export const workspaceConfigTopicWireCandidateSchema = topicWireFrameCandidateSchema.superRefine(
-  (wire, context) => {
+export type WorkspaceConfigTopicWireFrame = z.infer<
+  typeof workspaceConfigTopicWireFrameSchema
+>;
+export const workspaceConfigTopicWireCandidateSchema =
+  topicWireFrameCandidateSchema.superRefine((wire, context) => {
     if (
       !wire.topic.startsWith("workspace-config/") ||
       wire.topic.length === "workspace-config/".length
@@ -307,8 +377,7 @@ export const workspaceConfigTopicWireCandidateSchema = topicWireFrameCandidateSc
         path: ["topic"],
       });
     }
-  },
-);
+  });
 export type WorkspaceConfigTopicWireCandidate = z.infer<
   typeof workspaceConfigTopicWireCandidateSchema
 >;
@@ -331,7 +400,9 @@ export const routedTopicWireCandidateSchema = z.union([
   sessionsIndexTopicWireCandidateSchema,
   workspaceConfigTopicWireCandidateSchema,
 ]);
-export type RoutedTopicWireCandidate = z.infer<typeof routedTopicWireCandidateSchema>;
+export type RoutedTopicWireCandidate = z.infer<
+  typeof routedTopicWireCandidateSchema
+>;
 
 // ── v4 RPC 出入口（host 通道层）──
 // 载体复用现有 JSON-RPC（stdio NDJSON / socket），方法名带 v4/ 前缀与旧协议并存；
@@ -361,8 +432,10 @@ export const V4_METHODS = {
   //   ArtifactData 预置看板的条目分页（cursor = journal sequence）
   //   ArtifactRead 内容产物的字节，≤ 512 KiB 一块，形状逐字照 attachmentRead
   conversationWorkflowRunArtifacts: "v4/conversation/workflowRunArtifacts",
-  conversationWorkflowRunArtifactData: "v4/conversation/workflowRunArtifactData",
-  conversationWorkflowRunArtifactRead: "v4/conversation/workflowRunArtifactRead",
+  conversationWorkflowRunArtifactData:
+    "v4/conversation/workflowRunArtifactData",
+  conversationWorkflowRunArtifactRead:
+    "v4/conversation/workflowRunArtifactRead",
   // workflow run 的工作区 transcript。两条同族，
   // 照产物的 ①/③ 拆法：Workspace 是轻行清单（不带正文），NodeResult 是一个节点的有界正文。
   conversationWorkflowRunWorkspace: "v4/conversation/workflowRunWorkspace",
@@ -396,9 +469,15 @@ export const v4BackgroundBashOutputParamsSchema = z.strictObject({
   sessionId: z.string().min(1),
   workId: z.string().min(1),
 });
-export type V4BackgroundBashOutputParams = z.infer<typeof v4BackgroundBashOutputParamsSchema>;
+export type V4BackgroundBashOutputParams = z.infer<
+  typeof v4BackgroundBashOutputParamsSchema
+>;
 
-export const v4ConnectionFlowStateSchema = z.enum(["saturated", "drained", "closed"]);
+export const v4ConnectionFlowStateSchema = z.enum([
+  "saturated",
+  "drained",
+  "closed",
+]);
 export type V4ConnectionFlowState = z.infer<typeof v4ConnectionFlowStateSchema>;
 
 export const v4ConnectionFlowParamsSchema = z
@@ -407,7 +486,9 @@ export const v4ConnectionFlowParamsSchema = z
     state: v4ConnectionFlowStateSchema,
   })
   .strict();
-export type V4ConnectionFlowParams = z.infer<typeof v4ConnectionFlowParamsSchema>;
+export type V4ConnectionFlowParams = z.infer<
+  typeof v4ConnectionFlowParamsSchema
+>;
 
 export const v4ConnectionFlowResultSchema = z.object({}).strict();
 
@@ -426,23 +507,30 @@ export const MAX_LEGACY_TASK_IDS_PER_SUBSCRIBE = 200;
 
 // subscribe 请求 = 通用 SubscribeParams + connectionId（重订阅替换按
 // (connectionId, topic) 判定；stdio 单管道场景由 host 为每个下游客户端分配）。
-export const v4ConversationSubscribeParamsSchema = subscribeParamsSchema.extend({
-  connectionId: z.string(),
-  clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]),
-  // 当前可信 attachment 的 workspace；cold resume 优先使用它恢复身份，live 不消费。
-  workspace: zcodeWorkspaceRefSchema.optional(),
-  /** host 从当前 remote workspace 的 tasks-index 精确读取的旧任务归属 allowlist。 */
-  legacyTaskIds: z.array(z.string().min(1)).max(MAX_LEGACY_TASK_IDS_PER_SUBSCRIBE).optional(),
-  // 仅供 host→CLI cold resume 使用；live conversation 不消费该 hint。
-  resumeThoughtLevel: z.string().trim().min(1).optional(),
-  /**
-   * 这条订阅收不收 `workflowRun.*` 键级增量。与 `clientMode` 同族：由**可信 host** 从该连接的
-   * clientHello 注入，面向 UI 的 subscribe 选不了它——一个客户端能不能认得增量是连接的事实，
-   * 不是某一次订阅可以自选的口味。缺席 = 按旧消费者处理（整键 patch + 旧界裁剪）。
-   */
-  workflowRunDeltas: z.boolean().optional(),
-});
-export type V4ConversationSubscribeParams = z.infer<typeof v4ConversationSubscribeParamsSchema>;
+export const v4ConversationSubscribeParamsSchema = subscribeParamsSchema.extend(
+  {
+    connectionId: z.string(),
+    clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]),
+    // 当前可信 attachment 的 workspace；cold resume 优先使用它恢复身份，live 不消费。
+    workspace: zcodeWorkspaceRefSchema.optional(),
+    /** host 从当前 remote workspace 的 tasks-index 精确读取的旧任务归属 allowlist。 */
+    legacyTaskIds: z
+      .array(z.string().min(1))
+      .max(MAX_LEGACY_TASK_IDS_PER_SUBSCRIBE)
+      .optional(),
+    // 仅供 host→CLI cold resume 使用；live conversation 不消费该 hint。
+    resumeThoughtLevel: z.string().trim().min(1).optional(),
+    /**
+     * 这条订阅收不收 `workflowRun.*` 键级增量。与 `clientMode` 同族：由**可信 host** 从该连接的
+     * clientHello 注入，面向 UI 的 subscribe 选不了它——一个客户端能不能认得增量是连接的事实，
+     * 不是某一次订阅可以自选的口味。缺席 = 按旧消费者处理（整键 patch + 旧界裁剪）。
+     */
+    workflowRunDeltas: z.boolean().optional(),
+  },
+);
+export type V4ConversationSubscribeParams = z.infer<
+  typeof v4ConversationSubscribeParamsSchema
+>;
 
 // 公共 subscribe response 严格只含 ACK。initial snapshot/resume 由 server 的
 // request-scoped post-response outbox 在 response line 之后作为 owned notification 发出。
@@ -451,7 +539,9 @@ export const v4ConversationSubscribeResultSchema = z
     ack: conversationSubscribeAckSchema,
   })
   .strict();
-export type V4ConversationSubscribeResult = z.infer<typeof v4ConversationSubscribeResultSchema>;
+export type V4ConversationSubscribeResult = z.infer<
+  typeof v4ConversationSubscribeResultSchema
+>;
 
 // sessions-index 与 conversation 共用同一 subscribe RPC；公共 response 同样 ACK-only。
 export const v4SessionsIndexSubscribeResultSchema = z
@@ -459,7 +549,9 @@ export const v4SessionsIndexSubscribeResultSchema = z
     ack: subscribeAckSchema,
   })
   .strict();
-export type V4SessionsIndexSubscribeResult = z.infer<typeof v4SessionsIndexSubscribeResultSchema>;
+export type V4SessionsIndexSubscribeResult = z.infer<
+  typeof v4SessionsIndexSubscribeResultSchema
+>;
 
 // workspace-config 也只回 ACK；initial frame 走同一 post-response notification 时序。
 export const v4WorkspaceConfigSubscribeResultSchema = z
@@ -486,7 +578,9 @@ export const conversationResyncParamsSchema = z
     forceSnapshot: z.boolean().optional(),
   })
   .strict();
-export type ConversationResyncParams = z.infer<typeof conversationResyncParamsSchema>;
+export type ConversationResyncParams = z.infer<
+  typeof conversationResyncParamsSchema
+>;
 
 // CLI-facing 形状：topic/connectionId 只能由 connection facade 从 owned registry 注入。
 export const v4ConversationResyncParamsSchema = conversationResyncParamsSchema
@@ -495,14 +589,18 @@ export const v4ConversationResyncParamsSchema = conversationResyncParamsSchema
     connectionId: z.string().trim().min(1).max(1024),
   })
   .strict();
-export type V4ConversationResyncParams = z.infer<typeof v4ConversationResyncParamsSchema>;
+export type V4ConversationResyncParams = z.infer<
+  typeof v4ConversationResyncParamsSchema
+>;
 
 export const v4ConversationResyncResultSchema = z
   .object({
     ack: subscribeAckSchema,
   })
   .strict();
-export type V4ConversationResyncResult = z.infer<typeof v4ConversationResyncResultSchema>;
+export type V4ConversationResyncResult = z.infer<
+  typeof v4ConversationResyncResultSchema
+>;
 
 export const v4ConversationUnsubscribeParamsSchema = z
   .object({
@@ -511,19 +609,25 @@ export const v4ConversationUnsubscribeParamsSchema = z
     connectionId: z.string().trim().min(1).max(1024),
   })
   .strict();
-export type V4ConversationUnsubscribeParams = z.infer<typeof v4ConversationUnsubscribeParamsSchema>;
+export type V4ConversationUnsubscribeParams = z.infer<
+  typeof v4ConversationUnsubscribeParamsSchema
+>;
 
 // ── rows/range（游标制行分页，loadOlder）──
 // 无 index 语义：全序 = rowId 升序；客户端按 rowId 键控合并。
 export const v4ConversationRowsRangeParamsSchema = z.object({
   sessionId: z.string(),
   /** Host attachment injects this trusted value; renderer callers omit it. */
-  clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]).optional(),
+  clientMode: z
+    .enum(["desktop-continuous", "web-remote-replayable"])
+    .optional(),
   // 取 rowId < beforeRowId 的行；缺省 = 从当前尾部向前。
   beforeRowId: z.number().optional(),
   limit: z.number().min(1).max(PROTOCOL_V4_LIMITS.rowsRangeMaxLimit),
 });
-export type V4ConversationRowsRangeParams = z.infer<typeof v4ConversationRowsRangeParamsSchema>;
+export type V4ConversationRowsRangeParams = z.infer<
+  typeof v4ConversationRowsRangeParamsSchema
+>;
 
 export const v4ConversationRowsRangeResultSchema = z.object({
   // rowId 升序。
@@ -535,7 +639,9 @@ export const v4ConversationRowsRangeResultSchema = z.object({
   // beforeRowId 方向是否还有更早的行。
   hasMore: z.boolean(),
 });
-export type V4ConversationRowsRangeResult = z.infer<typeof v4ConversationRowsRangeResultSchema>;
+export type V4ConversationRowsRangeResult = z.infer<
+  typeof v4ConversationRowsRangeResultSchema
+>;
 
 // ── conversation plans directory ──
 // 目录来自 CLI 完整有效 projection，不能用 renderer 的有界 tail window 推导。
@@ -544,7 +650,9 @@ export const v4ConversationPlansParamsSchema = z
     sessionId: z.string().min(1),
   })
   .strict();
-export type V4ConversationPlansParams = z.infer<typeof v4ConversationPlansParamsSchema>;
+export type V4ConversationPlansParams = z.infer<
+  typeof v4ConversationPlansParamsSchema
+>;
 
 export const v4ConversationPlansResultSchema = z
   .object({
@@ -554,7 +662,9 @@ export const v4ConversationPlansResultSchema = z
     atLogEpoch: z.string().min(1),
   })
   .strict();
-export type V4ConversationPlansResult = z.infer<typeof v4ConversationPlansResultSchema>;
+export type V4ConversationPlansResult = z.infer<
+  typeof v4ConversationPlansResultSchema
+>;
 
 const readonlyDiffHunkSchema = z
   .object({
@@ -574,7 +684,9 @@ export const v4ConversationFileChangesParamsSchema = z
     baseLogEpoch: z.string().trim().min(1),
   })
   .strict();
-export type V4ConversationFileChangesParams = z.infer<typeof v4ConversationFileChangesParamsSchema>;
+export type V4ConversationFileChangesParams = z.infer<
+  typeof v4ConversationFileChangesParamsSchema
+>;
 
 export const v4ConversationFileChangesResultSchema = z
   .object({
@@ -596,7 +708,9 @@ export const v4ConversationFileChangesResultSchema = z
     ),
   })
   .strict();
-export type V4ConversationFileChangesResult = z.infer<typeof v4ConversationFileChangesResultSchema>;
+export type V4ConversationFileChangesResult = z.infer<
+  typeof v4ConversationFileChangesResultSchema
+>;
 
 // ── workflow run 事件日志──
 // 形态与 rows/range、plans 同族：只读、无状态、超时重发安全。cursor = journal sequence
@@ -620,7 +734,12 @@ export const v4ConversationWorkflowRunEventsParamsSchema = z
     runId: z.string().min(1),
     /** 只取 sequence 严格大于该值的事件；缺省从头取。 */
     afterSequence: z.number().int().nonnegative().optional(),
-    limit: z.number().int().positive().max(WORKFLOW_RUN_EVENTS_PAGE_LIMITS.maxEvents).optional(),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(WORKFLOW_RUN_EVENTS_PAGE_LIMITS.maxEvents)
+      .optional(),
   })
   .strict();
 export type V4ConversationWorkflowRunEventsParams = z.infer<
@@ -805,7 +924,9 @@ export const v4ConversationUsageParamsSchema = z
     sessionId: z.string().min(1),
   })
   .strict();
-export type V4ConversationUsageParams = z.infer<typeof v4ConversationUsageParamsSchema>;
+export type V4ConversationUsageParams = z.infer<
+  typeof v4ConversationUsageParamsSchema
+>;
 export const v4ConversationUsageResultSchema = z
   .object({
     sessionId: z.string().min(1),
@@ -820,7 +941,9 @@ export const v4ConversationUsageResultSchema = z
     inputBaselineBySource: z.record(z.string(), z.number().int().nonnegative()),
   })
   .strict();
-export type V4ConversationUsageResult = z.infer<typeof v4ConversationUsageResultSchema>;
+export type V4ConversationUsageResult = z.infer<
+  typeof v4ConversationUsageResultSchema
+>;
 
 // ── 附件上行事务 ──
 // UI 高层仍用 put(input)->ref；这份 full-data schema 只描述 renderer 内部调用，绝不作为
@@ -862,9 +985,19 @@ export const v4AttachmentBeginParamsSchema = z
       .string()
       .min(3)
       .max(255)
-      .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/),
-    totalBytes: z.number().int().min(0).max(PROTOCOL_V4_LIMITS.attachmentMaxBytes),
-    totalChunks: z.number().int().min(0).max(PROTOCOL_V4_LIMITS.attachmentUploadMaxChunks),
+      .regex(
+        /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/,
+      ),
+    totalBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(PROTOCOL_V4_LIMITS.attachmentMaxBytes),
+    totalChunks: z
+      .number()
+      .int()
+      .min(0)
+      .max(PROTOCOL_V4_LIMITS.attachmentUploadMaxChunks),
     checksum: v4AttachmentChecksumSchema,
   })
   .strict()
@@ -877,7 +1010,9 @@ export const v4AttachmentBeginParamsSchema = z
       });
     }
   });
-export type V4AttachmentBeginParams = z.infer<typeof v4AttachmentBeginParamsSchema>;
+export type V4AttachmentBeginParams = z.infer<
+  typeof v4AttachmentBeginParamsSchema
+>;
 
 export const v4AttachmentBeginResultSchema = z.discriminatedUnion("state", [
   z
@@ -896,7 +1031,9 @@ export const v4AttachmentBeginResultSchema = z.discriminatedUnion("state", [
     })
     .strict(),
 ]);
-export type V4AttachmentBeginResult = z.infer<typeof v4AttachmentBeginResultSchema>;
+export type V4AttachmentBeginResult = z.infer<
+  typeof v4AttachmentBeginResultSchema
+>;
 
 function decodedBase64ByteLength(value: string): number | null {
   if (value.length === 0) return 0;
@@ -931,7 +1068,11 @@ export const v4AttachmentChunkParamsSchema = z
   .superRefine((value, context) => {
     const decodedBytes = decodedBase64ByteLength(value.dataBase64);
     if (decodedBytes === null) {
-      context.addIssue({ code: "custom", message: "invalid base64", path: ["dataBase64"] });
+      context.addIssue({
+        code: "custom",
+        message: "invalid base64",
+        path: ["dataBase64"],
+      });
       return;
     }
     if (decodedBytes > PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes) {
@@ -945,7 +1086,9 @@ export const v4AttachmentChunkParamsSchema = z
       });
     }
   });
-export type V4AttachmentChunkParams = z.infer<typeof v4AttachmentChunkParamsSchema>;
+export type V4AttachmentChunkParams = z.infer<
+  typeof v4AttachmentChunkParamsSchema
+>;
 
 export const v4AttachmentChunkResultSchema = z
   .object({
@@ -953,7 +1096,9 @@ export const v4AttachmentChunkResultSchema = z
     nextChunkIndex: z.number().int().nonnegative(),
   })
   .strict();
-export type V4AttachmentChunkResult = z.infer<typeof v4AttachmentChunkResultSchema>;
+export type V4AttachmentChunkResult = z.infer<
+  typeof v4AttachmentChunkResultSchema
+>;
 
 const v4AttachmentTerminalParamsSchema = z
   .object({
@@ -963,11 +1108,18 @@ const v4AttachmentTerminalParamsSchema = z
   })
   .strict();
 export const v4AttachmentCommitParamsSchema = v4AttachmentTerminalParamsSchema;
-export type V4AttachmentCommitParams = z.infer<typeof v4AttachmentCommitParamsSchema>;
-export const v4AttachmentCommitResultSchema = v4AttachmentPutResultSchema.strict();
-export type V4AttachmentCommitResult = z.infer<typeof v4AttachmentCommitResultSchema>;
+export type V4AttachmentCommitParams = z.infer<
+  typeof v4AttachmentCommitParamsSchema
+>;
+export const v4AttachmentCommitResultSchema =
+  v4AttachmentPutResultSchema.strict();
+export type V4AttachmentCommitResult = z.infer<
+  typeof v4AttachmentCommitResultSchema
+>;
 export const v4AttachmentAbortParamsSchema = v4AttachmentTerminalParamsSchema;
-export type V4AttachmentAbortParams = z.infer<typeof v4AttachmentAbortParamsSchema>;
+export type V4AttachmentAbortParams = z.infer<
+  typeof v4AttachmentAbortParamsSchema
+>;
 export const v4AttachmentAbortResultSchema = z.object({}).strict();
 
 /** 已发送 image/video/PDF 预览 query；ref 必须由 CLI 对当前 session projection 再授权。 */
@@ -979,18 +1131,25 @@ export const v4AttachmentReadParamsSchema = z
     target: conversationRowTargetSchema.optional(),
     attachmentIndex: z.number().int().nonnegative().optional(),
     offset: z.number().int().nonnegative(),
-    limit: z.number().int().positive().max(PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes),
   })
   .strict()
   .superRefine((value, context) => {
-    if ((value.target === undefined) === (value.attachmentIndex === undefined)) return;
+    if ((value.target === undefined) === (value.attachmentIndex === undefined))
+      return;
     context.addIssue({
       code: "custom",
       message: "target and attachmentIndex must be provided together",
       path: value.target === undefined ? ["target"] : ["attachmentIndex"],
     });
   });
-export type V4AttachmentReadParams = z.infer<typeof v4AttachmentReadParamsSchema>;
+export type V4AttachmentReadParams = z.infer<
+  typeof v4AttachmentReadParamsSchema
+>;
 
 /** Desktop local 已发送视频 source query；远端与 Web 必须返回 chunked。PDF 始终走 chunked。 */
 export const v4AttachmentPreviewSourceParamsSchema = z
@@ -1003,14 +1162,17 @@ export const v4AttachmentPreviewSourceParamsSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if ((value.target === undefined) === (value.attachmentIndex === undefined)) return;
+    if ((value.target === undefined) === (value.attachmentIndex === undefined))
+      return;
     context.addIssue({
       code: "custom",
       message: "target and attachmentIndex must be provided together",
       path: value.target === undefined ? ["target"] : ["attachmentIndex"],
     });
   });
-export type V4AttachmentPreviewSourceParams = z.infer<typeof v4AttachmentPreviewSourceParamsSchema>;
+export type V4AttachmentPreviewSourceParams = z.infer<
+  typeof v4AttachmentPreviewSourceParamsSchema
+>;
 
 export const v4AttachmentPreviewSourceResultSchema = z.union([
   z
@@ -1024,7 +1186,9 @@ export const v4AttachmentPreviewSourceResultSchema = z.union([
     .strict(),
   z.object({ kind: z.literal("chunked") }).strict(),
 ]);
-export type V4AttachmentPreviewSourceResult = z.infer<typeof v4AttachmentPreviewSourceResultSchema>;
+export type V4AttachmentPreviewSourceResult = z.infer<
+  typeof v4AttachmentPreviewSourceResultSchema
+>;
 
 export const v4AttachmentReadResultSchema = z
   .object({
@@ -1039,7 +1203,11 @@ export const v4AttachmentReadResultSchema = z
           value.split(";", 1)[0]?.trim().toLowerCase() === "text/plain",
         "attachment preview only supports image/video/pdf/plain text types",
       ),
-    totalBytes: z.number().int().nonnegative().max(PROTOCOL_V4_LIMITS.attachmentPreviewMaxBytes),
+    totalBytes: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(PROTOCOL_V4_LIMITS.attachmentPreviewMaxBytes),
     nextOffset: z.number().int().positive().nullable(),
   })
   .strict()
@@ -1047,7 +1215,8 @@ export const v4AttachmentReadResultSchema = z
     if (
       // 根因：运行时已支持材料文本，响应 schema 仍只接受媒体，导致跨进程预览失败。
       (value.mediaType.startsWith("image/") ||
-        value.mediaType.split(";", 1)[0]?.trim().toLowerCase() === "text/plain") &&
+        value.mediaType.split(";", 1)[0]?.trim().toLowerCase() ===
+          "text/plain") &&
       value.totalBytes > PROTOCOL_V4_LIMITS.attachmentMaxBytes
     ) {
       context.addIssue({
@@ -1061,7 +1230,11 @@ export const v4AttachmentReadResultSchema = z
     }
     const decodedBytes = decodedBase64ByteLength(value.dataBase64);
     if (decodedBytes === null) {
-      context.addIssue({ code: "custom", message: "invalid base64", path: ["dataBase64"] });
+      context.addIssue({
+        code: "custom",
+        message: "invalid base64",
+        path: ["dataBase64"],
+      });
       return;
     }
     if (decodedBytes > PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes) {
@@ -1082,7 +1255,9 @@ export const v4AttachmentReadResultSchema = z
       });
     }
   });
-export type V4AttachmentReadResult = z.infer<typeof v4AttachmentReadResultSchema>;
+export type V4AttachmentReadResult = z.infer<
+  typeof v4AttachmentReadResultSchema
+>;
 
 /** Share 读取用户输入附件，允许任意已授权 MIME，不改变媒体预览 read 的语义。 */
 export const v4ConversationAttachmentReadParamsSchema = z
@@ -1092,7 +1267,11 @@ export const v4ConversationAttachmentReadParamsSchema = z
     target: conversationRowTargetSchema,
     attachmentIndex: z.number().int().nonnegative(),
     offset: z.number().int().nonnegative(),
-    limit: z.number().int().positive().max(PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes),
   })
   .strict();
 export type V4ConversationAttachmentReadParams = z.infer<
@@ -1103,14 +1282,22 @@ export const v4ConversationAttachmentReadResultSchema = z
   .object({
     dataBase64: z.string(),
     mediaType: z.string().min(1),
-    totalBytes: z.number().int().nonnegative().max(PROTOCOL_V4_LIMITS.attachmentPreviewMaxBytes),
+    totalBytes: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(PROTOCOL_V4_LIMITS.attachmentPreviewMaxBytes),
     nextOffset: z.number().int().positive().nullable(),
   })
   .strict()
   .superRefine((value, context) => {
     const decodedBytes = decodedBase64ByteLength(value.dataBase64);
     if (decodedBytes === null) {
-      context.addIssue({ code: "custom", message: "invalid base64", path: ["dataBase64"] });
+      context.addIssue({
+        code: "custom",
+        message: "invalid base64",
+        path: ["dataBase64"],
+      });
       return;
     }
     if (decodedBytes > PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes) {
@@ -1153,7 +1340,11 @@ export const v4ConversationAttachmentStatResultSchema = z
     mediaType: z.string().min(1),
     // stat 是 metadata-only 探测，必须能表达超过传输上限的真实大小，否则
     // 「已知容量超限」无法在选择阶段作为阻断项呈现（见 attachmentStatMaxBytes 注释）。
-    totalBytes: z.number().int().nonnegative().max(PROTOCOL_V4_LIMITS.attachmentStatMaxBytes),
+    totalBytes: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(PROTOCOL_V4_LIMITS.attachmentStatMaxBytes),
     mtimeMs: z.number().finite().optional(),
   })
   .strict();

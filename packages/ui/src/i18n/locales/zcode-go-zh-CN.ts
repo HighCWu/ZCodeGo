@@ -68,6 +68,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.models.capturing": "采集中…",
   "opc.models.probing": "探测 {cell} …",
   "opc.models.captureDone": "采集完成，指纹已落档",
+  "opc.models.captureDoneChanged":
+    "采集完成：{verdict}——建议重新拟合员工能力或确认新指纹",
   "opc.models.captureFailed": "采集失败（会话未产出有效样本或超时）",
   "opc.models.empty": "尚无指纹档案——输入模型 key 后点「采集指纹」建立基线",
   "opc.models.verdict.match": "指纹一致",
@@ -288,6 +290,8 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.escalate.noCandidates": "没有可转派的在职同事——请直接升级给所有者。",
   "opc.escalate.peer": "同类目 · 完成 {completed} 项",
   "opc.escalate.manager": "直属上级",
+  "opc.injectFailed":
+    "会话进行中或非草稿态，prompt 未注入——请切换到草稿会话后重试",
   "opc.escalate.top": "完成 {completed} 项",
   "opc.escalate.transferNote": "升级路由转派",
   "opc.escalate.ownerNote": "升级给所有者（附说明）",

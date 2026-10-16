@@ -42,7 +42,10 @@ import { OpcSkillsView } from "./OpcSkillsView.js";
 import { OpcEvolutionView } from "./OpcEvolutionView.js";
 import { OpcOfficeMap } from "./OpcOfficeMap.js";
 import { OpcModelsView } from "./OpcModelsView.js";
-import { insertOpcPrompt } from "./opcComposerBridge.js";
+import {
+  insertOpcPrompt,
+  insertOpcPromptWithReceipt,
+} from "./opcComposerBridge.js";
 import { downloadTextFile, readFileText } from "./opcFiles.js";
 import {
   countOrchestratable,
@@ -123,6 +126,7 @@ export function ZcodeGoOpcPanelRoot({
   const [orgGenerateOpen, setOrgGenerateOpen] = useState(false);
   const [orgPresetOpen, setOrgPresetOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [upgradeDialog, setUpgradeDialog] =
     useState<OpcUpgradeDialogState | null>(null);
 
@@ -329,7 +333,7 @@ export function ZcodeGoOpcPanelRoot({
 
   /** integrate：完成产出 → 下游整合 prompt 注入 composer（Self-Run 整合动作）。 */
   const handleIntegrate = useCallback(
-    (workItem: OpcWorkItem) => {
+    async (workItem: OpcWorkItem) => {
       if (!state || !workspacePath) return;
       const dependents = state.workItems
         .filter((item) => item.dependsOn.includes(workItem.id))
@@ -339,7 +343,7 @@ export function ZcodeGoOpcPanelRoot({
             state.employees.find((employee) => employee.id === item.assigneeId)
               ?.name ?? null,
         }));
-      const inserted = insertOpcPrompt({
+      const inserted = await insertOpcPromptWithReceipt({
         workspacePath,
         workspaceIdentity: workspaceIdentity ?? undefined,
         text: buildOpcIntegrationPrompt({
@@ -348,9 +352,14 @@ export function ZcodeGoOpcPanelRoot({
           dependents,
         }),
       });
-      if (inserted) setOpen(false);
+      if (inserted) {
+        setNotice(null);
+        setOpen(false);
+      } else {
+        setNotice(intl.formatMessage({ id: "opc.injectFailed" }));
+      }
     },
-    [state, workspacePath, workspaceIdentity],
+    [state, workspacePath, workspaceIdentity, intl],
   );
 
   const handleDeleteWorkItem = useCallback(
@@ -362,7 +371,7 @@ export function ZcodeGoOpcPanelRoot({
 
   /** 委派：角色正文 + 挂接技能 + 最近经验 → 委派 prompt → composer（用户确认发送）。 */
   const handleDelegate = useCallback(
-    (workItem: OpcWorkItem) => {
+    async (workItem: OpcWorkItem) => {
       if (!state || !workspacePath) return;
       const employee = state.employees.find(
         (item) => item.id === workItem.assigneeId,
@@ -400,12 +409,13 @@ export function ZcodeGoOpcPanelRoot({
       });
       // 依赖就绪门控（与 reducer/看板同规则）：未就绪不允许委派。
       if (!isOpcWorkItemRunnable(workItem, state.workItems)) return;
-      const inserted = insertOpcPrompt({
+      const inserted = await insertOpcPromptWithReceipt({
         workspacePath,
         workspaceIdentity: workspaceIdentity ?? undefined,
         text: prompt,
       });
       if (inserted) {
+        setNotice(null);
         // 委派即开跑：ready → in_progress（reducer 同规则门控兜底）。
         if (workItem.status === "ready") {
           void apply([
@@ -417,12 +427,16 @@ export function ZcodeGoOpcPanelRoot({
           ]);
         }
         setOpen(false);
+      } else {
+        // 回执失败：活跃会话/非草稿态——prompt 没有出现，不落账不误导
+        setNotice(intl.formatMessage({ id: "opc.injectFailed" }));
       }
     },
     [
       state,
       workspacePath,
       workspaceIdentity,
+      intl,
       resolveRoleBody,
       resolveSkillBody,
       apply,
@@ -481,6 +495,11 @@ export function ZcodeGoOpcPanelRoot({
               {intl.formatMessage({ id: "opc.panel.subtitle" })}
             </DialogDescription>
           </DialogHeader>
+          {notice ? (
+            <div className="shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-ui-xs text-foreground-subtle">
+              {notice}
+            </div>
+          ) : null}
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <OpcStatChip
               value={state.employees.length}

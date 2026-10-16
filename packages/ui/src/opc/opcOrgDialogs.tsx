@@ -25,7 +25,7 @@ import {
   parseOpcOrgBlock,
   type OpcOrgDraft,
 } from "@zcode/shared";
-import { insertOpcPrompt } from "./opcComposerBridge.js";
+import { insertOpcPromptWithReceipt } from "./opcComposerBridge.js";
 
 /** 解析预览（生成/预设共用）：岗位与招聘清单。 */
 function OpcOrgDraftPreview({ draft }: { draft: OpcOrgDraft }) {
@@ -65,10 +65,12 @@ export function OpcOrgGenerateDialog({
   workspaceIdentity?: string | null;
 }) {
   const { intl } = useZCodeIntl();
+  const [injectWarning, setInjectWarning] = useState<string | null>(null);
   const apply = useOpcStore((s) => s.apply);
   const state = useOpcStore((s) => s.state);
   const workspacePath = useOpcStore((s) => s.workspacePath);
   const [goal, setGoal] = useState("");
+
   const [output, setOutput] = useState("");
   const parsed = useMemo(() => parseOpcOrgBlock(output), [output]);
   const outcome = useMemo(
@@ -88,6 +90,9 @@ export function OpcOrgGenerateDialog({
             {intl.formatMessage({ id: "opc.org.generateDescription" })}
           </DialogDescription>
         </DialogHeader>
+        {injectWarning ? (
+          <p className="text-ui-xs text-red-500">{injectWarning}</p>
+        ) : null}
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="opc-org-goal">
@@ -107,15 +112,21 @@ export function OpcOrgGenerateDialog({
               variant="outline"
               className="self-start"
               disabled={!goal.trim() || !workspacePath}
-              onClick={() => {
+              onClick={async () => {
                 if (!workspacePath) return;
-                insertOpcPrompt({
+                const injected = await insertOpcPromptWithReceipt({
                   workspacePath,
                   workspaceIdentity: workspaceIdentity ?? undefined,
                   text: buildOpcOrgGeneratePrompt({ goal }),
                 });
-                // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
-                onClose();
+                if (injected) {
+                  // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                  onClose();
+                } else {
+                  setInjectWarning(
+                    intl.formatMessage({ id: "opc.injectFailed" }),
+                  );
+                }
               }}
             >
               {intl.formatMessage({ id: "opc.org.generatePrompt" })}
@@ -164,7 +175,7 @@ export function OpcOrgGenerateDialog({
           <Button
             size="sm"
             disabled={!parsed || !outcome || outcome.mutations.length === 0}
-            onClick={() => {
+            onClick={async () => {
               if (!parsed || !outcome) return;
               void apply(outcome.mutations);
               onClose();
@@ -241,7 +252,7 @@ export function OpcOrgPresetDialog({ onClose }: { onClose: () => void }) {
           <Button
             size="sm"
             disabled={!selected || !outcome || outcome.mutations.length === 0}
-            onClick={() => {
+            onClick={async () => {
               if (!outcome) return;
               void apply(outcome.mutations);
               onClose();

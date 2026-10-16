@@ -25,7 +25,7 @@ import {
   type OpcMutation,
   type OpcParsedLesson,
 } from "@zcode/shared";
-import { insertOpcPrompt } from "./opcComposerBridge.js";
+import { insertOpcPromptWithReceipt } from "./opcComposerBridge.js";
 
 export function OpcProjectRetroDialog({
   onClose,
@@ -35,10 +35,12 @@ export function OpcProjectRetroDialog({
   workspaceIdentity?: string | null;
 }) {
   const { intl } = useZCodeIntl();
+  const [injectWarning, setInjectWarning] = useState<string | null>(null);
   const apply = useOpcStore((s) => s.apply);
   const state = useOpcStore((s) => s.state);
   const workspacePath = useOpcStore((s) => s.workspacePath);
   const [goal, setGoal] = useState("");
+
   const [output, setOutput] = useState("");
 
   const parsed = useMemo(() => {
@@ -75,6 +77,9 @@ export function OpcProjectRetroDialog({
             {intl.formatMessage({ id: "opc.projectRetro.description" })}
           </DialogDescription>
         </DialogHeader>
+        {injectWarning ? (
+          <p className="text-ui-xs text-red-500">{injectWarning}</p>
+        ) : null}
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="opc-projretro-goal">
@@ -94,9 +99,9 @@ export function OpcProjectRetroDialog({
               variant="outline"
               className="self-start"
               disabled={!state || !workspacePath}
-              onClick={() => {
+              onClick={async () => {
                 if (!state || !workspacePath) return;
-                insertOpcPrompt({
+                const injected = await insertOpcPromptWithReceipt({
                   workspacePath,
                   workspaceIdentity: workspaceIdentity ?? undefined,
                   text: buildOpcProjectRetroPrompt({
@@ -116,8 +121,14 @@ export function OpcProjectRetroDialog({
                       })),
                   }),
                 });
-                // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
-                onClose();
+                if (injected) {
+                  // 注入即关闭：prompt 已进 composer，模态遮挡反而让用户找不到
+                  onClose();
+                } else {
+                  setInjectWarning(
+                    intl.formatMessage({ id: "opc.injectFailed" }),
+                  );
+                }
               }}
             >
               {intl.formatMessage({ id: "opc.projectRetro.generatePrompt" })}
@@ -181,7 +192,7 @@ export function OpcProjectRetroDialog({
           <Button
             size="sm"
             disabled={!parsed || parsed.groups.size === 0}
-            onClick={() => {
+            onClick={async () => {
               if (!parsed) return;
               const mutations: OpcMutation[] = [...parsed.groups.entries()].map(
                 ([employeeId, lessons]) => ({

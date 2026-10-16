@@ -645,3 +645,45 @@ describe("汇报线层级（五轮 review 补齐）", () => {
     ).toBeNull();
   });
 });
+
+describe("进化事件统一合并（五轮 review：升级链路留痕回归）", () => {
+  it("escalate 的事件经统一合并进 state.evolution（evolution-log 落盘前提）", () => {
+    const state = createEmptyOpcCompanyState(NOW);
+    const employee = applyOpcMutation(
+      state,
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: null,
+        custom: { name: "执行者", category: "engineering" },
+      },
+      NOW + 1,
+    ).state;
+    const hired = employee.employees.at(-1)!;
+    const item = applyOpcMutation(
+      employee,
+      {
+        kind: "workitem.create",
+        title: "E2E 留痕项",
+        assigneeId: hired.id,
+      },
+      NOW + 2,
+    ).state;
+    const created = item.workItems.at(-1)!;
+    const escalated = applyOpcMutation(
+      item,
+      { kind: "workitem.escalate", workItemId: created.id, note: "卡住了" },
+      NOW + 3,
+    );
+    // 统一合并：escalate 的事件进 state.evolution（persistDerivedFiles 的
+    // evolution-log.jsonl 增量前提）——修复前只回响应不落盘
+    expect(
+      escalated.state.evolution.some((event) =>
+        event.summary.includes("升级给所有者"),
+      ),
+    ).toBe(true);
+    expect(escalated.state.evolution.length).toBeGreaterThan(
+      escalated.state.evolution.filter(() => false).length,
+    );
+  });
+});
