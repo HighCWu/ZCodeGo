@@ -330,10 +330,10 @@ describe("内置模板包", () => {
     }
   });
 
-  it("16 个内置技能全部可解析（SKILL.md frontmatter）", () => {
-    expect(OPC_BUILTIN_SKILL_DRAFTS).toHaveLength(16);
+  it("17 个内置技能全部可解析（SKILL.md frontmatter）", () => {
+    expect(OPC_BUILTIN_SKILL_DRAFTS).toHaveLength(17);
     const ids = new Set(OPC_BUILTIN_SKILL_DRAFTS.map((draft) => draft.id));
-    expect(ids.size).toBe(16);
+    expect(ids.size).toBe(17);
   });
 });
 
