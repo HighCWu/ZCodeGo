@@ -221,6 +221,31 @@ export function installZcodeGoPreloadEntries({
         PlatformChannels.ZcodeGoOpcReadFingerprintSample,
         payload,
       ),
+    /** zcode-go：试验执行请求（main → renderer；临时会话跑 prompt 并写 .opc/exp/）。 */
+    onZcodeGoExpRunPrompt: (
+      handler: (payload: {
+        requestId: string;
+        workspacePath: string;
+        content: string;
+        fileTag: string;
+      }) => void,
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: {
+          requestId: string;
+          workspacePath: string;
+          content: string;
+          fileTag: string;
+        },
+      ) => handler(payload);
+      ipcRenderer.on(PlatformChannels.ZcodeGoExpRunPrompt, listener);
+      return () =>
+        ipcRenderer.removeListener(
+          PlatformChannels.ZcodeGoExpRunPrompt,
+          listener,
+        );
+    },
     /** zcode-go：OPC 模式——公司状态变化事件；返回退订函数。 */
     onZcodeGoOpcStateChanged: (
       handler: (payload: { workspacePath: string }) => void,

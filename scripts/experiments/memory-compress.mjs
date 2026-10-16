@@ -32,6 +32,8 @@ const arg = (name) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
+const httpBase = arg("--http") ?? process.env.OPC_EXP_HTTP ?? "";
+// --http http://127.0.0.1:<port>：走桌面试验接口（推荐——真实模型链路已验证）
 const cliBin = arg("--cli") ?? "zcode";
 const model = arg("--model") ?? "(cli 默认模型)";
 const samples = Number(arg("--samples") ?? 1);
@@ -110,6 +112,17 @@ function zcodeCli(content) {
 }
 
 async function chat(content) {
+  if (httpBase) {
+    // 桌面试验接口：临时会话执行，回复经 .opc/exp/<tag>.json 轮询回传
+    const response = await fetch(`${httpBase}/exp/prompt`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content, timeoutMs: 180_000 }),
+    });
+    const data = await response.json();
+    if (!data.ok) throw new Error(data.error ?? "exp timeout");
+    return { text: data.text, usageTokens: null };
+  }
   return zcodeCli(content);
 }
 
