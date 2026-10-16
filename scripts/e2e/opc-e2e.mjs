@@ -757,7 +757,7 @@ assert(telegramHits > 0, "mock API 收到 getUpdates");
   );
   const ackEntry = ack.state?.modelFingerprints?.["glm/glm-4.7"];
   assert(
-    ackEntry.baseline === ackEntry.last &&
+    JSON.stringify(ackEntry.baseline) === JSON.stringify(ackEntry.last) &&
       !ackEntry.lastVerdict &&
       ackEntry.acknowledgedAt !== undefined,
     "指纹：确认新指纹（last 升 baseline）",
