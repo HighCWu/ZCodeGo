@@ -856,6 +856,7 @@ export const v4AttachmentBeginParamsSchema = z
       .string()
       .min(1)
       .max(255)
+      // oxlint-disable-next-line no-control-regex -- 文件名校验的用途就是拒绝 NUL/CR/LF 控制字符
       .regex(/^[^\0\r\n]+$/),
     mime: z
       .string()

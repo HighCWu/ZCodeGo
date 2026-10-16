@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 指纹电池/归一化/比对是单文件收口的纯逻辑域（同 SessionPane/插件宿主惯例），拆散会破坏内聚。 */
 /**
  * zcode-go OPC 模型指纹（同 ID 模型变动检测，spec「模型指纹」节）。
  *

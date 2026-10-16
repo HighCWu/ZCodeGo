@@ -4,6 +4,7 @@ import {
   setRequestSecurityReporter,
 } from "@/request-security-edition/index.js";
 /* eslint-disable max-lines -- Root 当前集中编排启动和 workspace shell wiring，先保持入口收口避免跨层状态拆散。 */
+/* oxlint-disable eslint(max-lines) -- 同上（oxlint 对同一豁免的另一套指令语法）。 */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LucideProvider, RefreshCw } from "lucide-react";
 import {
