@@ -356,12 +356,30 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   （createTask+sendPrompt，编排器同款）执行并轮询会话行，完成后经 IPC
   把最后 assistant 文本回传 main 作为 HTTP 响应（120s 超时）。用途：
   记忆压缩试验、指纹探测采集等外部脚本的真实模型调用通路。
-- **CLI headless（zcode -p）秒退待查**：headless 一次问一次答在本机
-  （takeover 环境）1 秒静默退出（exit 0、无事件、模型未调用），试验脚本
-  的 CLI 通路被阻塞。已排除：参数路由（-p 注册正常）、输出格式（json/
-  stream-json 均无事件）、stdin 形态。剩余嫌疑：全局 hooks（zcode-go 接管
-  装入的 hook 在 headless 会话同样加载）或单实例/登录态 gate。多模型对照
-  与记忆压缩试验的自动化调用被此阻塞；手动路径（桌面会话）不受影响。
+- **CLI headless（zcode -p）秒退根因已定位（已解除阻塞）**：PATH 上的
+  `zcode`（/usr/bin/zcode → /opt/ZCode/zcode）是 **Electron 桌面启动器**，
+  任何参数（含 -p/--help）都进桌面 main 初始化后立即退出（exit 0，输出
+  deep-link/auto-update 日志，模型未调用）——不是 hooks 或单实例问题。
+  官版真实 CLI 是捆绑运行时 `ELECTRON_RUN_AS_NODE=1 /opt/ZCode/zcode
+  /opt/ZCode/resources/glm/zcode.cjs -p "<prompt>"`（把 Electron 二进制当
+  node v24.14.0 跑 zcode.cjs，与桌面拉起 zcode-cli 子进程同款：argv0 改写
+  + ELECTRON_RUN_AS_NODE）。该通路已实测跑通（干净 stdout、GLM coding
+  plan 登录态复用、不影响运行中的桌面实例），记忆压缩试验脚本经
+  `--cli <wrapper>` 使用此通路。
+- **记忆压缩试验（scripts/experiments/memory-compress*.mjs，四版结论）**：
+  提示词诱导的模型特定编码（LM Babel/PromptQuine/TextGrad 思想），
+  276 字符/10 事实样本上的实证边界——
+  (a) 纯随机映射 F=0（无共享状态无法重建映射，模型元认知亦拒绝）；
+  (b) 无意义化与浓缩不冲突（gzip 同理），模型自发产出 gzip-b64 掩护、
+  盲文私有编码、ROT13 成体系代号，「模型特定编码」机制存在且可复用；
+  (c) 压缩边界：单段 4 条事实 ≈R 0.31 可满分，级联联合层 **R=0.10 时
+  F_full=6-8/10 且骨架≈满**，再压（单段 12%/联合 8%/5%）模型拒绝或全崩；
+  (d) 解码失败反馈重编码（TextGrad 式）在 L1 有效（F 0→满分），但反馈
+  prompt 必须约束「已可还原部分保持原编码不动」，否则整体重写倒退；
+  (e) 判定口径：还原允许语法重组，关键词匹配存在「3期/三期」类误杀。
+  试验暂不产品化（协议纯函数 opc-memory-compress.ts 保留 v1 提示词，
+  迭代到试验结论等拍板）；token 口径 R 与跨模型对照 G 未做（headless
+  无 usage；多模型需员工 modelSelection 路径）。
 - **探测会话保留 Write 权限**（写指纹样本文件所必需，prompt 契约限定
   单文件）：被测模型理论上可写其他文件——与 workspace-write 员工同级
   的威胁口径，依赖会话隔离边界。
