@@ -85,7 +85,9 @@ export function OpcEscalateDialog({
                           id:
                             candidate.reason === "peer-category"
                               ? "opc.escalate.peer"
-                              : "opc.escalate.top",
+                              : candidate.reason === "direct-manager"
+                                ? "opc.escalate.manager"
+                                : "opc.escalate.top",
                         },
                         { completed: candidate.completed },
                       )}

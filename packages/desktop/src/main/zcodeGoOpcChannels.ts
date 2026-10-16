@@ -167,14 +167,21 @@ export async function pollTelegramOnce(
     onError?.("Telegram getUpdates 响应格式无效");
     return null;
   }
-  const messages = selectAllowedTexts(updates, config.allowFrom);
+  // 同 update_id 只保留最后形态（edited_message 与原 message 同 id——
+  // 不去重会让编辑过的消息产生重复入站条目）
+  const dedupedUpdates = (() => {
+    const byId = new Map<number, TelegramUpdate>();
+    for (const update of updates) byId.set(update.update_id, update);
+    return [...byId.values()];
+  })();
+  const messages = selectAllowedTexts(dedupedUpdates, config.allowFrom);
   const inboxDir = join(config.workspacePath, ".opc", "inbox");
   if (messages.length > 0) {
     mkdirSync(inboxDir, { recursive: true });
   }
   let maxUpdateId = offset;
   let delivered = 0;
-  for (const update of updates) {
+  for (const update of dedupedUpdates) {
     maxUpdateId = Math.max(maxUpdateId, update.update_id + 1);
   }
   for (const message of messages) {

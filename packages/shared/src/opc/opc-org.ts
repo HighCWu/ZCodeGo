@@ -46,8 +46,11 @@ function parseOpcOrgHire(hire: unknown): OpcOrgDraft["hires"][number] | null {
 
 export interface OpcOrgDraft {
   companyName?: string;
-  /** 岗位标题（扁平；层级由先后与命名表达）。 */
-  slots: string[];
+  /**
+   * 岗位标题。字符串 = 顶层岗位；对象形式携带 parent（上级岗位标题，须在
+   * slots 中或已存在）表达汇报线（OpenOPC 的层级骨架）。
+   */
+  slots: Array<string | { title: string; parent?: string }>;
   hires: Array<{
     name: string;
     /** 模板名（对内置/导入模板做名称匹配；未命中按自定义招聘）。 */
@@ -105,7 +108,7 @@ export function buildOpcOrgGeneratePrompt(input: { goal: string }): string {
     "- 严格只输出以下 JSON 围栏块：",
     "",
     "```opc-org",
-    '{ "companyName": "公司名", "slots": ["研发负责人"], "hires": [{ "name": "姓名", "template": "全栈开发工程师", "slot": "研发负责人", "seniority": "senior" }] }',
+    '{ "companyName": "公司名", "slots": ["研发负责人", { "title": "前端工程师", "parent": "研发负责人" }], "hires": [{ "name": "姓名", "template": "全栈开发工程师", "slot": "研发负责人", "seniority": "lead" }] }',
     "```",
   ].join("\n");
 }
@@ -184,16 +187,34 @@ export function buildOpcOrgMutations(
     mutations.push({ kind: "company.rename", name: draft.companyName });
   }
 
-  // 岗位：已存在的同名岗位直接复用 id
+  // 岗位：已存在的同名岗位直接复用 id。slots 支持 {title, parent} 对象形式
+  // 表达汇报线（parent 是上级岗位标题）；两遍处理——先收集全部标题与
+  // 预生成 id，再解析 parent（同批后定义的上级也能引用）。
+  const slotDefs = draft.slots.map((slot) =>
+    typeof slot === "string" ? { title: slot, parent: undefined } : slot,
+  );
   const slotIdByTitle = new Map(
     state.roleSlots.map((slot) => [slot.title, slot.id]),
   );
-  for (const title of draft.slots) {
+  for (const { title } of slotDefs) {
     if (slotIdByTitle.has(title)) continue;
     const id = createOpcEntityId("slot", now);
     slotIdByTitle.set(title, id);
+  }
+  for (const { title, parent } of slotDefs) {
+    if (state.roleSlots.some((slot) => slot.title === title)) continue;
+    // parent 解析成上级岗位 id（已存在或同批预生成）；未知 parent 视为顶层
+    const parentRoleId =
+      parent === undefined
+        ? undefined
+        : (slotIdByTitle.get(parent) ?? undefined);
     // 显式携带预生成 id：reducer 自造 id 与批内 roleId 映射脱节 → 幽灵绑定
-    mutations.push({ kind: "role-slot.create", title, id });
+    mutations.push({
+      kind: "role-slot.create",
+      title,
+      id: slotIdByTitle.get(title)!,
+      parentRoleId,
+    });
     slotsCreated += 1;
   }
 
@@ -408,8 +429,8 @@ export interface OpcEscalationCandidate {
   employeeId: string;
   name: string;
   emoji: string;
-  /** 同类目同事优先，其次按完成数排序的依据说明。 */
-  reason: "peer-category" | "top-completed";
+  /** 同类目同事优先，其次按完成数排序的依据说明。直属上级最高优先。 */
+  reason: "peer-category" | "top-completed" | "direct-manager";
   completed: number;
 }
 
@@ -426,16 +447,44 @@ export function findOpcEscalationCandidates(
     (employee) => employee.id === workItem.assigneeId,
   );
   const category = currentAssignee?.category;
+  // 汇报线：当前负责人的岗位 → 上级岗位 → 上级岗位的在职员工（OpenOPC
+  // 的 CEO→经理→员工骨架——升级先给直属上级，团队内其次，所有者最后）
+  let directManagerId: string | null = null;
+  const mySlot = state.roleSlots.find(
+    (slot) => slot.employeeId === workItem.assigneeId,
+  );
+  if (mySlot?.parentRoleId) {
+    const parentSlot = state.roleSlots.find(
+      (slot) => slot.id === mySlot.parentRoleId,
+    );
+    const manager = parentSlot
+      ? state.employees.find(
+          (employee) =>
+            employee.id === parentSlot.employeeId &&
+            employee.status === "active" &&
+            !employee.isFallback,
+        )
+      : undefined;
+    if (manager && manager.id !== workItem.assigneeId) {
+      directManagerId = manager.id;
+    }
+  }
   const candidates = state.employees.filter(
     (employee) =>
       employee.status === "active" &&
       !employee.isFallback &&
       employee.id !== workItem.assigneeId,
   );
-  const peers = category
-    ? candidates.filter((employee) => employee.category === category)
+  const managerFirst = directManagerId
+    ? candidates.filter((employee) => employee.id === directManagerId)
     : [];
-  const others = candidates.filter(
+  const withoutManager = candidates.filter(
+    (employee) => employee.id !== directManagerId,
+  );
+  const peers = category
+    ? withoutManager.filter((employee) => employee.category === category)
+    : [];
+  const others = withoutManager.filter(
     (employee) => !category || employee.category !== category,
   );
   const byCompleted = (
@@ -453,6 +502,7 @@ export function findOpcEscalationCandidates(
     completed: employee.stats.completed,
   });
   const ranked = [
+    ...managerFirst.map((employee) => toCandidate(employee, "direct-manager")),
     ...peers
       .sort((a, b) =>
         byCompleted(

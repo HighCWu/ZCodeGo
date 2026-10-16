@@ -253,6 +253,7 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.employee.statusDeparted": "departed",
   // zcode-go: OPC company package messages
   "opc.org.exportCompany": "Export company",
+  "opc.org.reportsTo": "reports to {name}",
   "opc.org.exportArchitecture": "Export org",
   "opc.org.importArchitecture": "Import org",
   "opc.org.importCompany": "Import company",
@@ -299,6 +300,7 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.escalate.noCandidates":
     "No active teammates to route to — escalate to the owner directly.",
   "opc.escalate.peer": "same category · {completed} done",
+  "opc.escalate.manager": "Direct manager",
   "opc.escalate.top": "{completed} done",
   "opc.escalate.transferNote": "escalation routing",
   "opc.escalate.ownerNote": "Escalate to owner (with note)",

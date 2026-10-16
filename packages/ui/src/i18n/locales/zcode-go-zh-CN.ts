@@ -241,6 +241,7 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.employee.statusDeparted": "已离职",
   // zcode-go：OPC 公司包文案
   "opc.org.exportCompany": "导出公司",
+  "opc.org.reportsTo": "汇报给 {name}",
   "opc.org.exportArchitecture": "导出架构",
   "opc.org.importArchitecture": "导入架构",
   "opc.org.importCompany": "导入公司",
@@ -286,6 +287,7 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.escalate.routeTitle": "转派团队成员",
   "opc.escalate.noCandidates": "没有可转派的在职同事——请直接升级给所有者。",
   "opc.escalate.peer": "同类目 · 完成 {completed} 项",
+  "opc.escalate.manager": "直属上级",
   "opc.escalate.top": "完成 {completed} 项",
   "opc.escalate.transferNote": "升级路由转派",
   "opc.escalate.ownerNote": "升级给所有者（附说明）",

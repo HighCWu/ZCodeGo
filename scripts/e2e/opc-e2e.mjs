@@ -775,6 +775,56 @@ assert(telegramHits > 0, "mock API 收到 getUpdates");
   );
 }
 
+// ── 9. 汇报线层级 + 指纹样本读取端点 ────────────────────────────────────────
+{
+  const parent = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "role-slot.create", title: "E2E 部门负责人" }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const parentSlot = parent.state.roleSlots.find(
+    (slot) => slot.title === "E2E 部门负责人",
+  );
+  assert(Boolean(parentSlot), "层级：父岗位创建");
+  const child = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "role-slot.create", title: "E2E 专员岗", parentRoleId: ${JSON.stringify(parentSlot.id)} }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const childSlot = child.state.roleSlots.find(
+    (slot) => slot.title === "E2E 专员岗",
+  );
+  assert(
+    childSlot?.parentRoleId === parentSlot.id,
+    "层级：子岗位 parentRoleId 透传",
+  );
+  // 指纹样本读取端点：样本文件直写沙箱，ReadFingerprintSample 读回；
+  // 路径穿越文件名须被拒绝
+  const samplePath = join(workspace, ".opc", "fingerprint");
+  mkdirSync(samplePath, { recursive: true });
+  writeFileSync(
+    join(samplePath, "fp-probe.json"),
+    JSON.stringify({ answers: ["42", "73", "7"] }),
+  );
+  const sample = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcReadFingerprintSample({ workspacePath: ${JSON.stringify(WORKSPACE)}, fileName: "fp-probe.json" }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  assert(
+    sample.ok === true &&
+      sample.content !== null &&
+      JSON.parse(sample.content).answers.length === 3,
+    "指纹样本端点：读回采集样本",
+  );
+  const traversal = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcReadFingerprintSample({ workspacePath: ${JSON.stringify(WORKSPACE)}, fileName: "../company.json" }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  assert(traversal.ok === false, "指纹样本端点：路径穿越被拒");
+}
+
 // ── 清理 ──────────────────────────────────────────────────────────────────
 mockApi.close();
 appProc.kill();

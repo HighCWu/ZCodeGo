@@ -603,3 +603,45 @@ describe("新员工入职继承共享 playbook（三轮 review 回归）", () =>
     expect(hired.skillRefs).not.toContain("playbook-gone");
   });
 });
+
+describe("汇报线层级（五轮 review 补齐）", () => {
+  it("role-slot.create 透传 parentRoleId；悬空 parent 落顶层；remove 孤儿提升", () => {
+    let state = createEmptyOpcCompanyState(NOW);
+    state = applyOpcMutation(
+      state,
+      { kind: "role-slot.create", title: "研发负责人" },
+      NOW + 1,
+    ).state;
+    const parentSlot = state.roleSlots.at(-1)!;
+    // 注意：同一标题岗位不重复创建（createOpcEntityId 带全局序号——重放会
+    // 产生不同 id，parent 引用会指向幽灵岗位）
+    state = applyOpcMutation(
+      state,
+      {
+        kind: "role-slot.create",
+        title: "前端工程师",
+        parentRoleId: parentSlot.id,
+      },
+      NOW + 2,
+    ).state;
+    const childSlot = state.roleSlots.at(-1)!;
+    expect(childSlot.parentRoleId).toBe(parentSlot.id);
+    // 悬空 parent（未存在岗位 id）→ 顶层
+    state = applyOpcMutation(
+      state,
+      { kind: "role-slot.create", title: "测试岗", parentRoleId: "slot:ghost" },
+      NOW + 3,
+    ).state;
+    expect(state.roleSlots.at(-1)!.parentRoleId).toBeNull();
+    // 删除上级岗位 → 子岗位提升为顶层
+    const afterRemove = applyOpcMutation(
+      state,
+      { kind: "role-slot.remove", roleId: parentSlot.id },
+      NOW + 4,
+    );
+    expect(
+      afterRemove.state.roleSlots.find((slot) => slot.title === "前端工程师")
+        ?.parentRoleId,
+    ).toBeNull();
+  });
+});

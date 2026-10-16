@@ -44,9 +44,16 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    - **升级上报（escalation）**：工作项可 `escalate`（记 escalatedAt + 说明，进化事件
      留痕）；升级项在看板徽标并计入「待所有者处理」；`resolveEscalation` 支持
      `resume`（解除）与 `takeover`（解除并转派给创始人执行）。
-   - **升级团队内路由（先团队后所有者）**：升级动作先给出同类目在职同事的
-     转派候选（按完成数排序，排除当前负责人与创始人）——`workitem.transfer`
-     转派并留进化事件；无合适候选或团队内解决不了，才升级给所有者。
+   - **升级团队内路由（先直属上级，再团队，后所有者）**：升级候选首位是
+     当前负责人的**直属上级**（岗位汇报线 parentRoleId 链上的在职员工，
+     reason=direct-manager）；其后是同类目在职同事（按完成数排序，排除
+     当前负责人与创始人）——`workitem.transfer` 转派并留进化事件；无合适
+     候选或团队内解决不了，才升级给所有者。
+   - **汇报线层级**：`role-slot.create` 支持携带 parentRoleId（上级岗位 id，
+     上级可同批创建——org 生成按预生成 id 引用；悬空引用落为顶层）；
+     `slot.remove` 时子岗位提升为顶层避免渲染死链；组织页员工卡展示
+     「汇报给 <上级>」；org 生成 JSON 的 slots 支持对象形式
+     `{ title, parent }` 表达汇报线。
    - **返工（rework）**：review 态工作项可退回 in_progress 并落 `reworkNotes`
      （追加式）；委派 prompt 注入「返工意见（必须逐条解决）」，闭环 rework 循环。
    - **整合（integrate）**：done 且存在被依赖项时，可一键生成整合 prompt
@@ -291,10 +298,8 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
 
 ## 已知边界（review 收录，不修）
 
-- **汇报线层级未实现**：OpcRoleSlot.parentRoleId 类型存在但恒为 null，
-  无编辑/渲染/委派消费路径——组织实为全员直隶创始人单层；原版的
-  CEO→经理→员工汇报线是委派链与升级路由骨架，本地团队内转派按 category。
-  完整实现（层级编辑 UI + 按汇报线转派路由）留待后续。
+- 汇报线的**运行时改派**（把在职员工换到不同上级岗位）暂无 UI——层级由
+  创建时（org 生成/预设）确立，slot.remove 会把子岗位提升为顶层。
 - Comms 决策/会议记录 artifact 未实现（真实会话模型下价值受限，可并入
   evolution-log 演化）。
 - 同工作区多公司未支持（每工作区一份公司状态）。
@@ -304,6 +309,9 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   html/csv/xml/ini/cfg），二进制资产（图片等）不随包。
 - 编排 done 标记的轮次取委派 prompt 构建时快照——rework 落账回流 UI 前
   立即委派的极端窗口内，完成信号可能被去重键忽略（人工验收兜底）。
+- **探测会话保留 Write 权限**（写指纹样本文件所必需，prompt 契约限定
+  单文件）：被测模型理论上可写其他文件——与 workspace-write 员工同级
+  的威胁口径，依赖会话隔离边界。
 
 - 公司包导入的 paused 员工落为 active（hire 的 id 由 reducer 生成，批内
   无法预测、无法追加 update 恢复暂停态）；departed 已正确跳过。

@@ -286,6 +286,8 @@ export interface OpcCustomEmployeeDraft {
   vibe: string;
   description: string;
   seniority: OpcEmployeeSeniority;
+  /** 入职初始状态（公司包导入 paused 员工时保持暂停态）；缺省 active。 */
+  status?: "active" | "paused";
   permissionLevel?: OpcPermissionLevel;
 }
 
@@ -294,6 +296,11 @@ export type OpcMutation =
   | {
       kind: "role-slot.create";
       title: string;
+      /**
+       * 汇报上级岗位 id（组织层级；OpenOPC 的 CEO→经理→员工骨架）。
+       * 上级岗位与自身同批创建时由 org 生成按预生成 id 引用。
+       */
+      parentRoleId?: string;
       /**
        * 显式 id：组织生成/预设/公司导入在批内预生成 slotIdByTitle 映射并让
        * 同批 employee.hire 的 roleId 指向它——reducer 若自造 id 会与映射

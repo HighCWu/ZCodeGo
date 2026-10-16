@@ -48,6 +48,28 @@ export function OpcOrgView({
     () => new Map(state.roleSlots.map((slot) => [slot.id, slot.title])),
     [state.roleSlots],
   );
+  // 汇报线：员工 → 岗位 → 上级岗位 → 上级员工名（层级展示最小闭环）
+  const managerNameByEmployeeId = useMemo(() => {
+    const nameById = new Map(
+      state.employees.map((employee) => [employee.id, employee.name]),
+    );
+    const slotById = new Map(state.roleSlots.map((slot) => [slot.id, slot]));
+    return new Map(
+      state.employees.flatMap((employee) => {
+        const slot = employee.roleId
+          ? slotById.get(employee.roleId)
+          : undefined;
+        const parentSlot =
+          slot?.parentRoleId != null
+            ? slotById.get(slot.parentRoleId)
+            : undefined;
+        const managerName = parentSlot?.employeeId
+          ? nameById.get(parentSlot.employeeId)
+          : undefined;
+        return managerName ? [[employee.id, managerName] as const] : [];
+      }),
+    );
+  }, [state.employees, state.roleSlots]);
   const skillsById = useMemo(
     () => new Map(state.skills.map((skill) => [skill.id, skill])),
     [state.skills],
@@ -195,6 +217,12 @@ export function OpcOrgView({
                     {employee.category} · {employee.seniority}
                     {employee.roleId
                       ? ` · ${slotTitleByRoleId.get(employee.roleId) ?? ""}`
+                      : ""}
+                    {managerNameByEmployeeId.get(employee.id)
+                      ? ` · ${intl.formatMessage(
+                          { id: "opc.org.reportsTo" },
+                          { name: managerNameByEmployeeId.get(employee.id)! },
+                        )}`
                       : ""}
                     {employee.permissionLevel &&
                     employee.permissionLevel !== "workspace-write"

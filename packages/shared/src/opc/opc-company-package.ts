@@ -168,6 +168,7 @@ export function buildOpcCompanyImportMutations(
         description: employee.description,
         seniority: employee.seniority ?? "junior",
         permissionLevel: employee.permissionLevel,
+        status: employee.status === "paused" ? "paused" : undefined,
       },
     });
     summary.hires += 1;

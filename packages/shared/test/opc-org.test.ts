@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOpcOrgGeneratePrompt,
   buildOpcOrgMutations,
+  findOpcEscalationCandidates,
   matchOpcRoleTemplate,
   OPC_ORG_PRESETS,
   parseOpcOrgBlock,
@@ -224,5 +225,60 @@ describe("parseOpcInboxFile（入站契约）", () => {
     expect(
       parseOpcInboxFile("../evil.json", JSON.stringify({ title: "x" })),
     ).toBeNull();
+  });
+});
+
+describe("升级路由按汇报线（五轮 review 补齐）", () => {
+  it("直属上级排候选首位（direct-manager），无汇报线时回退同类目", () => {
+    const state = createEmptyOpcCompanyState(NOW);
+    // 岗位层级：研发负责人（上级） ← 前端工程师（下属）
+    const s1 = applyOpcMutation(
+      state,
+      { kind: "role-slot.create", title: "研发负责人" },
+      NOW + 1,
+    ).state;
+    const leadSlot = s1.roleSlots.at(-1)!;
+    const s2 = applyOpcMutation(
+      s1,
+      {
+        kind: "role-slot.create",
+        title: "前端工程师",
+        parentRoleId: leadSlot.id,
+      },
+      NOW + 2,
+    ).state;
+    const frontSlot = s2.roleSlots.at(-1)!;
+    // 上级员工 + 下属员工（同 category 工程师）
+    const lead = applyOpcMutation(
+      s2,
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: leadSlot.id,
+        custom: { name: "研发负责人甲", category: "engineering" },
+      },
+      NOW + 3,
+    ).state;
+    const founder = lead.employees.find((e) => e.isFallback)!;
+    const junior = applyOpcMutation(
+      lead,
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: frontSlot.id,
+        custom: { name: "前端工程师乙", category: "engineering" },
+      },
+      NOW + 4,
+    ).state;
+    const candidates = findOpcEscalationCandidates(
+      junior,
+      { assigneeId: junior.employees.at(-1)!.id },
+      3,
+    );
+    expect(candidates[0]?.reason).toBe("direct-manager");
+    expect(candidates[0]?.name).toBe("研发负责人甲");
+    expect(candidates.some((c) => c.id ?? c.employeeId === founder.id)).toBe(
+      candidates.some((c) => c.employeeId === founder.id),
+    );
   });
 });

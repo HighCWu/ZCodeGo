@@ -129,7 +129,15 @@ function applyOnce(
             {
               id: mutation.id ?? createOpcEntityId("slot", now),
               title,
-              parentRoleId: null,
+              // 汇报上级：上级岗位不存在（悬空引用）时落为顶层，避免死链
+              parentRoleId:
+                mutation.parentRoleId &&
+                (mutation.parentRoleId === mutation.id ||
+                  state.roleSlots.some(
+                    (slot) => slot.id === mutation.parentRoleId,
+                  ))
+                  ? mutation.parentRoleId
+                  : null,
               employeeId: null,
             },
           ],
@@ -143,9 +151,14 @@ function applyOnce(
       return {
         state: {
           ...state,
-          roleSlots: state.roleSlots.filter(
-            (item) => item.id !== mutation.roleId,
-          ),
+          roleSlots: state.roleSlots
+            .filter((item) => item.id !== mutation.roleId)
+            .map((item) =>
+              // 子岗位提升为顶层：parent 悬空会产生渲染死链
+              item.parentRoleId === mutation.roleId
+                ? { ...item, parentRoleId: null }
+                : item,
+            ),
           employees: state.employees.map((employee) =>
             employee.roleId === mutation.roleId
               ? { ...employee, roleId: null }
@@ -173,7 +186,8 @@ function applyOnce(
         description: custom?.description || "",
         seniority: custom?.seniority || "junior",
         permissionLevel: custom?.permissionLevel,
-        status: "active",
+        // 公司包导入 paused 员工时保持暂停态（导入语义保真）；缺省 active
+        status: custom?.status === "paused" ? "paused" : "active",
         skillRefs: [
           ...new Set([
             ...(mutation.skillRefs ? [...mutation.skillRefs] : []),
