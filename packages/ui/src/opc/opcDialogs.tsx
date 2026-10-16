@@ -2,7 +2,7 @@
  * zcode-go OPC 面板对话框集：工作项编辑、模板/自定义招聘、复盘、技能升级。
  * 从 ZcodeGoOpcPanelRoot 拆出以控制文件行数；全部写路径经 apply(mutations) 收口。
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
@@ -29,6 +29,7 @@ import {
   type OpcRoleTemplateDraft,
   type OpcWorkItem,
   type OpcWorkItemPriority,
+  recommendOpcAssignees,
 } from "@zcode/shared";
 
 export interface OpcWorkItemDialogState {
@@ -116,9 +117,28 @@ export function OpcWorkItemDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label>
-                {intl.formatMessage({ id: "opc.workitem.assignee" })}
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label>
+                  {intl.formatMessage({ id: "opc.workitem.assignee" })}
+                </Label>
+                <button
+                  type="button"
+                  className="text-ui-xs text-foreground-subtle underline underline-offset-2"
+                  onClick={() => {
+                    const top = recommendOpcAssignees(
+                      state,
+                      {
+                        dependsOn,
+                        assigneeId: assigneeId === "none" ? null : assigneeId,
+                      },
+                      1,
+                    )[0];
+                    if (top) setAssigneeId(top.employeeId);
+                  }}
+                >
+                  {intl.formatMessage({ id: "opc.workitem.recommend" })}
+                </button>
+              </div>
               <Select value={assigneeId} onValueChange={setAssigneeId}>
                 <SelectTrigger size="sm" className="w-full">
                   <SelectValue />

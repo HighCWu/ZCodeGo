@@ -158,6 +158,7 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.workitem.detailPlaceholder":
     "Describe the goal, boundaries and acceptance criteria (markdown)…",
   "opc.workitem.assignee": "Assignee",
+  "opc.workitem.recommend": "Recommend assignee",
   "opc.workitem.unassigned": "Unassigned",
   "opc.workitem.priority": "Priority",
   "opc.hire.title": "Hire",

@@ -151,6 +151,7 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.workitem.detail": "背景与验收标准",
   "opc.workitem.detailPlaceholder": "描述目标、边界与验收标准（markdown）…",
   "opc.workitem.assignee": "负责人",
+  "opc.workitem.recommend": "推荐负责人",
   "opc.workitem.unassigned": "未指派",
   "opc.workitem.priority": "优先级",
   "opc.hire.title": "招聘",

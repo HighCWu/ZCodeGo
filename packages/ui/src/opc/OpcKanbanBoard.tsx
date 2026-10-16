@@ -169,6 +169,9 @@ export function OpcKanbanBoard({
                         >
                           <p className="line-clamp-2 text-ui-sm font-medium text-foreground">
                             {item.escalatedAt ? "⬆ " : ""}
+                            {item.parentWorkItemId
+                              ? `↳${(state.workItems.find((parent) => parent.id === item.parentWorkItemId)?.title ?? "").slice(0, 12)} · `
+                              : ""}
                             {item.title}
                           </p>
                         </button>
