@@ -348,6 +348,14 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   html/csv/xml/ini/cfg），二进制资产（图片等）不随包。
 - 编排 done 标记的轮次取委派 prompt 构建时快照——rework 落账回流 UI 前
   立即委派的极端窗口内，完成信号可能被去重键忽略（人工验收兜底）。
+- **试验 HTTP 接口（定版设计，待实现）**：CLI headless 秒退的替代通路——
+  桌面 main 起本地 HTTP 端口（默认关闭，env ZCODE_GO_EXP_HTTP=1 开启，
+  127.0.0.1 绑定），端点 `POST /exp/prompt`（{content, timeoutMs?} →
+  {text}）：main 收到后转发 renderer（webContents.send，fingerprint
+  sample 同款模式），renderer 侧用 IZCodeTaskService 创建**临时会话**
+  （createTask+sendPrompt，编排器同款）执行并轮询会话行，完成后经 IPC
+  把最后 assistant 文本回传 main 作为 HTTP 响应（120s 超时）。用途：
+  记忆压缩试验、指纹探测采集等外部脚本的真实模型调用通路。
 - **CLI headless（zcode -p）秒退待查**：headless 一次问一次答在本机
   （takeover 环境）1 秒静默退出（exit 0、无事件、模型未调用），试验脚本
   的 CLI 通路被阻塞。已排除：参数路由（-p 注册正常）、输出格式（json/
