@@ -177,12 +177,13 @@ export async function dispatchReadyWorkItems(
   return outcome;
 }
 
-/** 可编排数量（UI 按钮显隐）。 */
+/** 可编排数量（UI 按钮显隐）：与 dispatchable 同过滤（含 sessionId 幂等锚）。 */
 export function countOrchestratable(state: OpcCompanyState): number {
   return state.workItems.filter(
     (item) =>
       item.status === "ready" &&
       item.assigneeId !== null &&
-      isOpcWorkItemRunnable(item, state.workItems),
+      isOpcWorkItemRunnable(item, state.workItems) &&
+      !item.sessionId,
   ).length;
 }

@@ -118,6 +118,10 @@ async function backupCorruptState(workspaceRoot: string): Promise<void> {
   const corrupt = join(workspaceRoot, OPC_COMPANY_FILE);
   try {
     await rename(corrupt, `${corrupt}.corrupt-${Date.now()}`);
+    // 用户必须知道「默认公司重建」发生了：数据在备份里，但视图被重置
+    opcLoggerWarn(
+      `[zcode-go] OPC company.json 无法解析，已备份并重建默认公司: ${corrupt}`,
+    );
   } catch {
     /* 已不存在或已备份 */
   }

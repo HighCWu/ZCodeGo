@@ -164,11 +164,13 @@ export function evaluateOpcPromotions(
           name: `Playbook：${sample.statement.slice(0, 40)}`,
           description: `由 ${employee.name} 的重复经验自动晋升（指纹 ${statementKey.slice(0, 24)}…）。`,
           category: employee.category,
-          version: 1,
+          // 目标版本制：tombstone 或中途删除重建等场景下批次数可能已 >2，
+          // 首次创建直接取目标版本，避免下一轮补一次伪「再次被确认」升级
+          version: Math.max(1, batches.size - 1),
           origin: "promoted",
           promotedFromEmployeeId: employee.id,
           changelog: [
-            `v1 ${formatOpcDate(now)}：经验在 ${batches.size} 次复盘中重复出现，自动晋升为共享 playbook。`,
+            `v${Math.max(1, batches.size - 1)} ${formatOpcDate(now)}：经验在 ${batches.size} 次复盘中重复出现，自动晋升为共享 playbook。`,
           ],
           updatedAt: now,
         },
@@ -203,7 +205,7 @@ export function evaluateOpcPromotions(
         id: createOpcEntityId("ev", now),
         at: now,
         kind: "promote",
-        summary: `技能 ${skillId} 因经验再确认升级到 v${existing.version + 1}`,
+        summary: `技能 ${skillId} 因经验再确认升级到 v${targetVersion}`,
       });
     }
     // 自动挂接到来源员工

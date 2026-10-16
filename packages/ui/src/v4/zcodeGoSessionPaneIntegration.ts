@@ -218,10 +218,11 @@ const OPC_DONE_SCAN_WINDOW = 30;
 
 /**
  * OPC 委派完成自动检测（Self-Run 闭环最后一段）：委派 prompt 要求 agent 在
- * 验收全部通过时于回复末行输出 `<!-- zcode-go:opc-done <workItemId> -->` 标记；
- * 本 hook 扫描会话尾部的 assistantText 行，命中即把对应工作项推进到 review
- * （人工验收门，不自动 done）。去重键 = sessionId:workItemId:reworkNotes 数——
- * 返工一次计数 +1，同一条旧标记不会被再次触发；只扫尾部 30 行控开销。
+ * 验收全部通过时于回复末行输出 `<!-- zcode-go:opc-done <workItemId>:r<轮次> -->`
+ * 标记（轮次由委派 prompt 构造时注入当前返工次数）；本 hook 扫描会话尾部的
+ * assistantText 行，命中即把对应工作项推进到 review（人工验收门，不自动 done）。
+ * 去重键 = sessionId:workItemId:标记轮次——返工后新 prompt 产出更高轮次的
+ * 新标记才再次触发，旧标记不会误推；只扫尾部 30 行控开销。
  */
 export function useZcodeGoOpcDoneWatcher({
   sessionId,

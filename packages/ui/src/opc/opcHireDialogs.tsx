@@ -179,8 +179,8 @@ export function OpcHireDialog({
                   status: intl.formatMessage({
                     id:
                       reusable.status === "paused"
-                        ? "opc.org.pause"
-                        : "opc.org.depart",
+                        ? "opc.employee.statusPaused"
+                        : "opc.employee.statusDeparted",
                   }),
                 },
               )}
@@ -199,6 +199,8 @@ export function OpcHireDialog({
                       name: draft.name,
                       seniority: draft.seniority,
                       roleId: roleId === "none" ? null : roleId,
+                      // 表单里选的权限级别不丢（员工权限边界随复用更新）
+                      permissionLevel: draft.permissionLevel,
                     },
                   },
                 ]);

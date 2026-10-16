@@ -94,9 +94,9 @@ export function parseTelegramUpdatesBody(
 export function selectAllowedTexts(
   updates: TelegramUpdate[],
   allowFrom: Array<number | string>,
-): Array<{ chatId: string; text: string }> {
+): Array<{ chatId: string; text: string; updateId: number }> {
   const allowed = new Set(allowFrom.map((id) => String(id)));
-  const results: Array<{ chatId: string; text: string }> = [];
+  const results: Array<{ chatId: string; text: string; updateId: number }> = [];
   for (const update of updates) {
     const chatId = update.message?.chat?.id ?? update.edited_message?.chat?.id;
     const text = update.message?.text ?? update.edited_message?.text;

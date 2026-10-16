@@ -32,7 +32,17 @@ export function OpcInboxDialog({ onClose }: { onClose: () => void }) {
   const state = useOpcStore((s) => s.state);
   const consumeInbox = useOpcStore((s) => s.consumeInbox);
   const [assigneeId, setAssigneeId] = useState<string>("none");
-  const [priority, setPriority] = useState<OpcWorkItemPriority>("medium");
+  // 共享选择器初值 = 本批条目自述 priority 的最高档（urgent 静默降级到
+  // medium 会丢发送方的紧急语义；共享选择器仍可覆盖）
+  const [priority, setPriority] = useState<OpcWorkItemPriority>(() => {
+    const rank = { urgent: 0, high: 1, medium: 2, low: 3 } as const;
+    const values = inbox.map((item) => item.priority).filter(Boolean) as Array<
+      keyof typeof rank
+    >;
+    return values.length > 0
+      ? values.sort((a, b) => rank[a] - rank[b])[0]!
+      : "medium";
+  });
   const activeEmployees =
     state?.employees.filter((e) => e.status === "active") ?? [];
 

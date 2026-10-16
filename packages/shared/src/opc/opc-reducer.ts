@@ -452,6 +452,8 @@ function applyOnce(
                   ...item,
                   status: "in_progress" as const,
                   reworkNotes: [...(item.reworkNotes ?? []), note],
+                  // 清编排幂等锚：返工后允许编排器重新派发（旧会话已死）
+                  ...(item.sessionId ? { sessionId: null } : {}),
                   updatedAt: now,
                 }
               : item,
@@ -731,7 +733,13 @@ function bindEmployeeToRole(
   roleId: string | null,
   employeeId: string,
 ): OpcRoleSlot[] {
-  if (!roleId) return roleSlots;
+  if (!roleId) {
+    // null = 上岗「不占槽」：必须释放旧槽，否则暂停员工复用为无槽后
+    // slot.employeeId 仍指向他，组织视图出现幽灵占用
+    return roleSlots.map((slot) =>
+      slot.employeeId === employeeId ? { ...slot, employeeId: null } : slot,
+    );
+  }
   return roleSlots.map((slot) =>
     slot.id === roleId
       ? { ...slot, employeeId }

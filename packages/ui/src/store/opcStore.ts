@@ -152,6 +152,7 @@ export interface OpcStoreState {
 
 let opcUnsubscribe: (() => void) | null = null;
 let opcInFlight: Promise<void> | null = null;
+let opcInFlightKey: string | null = null;
 
 export const useOpcStore = create<OpcStoreState>()((set, get) => ({
   workspaceKey: null,
@@ -172,8 +173,11 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
     }
     if (get().workspaceKey === workspaceKey && (get().state || get().loading))
       return;
-    if (opcInFlight) return opcInFlight;
+    // in-flight 绑定工作区键：否则快速切工作区时 initialize(B) 被 A 的
+    // 请求吞掉，B 渲染 A 的公司数据
+    if (opcInFlight && opcInFlightKey === workspaceKey) return opcInFlight;
     set({ loading: true, error: null });
+    opcInFlightKey = workspaceKey;
     opcInFlight = (async () => {
       try {
         const result = await bridge.zcodeGoOpcGetState!({ workspacePath });
@@ -182,6 +186,8 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
             loading: false,
             error: result.error ?? "opc-state-unavailable",
             state: null,
+            // 失败即清残留：换工作区失败时不能留着上一区的入站条目
+            inbox: [],
             workspaceKey,
             workspacePath,
             bodies: { roleTemplateBodies: {}, skillBodies: {} },
@@ -221,6 +227,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
         });
       } finally {
         opcInFlight = null;
+        opcInFlightKey = null;
       }
     })();
     return opcInFlight;
@@ -300,6 +307,9 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           recentPromotedSkillIds: result.promotedSkillIds,
         });
       }
+      if (!result.ok) {
+        set({ error: result.error ?? "opc-apply-rejected" });
+      }
       return {
         ok: result.ok,
         events: result.events ?? [],
@@ -307,6 +317,10 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
       };
     } catch (error) {
       logger.warn("[zcode-go][opc] 应用变更失败", error);
+      // 失败必须可见：对话框会照常关闭，静默吞掉=用户以为已保存
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
       return { ok: false, events: [], promotedSkillIds: [] };
     }
   },

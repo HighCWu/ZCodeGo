@@ -28,5 +28,10 @@ export function ZcodeGoOpcPanelMount({
     });
   }, [initialize, workspacePath, workspaceIdentity, isOpcMode]);
 
-  return <ZcodeGoOpcPanelRoot workspaceIdentity={workspaceIdentity ?? null} />;
+  return (
+    <ZcodeGoOpcPanelRoot
+      workspaceIdentity={workspaceIdentity ?? null}
+      workspacePath={workspacePath}
+    />
+  );
 }

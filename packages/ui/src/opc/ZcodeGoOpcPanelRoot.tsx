@@ -77,8 +77,12 @@ type PanelTab = "kanban" | "office" | "org" | "market" | "skills" | "evolution";
 
 export function ZcodeGoOpcPanelRoot({
   workspaceIdentity,
+  workspacePath: workspacePathProp,
 }: {
   workspaceIdentity?: string | null;
+  /** Mount 下传的当前工作区：预热门控到 opc 模式后 store 的 workspacePath
+   * 只在 initialize 后才有值——非 opc 模式面板唤起时的兜底来源。 */
+  workspacePath?: string | null;
 }) {
   const { intl } = useZCodeIntl();
   const state = useOpcStore((s) => s.state);
@@ -115,10 +119,15 @@ export function ZcodeGoOpcPanelRoot({
     useState<OpcUpgradeDialogState | null>(null);
 
   useEffect(() => {
-    // detail.tab 允许快捷入口直达指定标签（驾驶舱快捷操作等）
+    // detail.tab 允许快捷入口直达指定标签；detail.action 直达面板内动作
+    // （如驾驶舱「新建工作项」→ 打开建项对话框，而不是只开看板）
     const handleOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ tab?: PanelTab }>).detail;
+      const detail = (event as CustomEvent<{ tab?: PanelTab; action?: string }>)
+        .detail;
       if (detail?.tab) setTab(detail.tab);
+      if (detail?.action === "createWorkItem") {
+        setWorkItemDialog({ mode: "create", workItem: null });
+      }
       setOpen(true);
     };
     window.addEventListener(OPC_OPEN_PANEL_EVENT, handleOpen);

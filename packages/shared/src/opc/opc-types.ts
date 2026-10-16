@@ -80,7 +80,7 @@ export interface OpcWorkItem {
   updatedAt: number;
   completedAt: number | null;
   /** 最近一次委派对应的会话 id（可选留痕，便于回溯）。 */
-  sessionId?: string;
+  sessionId?: string | null;
   /** 升级上报时间（OpenOPC escalation 语义：超权限/阻塞，待所有者处理）。 */
   escalatedAt?: number | null;
   escalationNote?: string | null;
