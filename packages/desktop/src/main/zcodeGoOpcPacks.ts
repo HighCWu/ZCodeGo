@@ -6,6 +6,7 @@
 import { app } from "electron";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { writeTextAtomic } from "./zcodeGoOpcFiles.js";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -56,8 +57,12 @@ async function collectPackFiles(
       await collectPackFiles(full, relative, files);
     } else if (
       entry.isFile() &&
-      /\.md$/i.test(entry.name) &&
-      entry.name !== "pack.json"
+      entry.name !== "pack.json" &&
+      // 文本资产：SKILL.md 相对引用的 scripts/references/assets 等（二进制
+      // 文件不进虚拟文件集——正文/资产均为 utf8 消费）
+      /\.(md|txt|py|sh|json|ya?ml|toml|js|ts|css|html?|csv|xml|ini|cfg)$/i.test(
+        entry.name,
+      )
     ) {
       files.push({
         relativePath: relative,
@@ -124,7 +129,7 @@ export async function syncOpcPacks(
         const target = join(templatesDir, `${templateId}.md`);
         if (existsSync(target)) continue;
         await mkdir(templatesDir, { recursive: true });
-        await writeFile(target, markdown, "utf8");
+        await writeTextAtomic(target, markdown);
         writtenBodies.push([target, markdown]);
       }
       try {
@@ -137,8 +142,25 @@ export async function syncOpcPacks(
           );
           if (existsSync(target)) continue;
           await mkdir(dirname(target), { recursive: true });
-          await writeFile(target, body, "utf8");
+          await writeTextAtomic(target, body);
           writtenBodies.push([target, body]);
+        }
+        // 技能随包资产：skills/<id>/<相对技能目录路径>（SKILL.md 的相对引用
+        // 落盘后成立）。id/rel 均来自包内真实目录结构，仍防 .. 逃逸。
+        for (const [assetKey, content] of Object.entries(outcome.skillAssets)) {
+          const [assetOwnerId, ...assetRelParts] = assetKey.split("/");
+          const rel = assetRelParts.join("/");
+          if (!assetOwnerId || rel.length === 0 || rel.includes("..")) continue;
+          const target = join(
+            workspaceRoot,
+            OPC_SKILLS_DIR,
+            assetOwnerId,
+            ...assetRelParts,
+          );
+          if (existsSync(target)) continue;
+          await mkdir(dirname(target), { recursive: true });
+          await writeTextAtomic(target, content);
+          writtenBodies.push([target, content]);
         }
       } catch (error) {
         // 回滚已写的正文（缺失文件重写无副作用），戳不盖 → 下次重试

@@ -201,7 +201,7 @@ export function buildOpcCompanyImportMutations(
       // 无正文的模板条目照常入清单（人才市场按描述展示），正文缺失仅影响委派注入
       mutations.push({
         kind: "template.importRole",
-        markdown: `---\nname: ${template.name}\ndescription: ${template.description}\ncolor: ${template.color}\nemoji: ${template.emoji}\nvibe: ${template.vibe}\n---\n\n${template.description}\n`,
+        markdown: `---\nname: ${template.name}\ndescription: ${template.description}\ncategory: ${template.category}\ncolor: ${template.color}\nemoji: ${template.emoji}\nvibe: ${template.vibe}\n---\n\n${template.description}\n`,
       });
       summary.roleTemplates += 1;
       continue;

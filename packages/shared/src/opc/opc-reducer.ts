@@ -154,7 +154,20 @@ function applyOnce(
         seniority: custom?.seniority || "junior",
         permissionLevel: custom?.permissionLevel,
         status: "active",
-        skillRefs: mutation.skillRefs ? [...mutation.skillRefs] : [],
+        skillRefs: [
+          ...new Set([
+            ...(mutation.skillRefs ? [...mutation.skillRefs] : []),
+            // 新员工入职即继承共享 playbook（OpenOPC 语义：晋升技能是组织
+            // 资产而非个人所有；tombstone 中的已删技能精确排除）
+            ...state.skills
+              .filter((skill) => skill.origin === "promoted")
+              .filter(
+                (skill) =>
+                  !(state.promotedSkillTombstones ?? []).includes(skill.id),
+              )
+              .map((skill) => skill.id),
+          ]),
+        ],
         stats: { completed: 0, retrospectives: 0, lessons: 0 },
         createdAt: now,
       };

@@ -500,7 +500,83 @@ assert(
   "持久化：重启式 GetState 状态一致",
 );
 
-// ── 5. 入站队列：drop → convert / dismiss ─────────────────────────────────
+// ── 5. RSI 闭环：两次同指纹复盘 → 晋升 → 再确认升版（无关复盘不膨胀）──────
+const rsiEmployeeId = st.state.employees.find((e) => !e.isFounder)?.id;
+assert(Boolean(rsiEmployeeId), "RSI：找到执行员工");
+{
+  const retroOnce = {
+    kind: "retro.record",
+    employeeId: rsiEmployeeId,
+    lessons: [{ statement: "E2E 复盘经验：先写测试再修", tags: ["e2e"] }],
+  };
+  const r1 = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [${JSON.stringify(retroOnce)}] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  assert(
+    r1.ok === true && r1.promotedSkillIds.length === 0,
+    "RSI：一次复盘不晋升",
+  );
+  // 无关复盘（批次不增长不得膨胀版本）
+  const noise = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "retro.record", employeeId: ${JSON.stringify(rsiEmployeeId)}, lessons: [{ statement: "无关经验", tags: ["x"] }] }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  assert(noise.ok === true, "RSI：无关复盘落账");
+  const r2 = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "retro.record", employeeId: ${JSON.stringify(rsiEmployeeId)}, lessons: [{ statement: "E2E 复盘经验：先写测试。再修。", tags: ["e2e"] }] }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  assert(r2.ok && r2.promotedSkillIds.length === 1, "RSI：两次同指纹晋升");
+  const promotedId = r2.promotedSkillIds[0];
+  const promotedSkill = r2.state.skills.find((sk) => sk.id === promotedId);
+  assert(
+    promotedSkill?.origin === "promoted" &&
+      promotedSkill.version === 1 &&
+      r2.state.employees
+        .find((e) => e.id === rsiEmployeeId)
+        .skillRefs.includes(promotedId),
+    "RSI：晋升技能 v1 且挂接来源员工",
+  );
+  // 无关复盘后版本不得膨胀
+  const stable = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcGetState({ workspacePath: ${JSON.stringify(WORKSPACE)} }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const vStable = stable.state.skills.find(
+    (sk) => sk.id === promotedId,
+  ).version;
+  // 第三次同指纹 → v2
+  const r3 = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "retro.record", employeeId: ${JSON.stringify(rsiEmployeeId)}, lessons: [{ statement: "E2E 复盘经验：先写测试再修！", tags: ["e2e"] }] }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  assert(
+    r3.state.skills.find((sk) => sk.id === promotedId).version === 2,
+    "RSI：第三批同指纹升 v2",
+  );
+  assert(vStable === 1, "RSI：无关复盘不膨胀版本");
+  // 新员工入职继承晋升技能（不含 tombstone 场景）
+  const hireNew = JSON.parse(
+    await ev(
+      `window.zcode.zcodeGoOpcApply({ workspacePath: ${JSON.stringify(WORKSPACE)}, mutations: [{ kind: "employee.hire", templateId: "custom", roleId: null, custom: { name: "E2E 继承员", category: "engineering" } }] }).then(r => JSON.stringify(r))`,
+    ),
+  );
+  const inherited = hireNew.state.employees.find(
+    (e) => e.name === "E2E 继承员",
+  );
+  assert(
+    inherited.skillRefs.includes(promotedId),
+    "RSI：新员工入职继承晋升技能",
+  );
+}
+
+// ── 6. 入站队列：drop → convert / dismiss ─────────────────────────────────
 const inboxDir = join(workspace, ".opc", "inbox");
 mkdirSync(inboxDir, { recursive: true });
 writeFileSync(
@@ -618,8 +694,8 @@ assert(
   "dismiss 删文件（drop 的两条不再可见）",
 );
 
-// ── 6. Telegram 渠道桥：mock API → 入站 ───────────────────────────────────
-console.log("6. 等待 Telegram 渠道桥首个轮询周期（10s）…");
+// ── 7. Telegram 渠道桥：mock API → 入站 ───────────────────────────────────
+console.log("7. 等待 Telegram 渠道桥首个轮询周期（10s）…");
 await sleep(12000);
 const tgInboxDir = join(workspace, ".opc", "inbox");
 const tgFiles = existsSync(tgInboxDir)

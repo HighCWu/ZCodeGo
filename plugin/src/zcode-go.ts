@@ -61,9 +61,7 @@ function deleteEmptyJunkSession(event: Record<string, unknown>): void {
     if (!sessionId.startsWith("sess_")) return;
     const builtin = (
       process as unknown as {
-        getBuiltinModule?: (
-          id: string,
-        ) =>
+        getBuiltinModule?: (id: string) =>
           | {
               DatabaseSync: new (
                 path: string,
@@ -463,8 +461,10 @@ function runHook(): void {
     const opcExpanded = low.includes("run custom command /opc");
     if (opcRaw || opcExpanded) {
       // 取 "/opc " 之后的完整参数（add 子命令带中文标题，不能按空白切分只取词）
+      // 展开形态 [^\n] 而非 [^\n.]：标题含版本号（如「升级到 v1.2」）
+      // 不得在句点截断
       const opcArgs = opcExpanded
-        ? (prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n.]+)/)?.[1] ?? "")
+        ? (prompt.match(/[Rr]un custom command\s+\/opc\s+([^\n]+)/)?.[1] ?? "")
         : (prompt.match(/^\/opc\s+([\s\S]+)$/)?.[1] ?? "");
       runOpcCommand(opcArgs, String(event.cwd ?? process.cwd()));
       return;
@@ -756,11 +756,11 @@ function mirrorPluginPacks(say: (message: string) => void): number {
     const destination = join(OPC_PACKS_DIR, id);
     const sourceTime = readPackTime(source);
     const destinationTime = readPackTime(destination);
-    // 目标已存在且不旧于来源 → 跳过（防降级）；缺时间戳的坏包按「需替换」处理
+    // 目标已存在且不旧于来源 → 跳过（防降级）。来源缺时间戳（旧 CI 包）时
+    // 同样跳过：无条件替换会让旧包反复覆盖更新鲜的用户缓存（时间单调保护被绕过）
     if (
       destinationTime !== null &&
-      sourceTime !== null &&
-      destinationTime.getTime() >= sourceTime.getTime()
+      (sourceTime === null || destinationTime.getTime() >= sourceTime.getTime())
     ) {
       continue;
     }

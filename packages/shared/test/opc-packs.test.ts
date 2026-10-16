@@ -123,3 +123,64 @@ describe("applyOpcPackFiles", () => {
     expect(v2.state.roleTemplates).toHaveLength(2);
   });
 });
+
+describe("技能随包资产（三轮 review 回归）", () => {
+  it("SKILL.md 同目录资产归属该技能并随包落盘键", () => {
+    const files: OpcPackSourceFile[] = [
+      {
+        relativePath: "skills/pack-skill/SKILL.md",
+        content: SKILL_MD,
+      },
+      {
+        relativePath: "skills/pack-skill/scripts/run.sh",
+        content: "echo hi",
+      },
+      {
+        relativePath: "skills/pack-skill/references/api.md",
+        content: "# api",
+      },
+      // 不属于任何技能目录的散文件不收
+      { relativePath: "README.md", content: "# readme" },
+    ];
+    const outcome = applyOpcPackFiles(
+      createEmptyOpcCompanyState(NOW),
+      MANIFEST,
+      files,
+      NOW,
+    );
+    expect(Object.keys(outcome.skillAssets).sort()).toEqual([
+      "pack-skill/references/api.md",
+      "pack-skill/scripts/run.sh",
+    ]);
+  });
+
+  it("已存在技能的资产跳过（幂等，不覆盖用户改动）", () => {
+    const base = createEmptyOpcCompanyState(NOW);
+    const first = applyOpcPackFiles(
+      base,
+      MANIFEST,
+      [
+        { relativePath: "skills/pack-skill/SKILL.md", content: SKILL_MD },
+        {
+          relativePath: "skills/pack-skill/scripts/run.sh",
+          content: "echo v1",
+        },
+      ],
+      NOW,
+    );
+    // 第二次（模拟用户已改资产后重扫）：knownSkillIds 已含 → 资产不重收
+    const second = applyOpcPackFiles(
+      first.state,
+      MANIFEST,
+      [
+        { relativePath: "skills/pack-skill/SKILL.md", content: SKILL_MD },
+        {
+          relativePath: "skills/pack-skill/scripts/run.sh",
+          content: "echo v2",
+        },
+      ],
+      NOW + 1,
+    );
+    expect(second.skillAssets).toEqual({});
+  });
+});

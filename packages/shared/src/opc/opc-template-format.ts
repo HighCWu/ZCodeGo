@@ -21,7 +21,9 @@ export interface OpcFrontmatter {
 export function parseOpcFrontmatter(markdown: string): OpcFrontmatter {
   const values: Record<string, string> = {};
   const nested: Record<string, Record<string, string>> = {};
-  const normalized = markdown.replace(/\r\n/g, "\n");
+  // BOM 剥除（先行于一切判定）：带 \uFEFF 的文件整篇会被视作正文，
+  // talent 模板因 description 空被静默丢弃
+  const normalized = markdown.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---")) {
     return { values, nested, body: normalized };
   }

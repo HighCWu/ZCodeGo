@@ -56,6 +56,8 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      buildOpcOrgMutations 的 merge-fill 去重语义）。
 4. 招聘（Self-Built）：从人才市场模板一键实例化员工（含内置 24 角色 + 导入模板 +
    自定义），或先建岗位再招人；员工可暂停/离职（离职不删历史经验）。
+   **新员工入职即继承全部共享 playbook 技能**（tombstone 中已删的不继承）——
+   晋升技能是组织资产而非个人所有（OpenOPC 语义）。
    - **组织智能**：「按目标生成架构」——把生成 prompt 注入 composer，agent 输出
      ```opc-org 围栏 JSON（slots/hires），粘贴回弹窗解析预览后一键应用（岗位去重、
      模板按名称匹配内置/导入库，未命中按自定义招聘）；另内置 corporate 预设一键应用。
@@ -101,8 +103,9 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
 
 ## 模板包（packs）：dev/打包期注入，开箱即用
 
-内置 24 角色 + 16 技能只是精编底座；两个上游仓库的全量内容（OpenOPC 97 角色
-talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」机制注入，
+内置 24 角色 + 16 技能只是精编底座；两个上游仓库的全量内容（OpenOPC talent 全量角色
+（上游已扩至 189，pack 拉 HEAD 自动跟随）+ 仓库级技能、claude-skills 全部
+SKILL.md 及其同目录文本资产）通过「模板包」机制注入，
 本 git 仓库零内容入库：
 
 1. **来源（用户 fork）**：默认 `HighCWu/OpenOPC` 与 `HighCWu/claude-skills`
@@ -111,8 +114,10 @@ talent + 仓库级技能、claude-skills 全部 SKILL.md）通过「模板包」
    用户级缓存）与 `pnpm opc:fetch-packs:desktop`（落
    `packages/desktop/build/opc-packs/`，供打包，`.gitignore` 排除）。
    下载 codeload tarball（HEAD），按内容过滤——OpenOPC 取
-   `.opc/prompts/talent/**` 与 `.opc/skills/**/SKILL.md`，claude-skills 取全部
-   `**/SKILL.md`——并写 `pack.json` 版本戳（repo/ref/commit/fetchedAt）。
+   `.opc/prompts/talent/**` 与 `.opc/skills/**`，claude-skills 取全部——并写
+   `pack.json` 版本戳（repo/ref/commit/fetchedAt）。技能目录内的文本资产
+   （scripts/references/assets 等）随 SKILL.md 一并落盘到 skills/<id>/ 下
+   （SKILL.md 以相对路径引用它们，不随包则技能不可用）。
    幂等：版本戳相同则跳过，`--force` 强制重拉。
 3. **打包注入**：electron-builder extraResources 增加存在性门控条目
    （`build/opc-packs` 存在才进包，到 `resources/opc-packs`），不打包时零足迹。
@@ -240,7 +245,21 @@ preload 增补落在 zcode-go 自己的 `zcodeGoEntries.ts`（非上游文件）
 9. 纯函数单元测试：frontmatter 解析（两种格式 + 容错）、状态机、晋升引擎
    （2 次阈值、版本递增、挂接）、委派/复盘/升级 prompt 构造。
 
-## 已知边界（本轮 review 收录，不修）
+## 已知边界（review 收录，不修）
+
+- **汇报线层级未实现**：OpcRoleSlot.parentRoleId 类型存在但恒为 null，
+  无编辑/渲染/委派消费路径——组织实为全员直隶创始人单层；原版的
+  CEO→经理→员工汇报线是委派链与升级路由骨架，本地团队内转派按 category。
+  完整实现（层级编辑 UI + 按汇报线转派路由）留待后续。
+- Comms 决策/会议记录 artifact 未实现（真实会话模型下价值受限，可并入
+  evolution-log 演化）。
+- 同工作区多公司未支持（每工作区一份公司状态）。
+- 原版工作区信任机制（opc trust 指纹绑定）未移植——本地 .opc/ 仅 prompt
+  消费的 md/json，威胁面不同。
+- **pack 技能资产仅收文本文件**（md/txt/py/sh/json/yaml/toml/js/ts/css/
+  html/csv/xml/ini/cfg），二进制资产（图片等）不随包。
+- 编排 done 标记的轮次取委派 prompt 构建时快照——rework 落账回流 UI 前
+  立即委派的极端窗口内，完成信号可能被去重键忽略（人工验收兜底）。
 
 - 公司包导入的 paused 员工落为 active（hire 的 id 由 reducer 生成，批内
   无法预测、无法追加 update 恢复暂停态）；departed 已正确跳过。

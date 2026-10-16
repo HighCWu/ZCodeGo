@@ -15,6 +15,7 @@ export async function writeTextAtomic(
 }
 import { join, resolve } from "node:path";
 import {
+  opcStableId,
   OPC_BUILTIN_SKILL_DRAFTS,
   OPC_ROLES_TEMPLATES_SUBDIR,
   OPC_SKILLS_DIR,
@@ -84,8 +85,11 @@ export async function persistSkillBodies(
   for (const mutation of mutations) {
     if (mutation.kind !== "skill.import" && mutation.kind !== "skill.upgrade")
       continue;
-    const skillId = mutation.skillId;
-    if (!skillId) continue;
+    const rawId = mutation.skillId;
+    if (!rawId) continue;
+    // 与 reducer 的 id 生成严格一致（opcStableId = slug 净化）：原样拼路径时
+    // ../ 形态的 id 会写出工作区外（路径穿越）
+    const skillId = opcStableId("skill", rawId);
     const skillDir = join(workspaceRoot, OPC_SKILLS_DIR, skillId);
     await mkdir(skillDir, { recursive: true });
     await writeTextAtomic(join(skillDir, "SKILL.md"), mutation.body);

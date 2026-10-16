@@ -564,3 +564,42 @@ describe("返工（rework）", () => {
     expect(rejected.state).toBe(inProgress.state);
   });
 });
+
+describe("新员工入职继承共享 playbook（三轮 review 回归）", () => {
+  it("hire 时自动挂接全部晋升技能（tombstone 除外）", () => {
+    let state = createEmptyOpcCompanyState(NOW);
+    const promoted = {
+      id: "playbook-incident",
+      name: "Playbook：止血",
+      description: "shared",
+      category: "engineering" as const,
+      version: 1,
+      origin: "promoted" as const,
+      changelog: ["v1"],
+      updatedAt: NOW,
+    };
+    const removed = {
+      ...promoted,
+      id: "playbook-gone",
+      name: "Playbook：已删",
+    };
+    state = {
+      ...state,
+      skills: [promoted, removed],
+      promotedSkillTombstones: ["playbook-gone"],
+    };
+    const applied = applyOpcMutation(
+      state,
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: null,
+        custom: { name: "新人", category: "engineering" },
+      },
+      NOW + 1,
+    );
+    const hired = applied.state.employees.at(-1)!;
+    expect(hired.skillRefs).toContain("playbook-incident");
+    expect(hired.skillRefs).not.toContain("playbook-gone");
+  });
+});
