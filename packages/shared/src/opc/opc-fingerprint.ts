@@ -450,10 +450,36 @@ export function opcAnswerDistribution(
     valid: samples.length - invalid,
     invalid,
     raw: samples.length,
+    // 仅有效样本参与分半（无效样本是解析噪声不是模型行为）
+    selfConsistency:
+      samples.length - invalid >= 4
+        ? Math.round(
+            (1 -
+              opcSplitHalfJsd(
+                samples.filter(
+                  (sample) =>
+                    normalizeOpcProbeAnswer(sample, domain).length > 0,
+                ),
+                domain,
+              )) *
+              100,
+          ) / 100
+        : 0,
   };
 }
 
 /** Jensen-Shannon 散度（base 2，0–1 bit；detector 口径）。 */
+export function opcSplitHalfJsd(
+  samples: string[],
+  domain: OpcProbeDomain,
+): number {
+  if (samples.length < 4) return 1; // 样本太少无从分半
+  const mid = Math.floor(samples.length / 2);
+  const first = opcAnswerDistribution(samples.slice(0, mid), domain);
+  const second = opcAnswerDistribution(samples.slice(mid), domain);
+  return opcJensenShannonDivergence(first.counts, second.counts);
+}
+
 export function opcJensenShannonDivergence(
   a: Record<string, number>,
   b: Record<string, number>,

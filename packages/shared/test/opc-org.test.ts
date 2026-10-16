@@ -285,7 +285,7 @@ describe("升级路由按汇报线（五轮 review 补齐）", () => {
 });
 
 describe("运行时委派推荐（绩效影响委派思想）", () => {
-  it("类目匹配 + 高完成数排序在前；自身排除", () => {
+  it("完成数驱动排序；自身排除", () => {
     const state = createEmptyOpcCompanyState(NOW);
     let current = state;
     for (const [name, category, completed] of [
@@ -347,7 +347,8 @@ describe("运行时委派推荐（绩效影响委派思想）", () => {
       { dependsOn: [], assigneeId: null, category: "engineering" },
       3,
     );
-    expect(recommendations[0]?.name).toBe("甲");
+    // 完成数驱动：丙 9 单 > 甲 5 单 > 乙 0 单
+    expect(recommendations[0]?.name).toBe("丙");
     expect(recommendations.find((r) => r.name === "丙")?.reasons).toContain(
       "high-completion",
     );

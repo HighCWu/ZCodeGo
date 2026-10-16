@@ -214,3 +214,21 @@ describe("reducer：capture/acknowledge（三轮 review 的 E2E 断言语义）"
     expect(noop.state).toBe(ack.state);
   });
 });
+
+describe("split-half 自洽（detector 采集自检思想）", () => {
+  it("稳定分布自洽度高；随机分布自洽度低", () => {
+    const stable = opcAnswerDistribution(
+      Array.from({ length: 10 }, () => "42"),
+      "number100",
+    );
+    expect(stable.selfConsistency).toBe(1);
+    const noisy = opcAnswerDistribution(
+      ["1", "2", "3", "4", "5", "6", "7", "8"],
+      "number100",
+    );
+    expect(noisy.selfConsistency).toBeLessThan(stable.selfConsistency);
+    // 样本 <4：无从分半，自洽度记 0（比对信号降权由调用方处理）
+    const tiny = opcAnswerDistribution(["42", "73"], "number100");
+    expect(tiny.selfConsistency).toBe(0);
+  });
+});

@@ -282,7 +282,10 @@ ToseaAI/llm-fingerprint-detector（一词回答分布 + JSD 三带判定，论�
 3. **比对与判定**：逐格 Jensen-Shannon 散度（base 2），只对两侧有效样本
    ≥6 的格取平均 → meanJsd：≤0.25 match / 0.25–0.35 uncertain / >0.35
    mismatch（detector 论文口径）。10 样本/格置信度有限（论文 25 样本），
-   verdict 是提醒信号而非结论——如实展示格数与样本量。
+   verdict 是提醒信号而非结论——如实展示格数与样本量。**split-half 自洽**
+   （detector 采集自检思想）：每格样本对半分的 JSD 换算为 0–1 的
+   selfConsistency 存档，低自洽 = 样本不稳定（量不足或输出随机性强），
+   人工判读时降权。
 4. **存档与提醒**：公司状态 `modelFingerprints[modelKey]`（modelKey =
    `providerId/modelId` 或裸 modelId）：`{ baseline, last, lastVerdict,
 lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定）；

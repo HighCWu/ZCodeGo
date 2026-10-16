@@ -248,6 +248,11 @@ export interface OpcProbeCellStats {
   invalid: number;
   /** 本次会话采到的原始样本数（应 ≈ prompts 数）。 */
   raw: number;
+  /**
+   * split-half 自洽度（1 = 两半分布一致；低 = 样本不稳定，比对信号降权）。
+   * 采集时由样本对半分的 JSD 换算（1 - JSD）；样本 <4 时为 0。
+   */
+  selfConsistency: number;
 }
 
 export type OpcProbeDomain =

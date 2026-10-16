@@ -127,10 +127,7 @@ export function OpcWorkItemDialog({
                   onClick={() => {
                     const top = recommendOpcAssignees(
                       state,
-                      {
-                        dependsOn,
-                        assigneeId: assigneeId === "none" ? null : assigneeId,
-                      },
+                      { assigneeId: assigneeId === "none" ? null : assigneeId },
                       1,
                     )[0];
                     if (top) setAssigneeId(top.employeeId);

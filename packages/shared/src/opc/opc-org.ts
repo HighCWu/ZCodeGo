@@ -119,7 +119,7 @@ export interface OpcAssigneeRecommendation {
   emoji: string;
   /** 推荐得分构成：类目匹配 + 完成数 + 技能覆盖（归一化前的原始信号）。 */
   score: number;
-  reasons: Array<"category-match" | "skill-match" | "high-completion">;
+  reasons: Array<"skill-match" | "high-completion">;
 }
 
 /**
@@ -128,10 +128,7 @@ export interface OpcAssigneeRecommendation {
  */
 export function recommendOpcAssignees(
   state: OpcCompanyState,
-  workItem: Pick<
-    OpcCompanyState["workItems"][number],
-    "dependsOn" | "assigneeId"
-  > & { category?: string },
+  workItem: Pick<OpcCompanyState["workItems"][number], "assigneeId">,
   topN = 3,
 ): OpcAssigneeRecommendation[] {
   const candidates = state.employees.filter(
@@ -143,13 +140,11 @@ export function recommendOpcAssignees(
   const scored = candidates.map((employee) => {
     const reasons: OpcAssigneeRecommendation["reasons"] = [];
     let score = 0;
-    if (workItem.category && employee.category === workItem.category) {
-      score += 2;
-      reasons.push("category-match");
-    }
-    const skillHits = employee.skillRefs.length;
-    score += Math.min(skillHits, 5) * 0.2;
-    if (skillHits > 0) reasons.push("skill-match");
+    // 技能挂接覆盖：员工的技能面广度（信号弱，封顶 1 分）
+    const skillRefs = employee.skillRefs.length;
+    score += Math.min(skillRefs, 5) * 0.2;
+    if (skillRefs > 0) reasons.push("skill-match");
+    // 完成数：实战验证过的交付能力（信号强，封顶 1 分）
     if (employee.stats.completed >= 3) {
       score += Math.min(employee.stats.completed, 10) * 0.1;
       reasons.push("high-completion");
