@@ -34,7 +34,11 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
   // service 在组件 render 层解析（hook 规则）；非 render 的轮询/订阅回调只用引用。
   // 试验请求的 workspacePath 必须与本组件 workspace 一致才执行（service 按
   // workspace 身份解析到对应 host，跨 workspace 复用会话会落错 host）。
-  const taskService = useZCodeTaskService(workspacePath, undefined, undefined);
+  const taskService = useZCodeTaskService(
+    workspacePath ?? undefined,
+    undefined,
+    undefined,
+  );
   const serviceRef = useRef(taskService);
   serviceRef.current = taskService;
   const workspaceRef = useRef(workspacePath);
