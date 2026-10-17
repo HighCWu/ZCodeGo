@@ -101,6 +101,13 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
             traceId: `exp:${payload.requestId}`,
             content: prompt,
             toolDenylist: EXEC_DENYLIST,
+            // 执行轮显式模型：v4 admission 把 sendPrompt 的 modelSelection 固定进
+            // canonical intent——这是不被桌面当前选择劫持的最强保证点。
+            modelSelection: {
+              providerId: "account:bigmodel-individual-coding-plan",
+              modelId: payload.model ?? "GLM-5.3-Flash",
+              options: { reasoningLevel: "high" },
+            },
           });
           logger.debug("[zcode-go][opc] 试验 prompt 已派发", {
             requestId: payload.requestId,
