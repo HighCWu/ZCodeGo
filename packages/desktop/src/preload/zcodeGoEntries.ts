@@ -225,6 +225,18 @@ export function installZcodeGoPreloadEntries({
     __zcExpChannelDebug: (): { runPrompt: string } => ({
       runPrompt: PlatformChannels.ZcodeGoExpRunPrompt,
     }),
+    /** zcode-go：试验拉模式——renderer 轮询取待执行请求（无请求返回 null）。 */
+    takeZcodeGoExpPending: (payload: {
+      workspacePath: string;
+    }): Promise<{
+      request: {
+        requestId: string;
+        workspacePath: string;
+        content: string;
+        fileTag: string;
+        model?: string;
+      } | null;
+    }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoExpTakePending, payload),
     /** zcode-go：试验执行请求（main → renderer；临时会话跑 prompt 并写 .opc/exp/）。 */
     onZcodeGoExpRunPrompt: (
       handler: (payload: {

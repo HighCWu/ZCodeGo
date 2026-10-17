@@ -34,12 +34,29 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
               model?: string;
             }) => void,
           ) => () => void;
+          takeZcodeGoExpPending?: (payload: {
+            workspacePath: string;
+          }) => Promise<{
+            request: {
+              requestId: string;
+              workspacePath: string;
+              content: string;
+              fileTag: string;
+              model?: string;
+            } | null;
+          }>;
         };
       }
     ).zcode;
     const subscribe = bridge?.onZcodeGoExpRunPrompt;
-    if (!subscribe) return;
-    const unsubscribe = subscribe((payload) => {
+    // 执行函数：推式/拉式两条路径共用
+    const execute = (payload: {
+      requestId: string;
+      workspacePath: string;
+      content: string;
+      fileTag: string;
+      model?: string;
+    }) => {
       const taskService = useZCodeTaskService(
         payload.workspacePath,
         undefined,
@@ -82,7 +99,29 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
           logger.warn("[zcode-go][opc] 试验执行失败", error);
         }
       })();
-    });
-    return unsubscribe;
+    };
+    if (!subscribe) {
+      // 无推式 API 时仅拉模式亦可工作
+      return;
+    }
+    const unsubscribe = subscribe(execute);
+    // 拉模式轮询（主路径）：推式 webContents.send 在 Electron 41 实测不达，
+    // invoke 方向（桌面全部功能同款）可靠——renderer 每 1.5s 取一次待执行请求。
+    const poll = window.setInterval(() => {
+      void (async () => {
+        try {
+          const taken = await bridge.takeZcodeGoExpPending?.({
+            workspacePath: workspacePath ?? "",
+          });
+          if (taken?.request) execute(taken.request);
+        } catch {
+          /* 轮询失败静默重试 */
+        }
+      })();
+    }, 1500);
+    return () => {
+      unsubscribe();
+      window.clearInterval(poll);
+    };
   }, [workspacePath]);
 }

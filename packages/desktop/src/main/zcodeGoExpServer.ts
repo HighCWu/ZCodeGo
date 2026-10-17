@@ -13,7 +13,7 @@ import { PlatformChannels } from "@zcode/shared";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { BrowserWindow } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 
 const EXP_DIR = join(
   process.env.ZCODE_GO_E2E_HOME ?? join(homedir(), ".zcode"),
@@ -29,6 +29,15 @@ export interface ZcodeGoExpLogger {
 }
 
 let server: Server | null = null;
+
+/** 拉模式待执行队列（POST 入队，renderer 轮询取走；单机试验内存态即可）。 */
+const pendingQueue: {
+  requestId: string;
+  workspacePath: string;
+  content: string;
+  fileTag: string;
+  model?: string;
+}[] = [];
 
 /** 转发执行请求给 renderer（所有窗口广播；桥接 hook 按 workspacePath 自选）。 */
 function forwardToRenderer(
@@ -99,6 +108,19 @@ function waitForSample(
 
 export function initZcodeGoExpServer(logger: ZcodeGoExpLogger): void {
   if (process.env.ZCODE_GO_EXP_HTTP !== "1" || server) return;
+  // 拉模式兜底：推式 webContents.send 在 Electron 41 实测不达（通道值一致、
+  // executeJavaScript 可达、ipcRenderer.on 不触发），renderer 改为轮询取请求。
+  ipcMain.removeHandler(PlatformChannels.ZcodeGoExpTakePending);
+  ipcMain.handle(PlatformChannels.ZcodeGoExpTakePending, (_event, query) => {
+    const q = (query ?? {}) as { workspacePath?: string };
+    const index = pendingQueue.findIndex(
+      (item) => !q.workspacePath || item.workspacePath === q.workspacePath,
+    );
+    if (index < 0) return { request: null };
+    const [request] = pendingQueue.splice(index, 1);
+    logger.info("[zcode-go][exp] 拉模式交付请求", { fileTag: request.fileTag });
+    return { request };
+  });
   server = createServer((req, res) => {
     if (req.method !== "POST" || !req.url?.startsWith("/exp/prompt")) {
       res.writeHead(404).end();
@@ -125,6 +147,13 @@ export function initZcodeGoExpServer(logger: ZcodeGoExpLogger): void {
           return;
         }
         mkdirSync(join(workspacePath, ".opc", "exp"), { recursive: true });
+        pendingQueue.push({
+          requestId: fileTag,
+          workspacePath,
+          content,
+          fileTag,
+          ...(parsed.model ? { model: parsed.model } : {}),
+        });
         if (
           !forwardToRenderer(
             {

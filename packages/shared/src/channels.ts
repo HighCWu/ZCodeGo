@@ -550,6 +550,9 @@ export const PlatformChannels = {
   ZcodeGoOpcReadFingerprintSample: "zcode:zcode-go-opc-read-fingerprint-sample",
   /** Main → Renderer：试验执行请求（临时会话跑一条 prompt，回复写 .opc/exp/） */
   ZcodeGoExpRunPrompt: "zcode:zcode-go-exp-run-prompt",
+  /** Renderer → Main：试验执行拉模式——renderer 轮询取待执行请求（推式
+   * webContents.send 在 Electron 41/Chromium 146 上实测不达，invoke 方向可靠）。 */
+  ZcodeGoExpTakePending: "zcode:zcode-go-exp-take-pending",
   /** Renderer → Main：同步应用菜单语言，用于重建原生菜单 */
   SetApplicationLocale: "zcode:set-application-locale",
   /** Renderer → Main：同步标题栏亮暗色，用于原生窗口控制按钮配色 */
