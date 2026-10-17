@@ -1,12 +1,15 @@
 /**
- * zcode-go 试验执行桥（renderer 侧）：接收 main 转发的试验 prompt 请求，
+ * zcode-go 试验执行桥（renderer 侧）：接收 main 的试验 prompt 请求，
  * 用 IZCodeTaskService 创建临时会话执行（编排器同款执行器，真实模型链路）。
  * 回复按 prompt 契约写入 .opc/exp/<fileTag>.json（由试验调用方轮询读取）——
  * 本桥只负责「执行」，不等待完成（headless 会话行无轻量读取面）。
+ *
+ * 取请求走拉模式（renderer 每 1.5s invoke 轮询）：推式 webContents.send 在
+ * Electron 41 实测不达（通道值一致、executeJavaScript 可达、on 不触发），
+ * invoke 方向为桌面全部功能的既有通路，可靠性已验证。
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useZCodeTaskService } from "@/hooks/useZCodeTaskService.js";
-import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { logger } from "@/logger.js";
 
 const EXEC_DENYLIST = [
@@ -19,52 +22,56 @@ const EXEC_DENYLIST = [
   "mcp__node_repl__js_add_node_module_dir",
 ];
 
+interface ExpRequest {
+  requestId: string;
+  workspacePath: string;
+  content: string;
+  fileTag: string;
+  model?: string;
+}
+
 export function useZCodeGoExpBridge(workspacePath: string | null): void {
+  // service 在组件 render 层解析（hook 规则）；非 render 的轮询/订阅回调只用引用。
+  // 试验请求的 workspacePath 必须与本组件 workspace 一致才执行（service 按
+  // workspace 身份解析到对应 host，跨 workspace 复用会话会落错 host）。
+  const taskService = useZCodeTaskService(workspacePath, undefined, undefined);
+  const serviceRef = useRef(taskService);
+  serviceRef.current = taskService;
+  const workspaceRef = useRef(workspacePath);
+  workspaceRef.current = workspacePath;
+
   useEffect(() => {
     if (!workspacePath) return;
     const bridge = (
       window as unknown as {
         zcode?: {
-          onZcodeGoExpRunPrompt?: (
-            handler: (payload: {
-              requestId: string;
-              workspacePath: string;
-              content: string;
-              fileTag: string;
-              model?: string;
-            }) => void,
-          ) => () => void;
           takeZcodeGoExpPending?: (payload: {
             workspacePath: string;
-          }) => Promise<{
-            request: {
-              requestId: string;
-              workspacePath: string;
-              content: string;
-              fileTag: string;
-              model?: string;
-            } | null;
-          }>;
+          }) => Promise<{ request: ExpRequest | null }>;
         };
       }
     ).zcode;
-    const subscribe = bridge?.onZcodeGoExpRunPrompt;
-    // 执行函数：推式/拉式两条路径共用
-    const execute = (payload: {
-      requestId: string;
-      workspacePath: string;
-      content: string;
-      fileTag: string;
-      model?: string;
-    }) => {
-      const taskService = useZCodeTaskService(
-        payload.workspacePath,
-        undefined,
-        undefined,
-      );
+    const take = bridge?.takeZcodeGoExpPending;
+    if (!take) {
+      logger.warn("[zcode-go][opc] 试验桥缺失 takeZcodeGoExpPending（preload 过旧）");
+      return;
+    }
+    const execute = (payload: ExpRequest) => {
+      if (payload.workspacePath !== workspacePath) {
+        logger.warn("[zcode-go][opc] 丢弃 workspace 不匹配的试验请求", {
+          request: payload.workspacePath,
+          bridge: workspacePath,
+        });
+        return;
+      }
+      const service = serviceRef.current;
+      if (!service) {
+        logger.warn("[zcode-go][opc] 试验桥 service 未就绪");
+        return;
+      }
       void (async () => {
         try {
-          const created = await taskService.createTask({
+          const created = await service.createTask({
             workspacePath: payload.workspacePath,
             v4Create: true,
             deferPersistenceUntilFirstPrompt: true,
@@ -85,7 +92,7 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
             `.opc/exp/${payload.fileTag}.json`,
             "写完后回复 done。",
           ].join("\n");
-          await taskService.sendPrompt({
+          await service.sendPrompt({
             taskId: created.taskId,
             traceId: `exp:${payload.requestId}`,
             content: prompt,
@@ -100,27 +107,18 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
         }
       })();
     };
-    if (!subscribe) {
-      // 无推式 API 时仅拉模式亦可工作
-      return;
-    }
-    const unsubscribe = subscribe(execute);
-    // 拉模式轮询（主路径）：推式 webContents.send 在 Electron 41 实测不达，
-    // invoke 方向（桌面全部功能同款）可靠——renderer 每 1.5s 取一次待执行请求。
+    // 拉模式轮询（主路径）
     const poll = window.setInterval(() => {
       void (async () => {
         try {
-          const taken = await bridge.takeZcodeGoExpPending?.({
-            workspacePath: workspacePath ?? "",
-          });
+          const taken = await take({ workspacePath });
           if (taken?.request) execute(taken.request);
-        } catch {
-          /* 轮询失败静默重试 */
+        } catch (error) {
+          logger.warn("[zcode-go][opc] 试验轮询失败", error);
         }
       })();
     }, 1500);
     return () => {
-      unsubscribe();
       window.clearInterval(poll);
     };
   }, [workspacePath]);
