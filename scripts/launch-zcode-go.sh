@@ -22,6 +22,12 @@ export ZCODE_GO_TAKEOVER=1
 # 单实例身份隔离：官方（"ZCode"）与本应用（"ZCode Go"）可同时常驻。
 export ZCODE_DESKTOP_APPLICATION_NAME="ZCode Go"
 
+# 试验模式（~/.zcode-go/EXP_MODE 存在）：自动启用试验 HTTP 接口（记忆压缩等
+# 外部脚本的真实模型调用通路）；共存开关由桌面侧同款文件判定（zcodeGoTakeover.ts）。
+if [ -f "$STATE_DIR/EXP_MODE" ]; then
+  export ZCODE_GO_EXP_HTTP="${ZCODE_GO_EXP_HTTP:-1}"
+fi
+
 if [ ! -f "$STATE_DIR/official.json" ]; then
   echo "[zcode-go] warn: $STATE_DIR/official.json 缺失——请先在官方会话内执行 /zcode-go（插件负责探测写入），否则底层运行时回落本仓库链条" >>"$STATE_DIR/desktop-launch.log" 2>&1
 fi

@@ -236,7 +236,13 @@ export async function enterZCodeGo(): Promise<void> {
     // 设置页「ZCode Go → 触发后关闭官版」：关闭时与官版共存运行（不再退官方）。
     takeoverDebug("enter: show 完成，读取设置");
     context.logger.info("[zcode-go] enterZCodeGo：读取关闭官版设置");
-    const closeOfficial = (await Promise.race([context.shouldCloseOfficialZcode?.() ?? true, new Promise((resolve) => setTimeout(() => resolve(true), 5000))])) ?? true;
+    // 试验共存开关：~/.zcode-go/EXP_MODE 存在时强制共存。文件读取无竞态——
+    // shouldCloseOfficialZcode 依赖 setting 服务就绪，race 超时回退 true 曾在
+    // 启动早期误杀官版（两次事故根因）。
+    const expModeKeepOfficial = existsSync(join(ZCODE_GO_DIR, "EXP_MODE"));
+    const closeOfficial = expModeKeepOfficial
+      ? false
+      : ((await Promise.race([context.shouldCloseOfficialZcode?.() ?? true, new Promise((resolve) => setTimeout(() => resolve(true), 5000))])) ?? true);
     takeoverDebug(`enter: 设置读取完成 closeOfficial=${closeOfficial}`);
     context.logger.info("[zcode-go] enterZCodeGo：closeOfficial=" + closeOfficial);
     if (closeOfficial) {
