@@ -221,6 +221,10 @@ export function installZcodeGoPreloadEntries({
         PlatformChannels.ZcodeGoOpcReadFingerprintSample,
         payload,
       ),
+    /** zcode-go：试验接口通道调试（比对 preload 运行时实际使用的通道值）。 */
+    __zcExpChannelDebug: (): { runPrompt: string } => ({
+      runPrompt: PlatformChannels.ZcodeGoExpRunPrompt,
+    }),
     /** zcode-go：试验执行请求（main → renderer；临时会话跑 prompt 并写 .opc/exp/）。 */
     onZcodeGoExpRunPrompt: (
       handler: (payload: {
