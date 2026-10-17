@@ -52,6 +52,14 @@ function forwardToRenderer(
         url: win.webContents.getURL().slice(0, 60),
       });
       win.webContents.send(PlatformChannels.ZcodeGoExpRunPrompt, payload);
+      // 通路对照：JS 注入走 executeJavaScript（与 IPC 无关）。注入计数增长而
+      // renderer 探针不增长 = 问题锁死在 Electron 事件分发层。
+      void win.webContents
+        .executeJavaScript(
+          "window.__mainProbe=(window.__mainProbe||0)+1; window.__mainProbe",
+        )
+        .then((v) => log.info("[zcode-go][exp] JS 注入探针", { winId: win.id, count: v }))
+        .catch((error) => log.warn("[zcode-go][exp] JS 注入失败", error));
       delivered = true;
     } catch (error) {
       log.warn("[zcode-go][exp] 单窗投递失败", error);
