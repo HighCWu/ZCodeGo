@@ -348,14 +348,26 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   html/csv/xml/ini/cfg），二进制资产（图片等）不随包。
 - 编排 done 标记的轮次取委派 prompt 构建时快照——rework 落账回流 UI 前
   立即委派的极端窗口内，完成信号可能被去重键忽略（人工验收兜底）。
-- **试验 HTTP 接口（定版设计，待实现）**：CLI headless 秒退的替代通路——
-  桌面 main 起本地 HTTP 端口（默认关闭，env ZCODE_GO_EXP_HTTP=1 开启，
-  127.0.0.1 绑定），端点 `POST /exp/prompt`（{content, timeoutMs?} →
-  {text}）：main 收到后转发 renderer（webContents.send，fingerprint
-  sample 同款模式），renderer 侧用 IZCodeTaskService 创建**临时会话**
-  （createTask+sendPrompt，编排器同款）执行并轮询会话行，完成后经 IPC
-  把最后 assistant 文本回传 main 作为 HTTP 响应（120s 超时）。用途：
-  记忆压缩试验、指纹探测采集等外部脚本的真实模型调用通路。
+- **试验 HTTP 接口（已实现）**：CLI headless 的替代通路——桌面 main 起本地
+  HTTP（默认关，env ZCODE_GO_EXP_HTTP=1 或 ~/.zcode-go/EXP_MODE 文件开启，
+  127.0.0.1 绑定），端点 `POST /exp/prompt`（{workspacePath, content,
+  model?, timeoutMs?} → {text}）。取请求走**拉模式**（renderer 每 1.5s
+  invoke ZcodeGoExpTakePending；推式 webContents.send 在 Electron 41 实测
+  不达：通道值一致、executeJavaScript 可达、ipcRenderer.on 不触发，三层
+  对照实证后弃推改拉）。桥的 createTask+sendPrompt 双点显式 modelSelection
+  （默认 GLM-5.3-Flash——不继承桌面当前选择，历史曾静默落到 openai/
+  gpt-6-astra）；回复走 .opc/exp/<tag>.json 文件中转。
+  **当前阻塞（产品 bug，非脚本层）**：ZCode Go 接管桌面的 host 对 GLM 账号
+  provider「Model creation failed（Provider Registry 中不存在
+  account:bigmodel-individual-coding-plan）」——账号装配交付正常（快照含
+  entitled:true）、UI 模型设置显示已连接，但 Model 实例化失败，UI 手动发
+  GLM 消息同样报错（官版桌面不受影响）。修复点在 host 的 ModelFactory 与
+  账号装配耦合（克隆环境缺失某种初始化），属产品开发工作。
+- **EXP_MODE 试验共存开关**：~/.zcode-go/EXP_MODE 存在时桌面 enterZCodeGo
+  强制共存 + launcher 自动开试验接口。根治 shouldCloseOfficialZcode 的
+  setting 就绪竞态（race 5s 超时回退 true 曾两次误杀官版）。
+  start-zcgo-desktop-safe.sh 提供五重前置检查 + 强制重建产物验证
+  （launcher 构建新鲜度判定不感知分支切换，旧产物组装曾致事故）。
 - **CLI headless（zcode -p）秒退根因已定位（已解除阻塞）**：PATH 上的
   `zcode`（/usr/bin/zcode → /opt/ZCode/zcode）是 **Electron 桌面启动器**，
   任何参数（含 -p/--help）都进桌面 main 初始化后立即退出（exit 0，输出
