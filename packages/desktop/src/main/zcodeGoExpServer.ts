@@ -34,6 +34,8 @@ function forwardToRenderer(payload: {
   workspacePath: string;
   content: string;
   fileTag: string;
+  /** 可选模型 id（GLM-5.3-Flash 等裸 id）；缺省由 renderer 侧默认。 */
+  model?: string;
 }): boolean {
   let delivered = false;
   for (const win of BrowserWindow.getAllWindows()) {
@@ -92,6 +94,7 @@ export function initZcodeGoExpServer(logger: ZcodeGoExpLogger): void {
           workspacePath?: string;
           content?: string;
           timeoutMs?: number;
+          model?: string;
         };
         const workspacePath = parsed.workspacePath
           ? resolve(parsed.workspacePath)
@@ -110,6 +113,7 @@ export function initZcodeGoExpServer(logger: ZcodeGoExpLogger): void {
             workspacePath,
             content,
             fileTag,
+            ...(parsed.model ? { model: parsed.model } : {}),
           })
         ) {
           res.writeHead(503, { "content-type": "application/json" });

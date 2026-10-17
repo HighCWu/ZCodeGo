@@ -31,6 +31,7 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
               workspacePath: string;
               content: string;
               fileTag: string;
+              model?: string;
             }) => void,
           ) => () => void;
         };
@@ -51,6 +52,13 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
             v4Create: true,
             deferPersistenceUntilFirstPrompt: true,
             permissionScope: "session",
+            // 试验会话显式绑定模型：不继承桌面当前选择（可能被切到其他供应商模型，
+            // 历史 v5 试验曾静默落到 openai/gpt-6-astra）。默认 GLM-5.3-Flash。
+            modelSelection: {
+              providerId: "account:bigmodel-individual-coding-plan",
+              modelId: payload.model ?? "GLM-5.3-Flash",
+              options: { reasoningLevel: "high" },
+            },
           });
           // 回复走文件中转契约：prompt 尾部追加写文件指令（.opc/exp/）
           const prompt = [

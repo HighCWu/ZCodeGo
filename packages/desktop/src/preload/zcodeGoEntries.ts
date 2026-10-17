@@ -228,6 +228,7 @@ export function installZcodeGoPreloadEntries({
         workspacePath: string;
         content: string;
         fileTag: string;
+        model?: string;
       }) => void,
     ): (() => void) => {
       const listener = (
@@ -237,6 +238,7 @@ export function installZcodeGoPreloadEntries({
           workspacePath: string;
           content: string;
           fileTag: string;
+          model?: string;
         },
       ) => handler(payload);
       ipcRenderer.on(PlatformChannels.ZcodeGoExpRunPrompt, listener);
