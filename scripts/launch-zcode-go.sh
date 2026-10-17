@@ -92,4 +92,6 @@ esac
 # CI 虚拟机 GPU helper 可能不稳，显式开关降级软件渲染（真实用户默认走 GPU）
 GPU_FLAGS=""
 [ -n "${ZCODE_GO_DISABLE_GPU:-}" ] && GPU_FLAGS="--disable-gpu"
+# 试验模式：开远程调试口（renderer 侧桥接问题实证用）
+[ -f "$STATE_DIR/EXP_MODE" ] && GPU_FLAGS="$GPU_FLAGS --remote-debugging-port=9223"
 exec "$ZCODE_EXE" --no-sandbox $GPU_FLAGS >>"$STATE_DIR/desktop-launch.log" 2>&1
