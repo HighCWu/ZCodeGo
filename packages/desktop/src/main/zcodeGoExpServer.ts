@@ -8,6 +8,8 @@
  * 白名单字符（拒绝路径穿越）。
  */
 import { createServer, type Server } from "node:http";
+
+import { PlatformChannels } from "@zcode/shared";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -41,7 +43,7 @@ function forwardToRenderer(payload: {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
     try {
-      win.webContents.send("zcode-go:exp-run-prompt", payload);
+      win.webContents.send(PlatformChannels.ZcodeGoExpRunPrompt, payload);
       delivered = true;
     } catch {
       /* 忽略单窗投递失败 */
