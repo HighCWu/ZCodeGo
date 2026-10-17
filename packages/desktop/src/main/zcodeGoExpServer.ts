@@ -180,7 +180,7 @@ export function initZcodeGoExpServer(logger: ZcodeGoExpLogger): void {
     } catch {
       /* 尽力而为 */
     }
-    logger.info("[zcode-go] 试验 HTTP 接口就绪", { port });
+    logger.info("[zcode-go] 试验 HTTP 接口就绪", { port, channel: PlatformChannels.ZcodeGoExpRunPrompt });
   });
   server.on("error", (error) => {
     logger.warn("[zcode-go] 试验 HTTP 接口启动失败", error);
