@@ -80,6 +80,9 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
             v4Create: true,
             deferPersistenceUntilFirstPrompt: true,
             permissionScope: "session",
+            // 无人值守执行：写回复文件是 prompt 契约的一部分，权限弹窗无人批准
+            // 会卡死 turn（pendingPermissions=1 实证）——试验会话固定 yolo。
+            mode: "yolo",
             // 试验会话显式绑定模型：不继承桌面当前选择（可能被切到其他供应商模型，
             // 历史 v5 试验曾静默落到 openai/gpt-6-astra）。默认 GLM-5.3-Flash。
             modelSelection: {
