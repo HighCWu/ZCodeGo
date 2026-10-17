@@ -109,11 +109,14 @@ export function useZCodeGoExpBridge(workspacePath: string | null): void {
               options: { reasoningLevel: "high" },
             },
           });
+          console.error("[exp-debug] 已派发", created.taskId, JSON.stringify(created).slice(0, 120));
           logger.debug("[zcode-go][opc] 试验 prompt 已派发", {
             requestId: payload.requestId,
             taskId: created.taskId,
           });
         } catch (error) {
+          // 试验调试：生产 logger 为 no-op，用原生 console 透出（CDP 可抓）
+          console.error("[exp-debug] 执行失败", error);
           logger.warn("[zcode-go][opc] 试验执行失败", error);
         }
       })();
