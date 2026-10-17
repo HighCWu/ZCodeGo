@@ -31,22 +31,30 @@ export interface ZcodeGoExpLogger {
 let server: Server | null = null;
 
 /** 转发执行请求给 renderer（所有窗口广播；桥接 hook 按 workspacePath 自选）。 */
-function forwardToRenderer(payload: {
-  requestId: string;
-  workspacePath: string;
-  content: string;
-  fileTag: string;
-  /** 可选模型 id（GLM-5.3-Flash 等裸 id）；缺省由 renderer 侧默认。 */
-  model?: string;
-}): boolean {
+function forwardToRenderer(
+  payload: {
+    requestId: string;
+    workspacePath: string;
+    content: string;
+    fileTag: string;
+    /** 可选模型 id（GLM-5.3-Flash 等裸 id）；缺省由 renderer 侧默认。 */
+    model?: string;
+  },
+  log: ZcodeGoExpLogger,
+): boolean {
   let delivered = false;
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
     try {
+      log.info("[zcode-go][exp] 广播试验请求", {
+        winId: win.id,
+        title: win.getTitle(),
+        url: win.webContents.getURL().slice(0, 60),
+      });
       win.webContents.send(PlatformChannels.ZcodeGoExpRunPrompt, payload);
       delivered = true;
-    } catch {
-      /* 忽略单窗投递失败 */
+    } catch (error) {
+      log.warn("[zcode-go][exp] 单窗投递失败", error);
     }
   }
   return delivered;
@@ -110,13 +118,16 @@ export function initZcodeGoExpServer(logger: ZcodeGoExpLogger): void {
         }
         mkdirSync(join(workspacePath, ".opc", "exp"), { recursive: true });
         if (
-          !forwardToRenderer({
-            requestId: fileTag,
-            workspacePath,
-            content,
-            fileTag,
-            ...(parsed.model ? { model: parsed.model } : {}),
-          })
+          !forwardToRenderer(
+            {
+              requestId: fileTag,
+              workspacePath,
+              content,
+              fileTag,
+              ...(parsed.model ? { model: parsed.model } : {}),
+            },
+            logger,
+          )
         ) {
           res.writeHead(503, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: "no window" }));
