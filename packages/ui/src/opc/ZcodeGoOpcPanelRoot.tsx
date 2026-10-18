@@ -103,6 +103,7 @@ export function ZcodeGoOpcPanelRoot({
   const workspacePath = useOpcStore((s) => s.workspacePath);
   const bodies = useOpcStore((s) => s.bodies);
   const inbox = useOpcStore((s) => s.inbox);
+  const employeeMemoryIndexes = useOpcStore((s) => s.employeeMemoryIndexes);
   const { settings } = useSettings();
   const taskService = useZCodeTaskService(
     workspacePath ?? undefined,
@@ -288,27 +289,8 @@ export function ZcodeGoOpcPanelRoot({
       taskService,
       resolveRoleBody,
       resolveSkillBody,
-      // 员工持久记忆绑定（桌面 main：.opc 目录 + ~/.zcode 链接 + 索引回读）
-      ensureEmployeeMemory: async (employeeId) => {
-        const invoke = (window as unknown as {
-          zcode?: {
-            zcodeGoOpcEnsureEmployeeMemory?: (payload: {
-              workspacePath: string;
-              employeeId: string;
-            }) => Promise<{ ok: boolean; memoryIndex: string | null; error?: string }>;
-          };
-        }).zcode?.zcodeGoOpcEnsureEmployeeMemory;
-        if (!invoke) {
-          logger.warn("[zcode-go][opc] 员工记忆绑定通道缺失（preload 过旧），跳过记忆注入");
-          return { memoryIndex: null };
-        }
-        const result = await invoke({ workspacePath, employeeId });
-        if (!result.ok) {
-          logger.warn("[zcode-go][opc] 员工记忆绑定失败", result.error ?? "");
-        }
-        return { memoryIndex: result.memoryIndex };
-      },
-      onMutations: (mutations) => void apply(mutations),
+      // 员工持久记忆索引（GetState 时 main 批量绑定并回读）
+      employeeMemoryIndexes: employeeMemoryIndexes ?? {},      onMutations: (mutations) => void apply(mutations),
     })
       .then((outcome) => {
         if (outcome.mutations.length > 0) void apply(outcome.mutations);

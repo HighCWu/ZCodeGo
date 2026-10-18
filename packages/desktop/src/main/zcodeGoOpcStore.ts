@@ -55,6 +55,7 @@ import {
   writeTextAtomic,
 } from "./zcodeGoOpcFiles.js";
 import { syncOpcPacks } from "./zcodeGoOpcPacks.js";
+import { ensureOpcEmployeeMemory } from "./zcodeGoOpcEmployeeMemory.js";
 
 interface OpcStoreLogger {
   info: (...args: unknown[]) => void;
@@ -434,10 +435,23 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             state = synced;
           }
           const inbox = await scanInbox(workspaceRoot);
+          // 员工持久记忆：面板打开即批量绑定（.opc 目录 + ~/.zcode 链接）
+          // 并回读各员工 MEMORY.md 索引——绑定副作用全部留在 main。
+          const employeeMemoryIndexes: Record<string, string | null> = {};
+          for (const employee of state.employees) {
+            if (employee.status === "departed") continue;
+            const bound = await ensureOpcEmployeeMemory(
+              logger,
+              payload.workspacePath,
+              employee.id,
+            );
+            employeeMemoryIndexes[employee.id] = bound.memoryIndex;
+          }
           return {
             ok: true as const,
             state,
             inbox,
+            employeeMemoryIndexes,
             ...(await readBodies(workspaceRoot, state)),
           };
         } catch (error) {

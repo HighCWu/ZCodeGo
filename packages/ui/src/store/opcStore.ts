@@ -32,6 +32,7 @@ interface ZcodeGoOpcBridge {
     ok: boolean;
     state: OpcCompanyState | null;
     inbox?: OpcInboxItem[];
+    employeeMemoryIndexes?: Record<string, string | null>;
     roleTemplateBodies?: Record<string, string>;
     skillBodies?: Record<string, string>;
     error?: string;
@@ -120,6 +121,8 @@ export interface OpcStoreState {
   state: OpcCompanyState | null;
   bodies: OpcBodies;
   inbox: OpcInboxItem[];
+  /** 员工持久记忆的 MEMORY.md 索引（GetState 时 main 批量绑定并回读） */
+  employeeMemoryIndexes: Record<string, string | null>;
   loading: boolean;
   error: string | null;
   /** 最近一次 apply 触发的晋升（UI toast 用，消费后 clearRecentPromotions）。 */
@@ -164,6 +167,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
   state: null,
   bodies: { roleTemplateBodies: {}, skillBodies: {} },
   inbox: [],
+  employeeMemoryIndexes: {},
   loading: false,
   error: null,
   recentPromotedSkillIds: [],
@@ -192,6 +196,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
             state: null,
             // 失败即清残留：换工作区失败时不能留着上一区的入站条目
             inbox: [],
+          employeeMemoryIndexes: {},
             workspaceKey,
             workspacePath,
             bodies: { roleTemplateBodies: {}, skillBodies: {} },
@@ -203,6 +208,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           error: null,
           state: result.state,
           inbox: result.inbox ?? [],
+          employeeMemoryIndexes: result.employeeMemoryIndexes ?? {},
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},
@@ -247,6 +253,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
         set({
           state: result.state,
           inbox: result.inbox ?? [],
+          employeeMemoryIndexes: result.employeeMemoryIndexes ?? {},
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},

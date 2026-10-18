@@ -8,13 +8,11 @@
  * 目录内一切读写穿透到 .opc。这里只做纯 fs 副作用，纯计算在 shared 的
  * opc-employee-memory.ts（hash 算法与 CLI project-root.ts 双向同步）。
  */
-import { ipcMain } from "electron";
 import { lstat, mkdir, readlink, readFile, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
-  PlatformChannels,
   opcEmployeeCliMemoryDir,
   opcEmployeeMemoryCliLinkPath,
   opcEmployeeMemoryDir,
@@ -73,51 +71,42 @@ function resolveCliStorageRoot(): string {
   return process.env.ZCODE_DATA_BASE_DIR?.trim() || homedir();
 }
 
-export function registerZcodeGoOpcEmployeeMemoryIpc(logger: OpcEmployeeMemoryLogger): void {
-  ipcMain.removeHandler(PlatformChannels.ZcodeGoOpcEnsureEmployeeMemory);
-  ipcMain.handle(
-    PlatformChannels.ZcodeGoOpcEnsureEmployeeMemory,
-    async (
-      _event,
-      payload: { workspacePath: string; employeeId: string },
-    ): Promise<{ ok: boolean; memoryIndex: string | null; linked: boolean; error?: string }> => {
-      try {
-        const workspacePath = resolve(payload.workspacePath);
-        if (!payload.employeeId || /[/\\]/.test(payload.employeeId)) {
-          return { ok: false, memoryIndex: null, linked: false, error: "bad employeeId" };
-        }
-        const memoryDir = opcEmployeeMemoryDir(workspacePath, payload.employeeId);
-        const cliMemoryDir = opcEmployeeCliMemoryDir(workspacePath, payload.employeeId);
-        const linkPath = opcEmployeeMemoryCliLinkPath(
-          resolveCliStorageRoot(),
-          payload.employeeId,
-          workspacePath,
-          opcEmployeeMemoryHash(payload.employeeId, workspacePath),
-        );
-        await mkdir(memoryDir, { recursive: true });
-        await ensureDirLink(linkPath, cliMemoryDir);
-        let memoryIndex: string | null = null;
-        try {
-          memoryIndex = await readFile(join(memoryDir, "MEMORY.md"), "utf8");
-        } catch {
-          memoryIndex = null; // 新员工无索引，prompt 段走「初期」分支
-        }
-        logger.info("[zcode-go] OPC 员工记忆绑定就绪", {
-          employeeId: payload.employeeId,
-          linkPath,
-        });
-        return { ok: true, memoryIndex, linked: true };
-      } catch (error) {
-        logger.warn("[zcode-go] OPC 员工记忆绑定失败", error);
-        return {
-          ok: false,
-          memoryIndex: null,
-          linked: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
-  );
+/**
+ * 确保单个员工的记忆绑定并返回 MEMORY.md 索引（供编排器注入委派 prompt）。
+ * 由 ZcodeGoOpcGetState（既有通道）在 main 内批量调用——不新增 IPC 通道、
+ * 不改 preload（bind 全部副作用留在 main）。
+ */
+export async function ensureOpcEmployeeMemory(
+  logger: OpcEmployeeMemoryLogger,
+  workspacePath: string,
+  employeeId: string,
+): Promise<{ memoryIndex: string | null; bound: boolean }> {
+  try {
+    const ws = resolve(workspacePath);
+    if (!employeeId || /[/\\]/.test(employeeId)) {
+      return { memoryIndex: null, bound: false };
+    }
+    const memoryDir = opcEmployeeMemoryDir(ws, employeeId);
+    const cliMemoryDir = opcEmployeeCliMemoryDir(ws, employeeId);
+    const linkPath = opcEmployeeMemoryCliLinkPath(
+      resolveCliStorageRoot(),
+      employeeId,
+      workspacePath,
+      opcEmployeeMemoryHash(employeeId, workspacePath),
+    );
+    await mkdir(memoryDir, { recursive: true });
+    await ensureDirLink(linkPath, cliMemoryDir);
+    let memoryIndex: string | null = null;
+    try {
+      memoryIndex = await readFile(join(memoryDir, "MEMORY.md"), "utf8");
+    } catch {
+      memoryIndex = null; // 新员工无索引，prompt 段走「初期」分支
+    }
+    return { memoryIndex, bound: true };
+  } catch (error) {
+    logger.warn("[zcode-go] OPC 员工记忆绑定失败", { employeeId, error });
+    return { memoryIndex: null, bound: false };
+  }
 }
 
 /** 预留：员工记忆目录的明文路径（UI 展示/审计用）。 */

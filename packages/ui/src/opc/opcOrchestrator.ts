@@ -27,11 +27,9 @@ export interface OpcOrchestratorDeps {
   taskService: IZCodeTaskService;
   resolveRoleBody: (templateId: string) => string | null;
   resolveSkillBody: (skillId: string) => string | null;
-  /** 员工记忆绑定（桌面 main：.opc 目录 + ~/.zcode 链接）；返回 MEMORY.md 索引。
-   * 缺省（或失败）时仅跳过记忆注入，不阻断派发。 */
-  ensureEmployeeMemory?: (
-    employeeId: string,
-  ) => Promise<{ memoryIndex: string | null }>;
+  /** 员工持久记忆的 MEMORY.md 索引（GetState 时 main 批量绑定并回读，
+   * key=employeeId）。缺员工条目视为索引未建（prompt 走初期分支）。 */
+  employeeMemoryIndexes?: Record<string, string | null>;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
   /**
@@ -146,18 +144,13 @@ export async function dispatchReadyWorkItems(
     // 员工持久记忆：绑定（.opc + ~/.zcode 链接）→ 索引注入 prompt；
     // 会话身份切到员工键（记忆根与会话隔离同键，spec「员工持久记忆」）。
     let memorySection: string | null = null;
-    if (deps.ensureEmployeeMemory && permissionLevel !== "read-only") {
-      // read-only 员工无写工具，记忆维护指令会与权限约束矛盾——不注入不绑定
+    if (permissionLevel !== "read-only") {
+      // read-only 员工无写工具，记忆维护指令会与权限约束矛盾——不注入
       // （其记忆依赖 CLI 管线的自动抽取，spec 边界已注明）。
-      try {
-        const bound = await deps.ensureEmployeeMemory(employee.id);
-        memorySection = buildOpcEmployeeMemoryPromptSection({
-          memoryDirDisplay: `.opc/employees/${employee.id}/memory`,
-          memoryIndex: bound.memoryIndex,
-        });
-      } catch {
-        // 绑定失败静默跳过记忆注入（不阻断派发；面板回调层负责告警）
-      }
+      memorySection = buildOpcEmployeeMemoryPromptSection({
+        memoryDirDisplay: `.opc/employees/${employee.id}/memory`,
+        memoryIndex: deps.employeeMemoryIndexes?.[employee.id] ?? null,
+      });
     }
     const memoryDenylist = buildOpcEmployeeMemoryDenylist(
       employee.id,

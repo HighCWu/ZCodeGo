@@ -125,9 +125,12 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      workspace 不支持自动绑定（记忆退回 `~/.zcode`，功能保留）。
    - **会话身份**：员工会话 `workspaceIdentity = opc-employee/<employeeId>`
      （与 AGENTS.md 的 Workspace Identity 规则同构，记忆与会话隔离同键）。
-   - **召回（注入）**：委派 prompt 尾部追加「持久记忆」段——员工 MEMORY.md
-     索引全文 + 维护指令（重要事实写入记忆文件并同步索引行；这是员工自己的
-     长期记忆，跨任务保留）。CLI 记忆管线的 default-index 注入与本段并存不冲突。
+   - **绑定时点与召回（注入）**：绑定挂在 **ZcodeGoOpcGetState 既有通道**
+     （面板打开时 main 批量绑定全部在职员工并回读各员工 MEMORY.md 索引，
+     返回 `employeeMemoryIndexes`）——零新 IPC 通道、零 preload 改动、
+     副作用全部留在 main。委派 prompt 尾部追加「持久记忆」段（员工 MEMORY.md
+     索引全文 + 维护指令）；read-only 员工跳过（无写工具，维护指令与权限
+     约束矛盾）。CLI 记忆管线的 default-index 注入与本段并存不冲突。
    - **隔离**：员工 toolDenylist 动态追加——其它员工 `.opc/employees/<otherId>/**`
      的 Read/Write/Edit 拒绝；`.opc/company.json` 等公司状态的写拒绝。员工写
      自己记忆目录属 workspace 内写，天然允许。
