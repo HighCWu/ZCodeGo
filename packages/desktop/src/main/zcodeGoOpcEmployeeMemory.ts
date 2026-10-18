@@ -10,7 +10,7 @@
  * opc-employee-memory.ts（hash 算法与 CLI project-root.ts 双向同步）。
  */
 import { cp, mkdir, readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { createHash } from "node:crypto";
 import {
   opcEmployeeMemoryIdentity,
@@ -63,8 +63,11 @@ export async function ensureOpcEmployeeMemory(
   employeeId: string,
 ): Promise<OpcEmployeeMemoryEnsureResult> {
   try {
-    const ws = resolve(workspacePath);
-    if (!employeeId || /[/\\]/.test(employeeId)) {
+    // 用与 services/ui 完全同一份原始字符串（identity 内嵌 ws 的三方一致性
+    // 优先于本地规整化：resolve() 在非规整输入上会算出不同的记忆 hash，
+    // 造成 main 回读与 CLI 写入落到两个 project 目录）。仅要求绝对路径。
+    const ws = workspacePath;
+    if (!employeeId || /[/\\]/.test(employeeId) || !isAbsolute(ws)) {
       return FAILED_ENSURE;
     }
     // 员工 data dir 沙箱（与 services resolveSpawnEnv 同一解析，路径单一来源）：
@@ -146,9 +149,11 @@ export function opcEmployeeMemoryIndexPath(
   workspacePath: string,
   employeeId: string,
 ): string {
-  const ws = resolve(workspacePath);
+  const ws = workspacePath;
   const sandbox = resolveOpcEmployeeSandbox(ws, opcEmployeeMemoryIdentity(employeeId, ws));
-  if (!sandbox) return join(ws, ".opc", "employees", employeeId, "memory", "MEMORY.md");
+  if (!sandbox || !isAbsolute(ws)) {
+    return join(ws, ".opc", "employees", employeeId, "memory", "MEMORY.md");
+  }
   return join(
     opcEmployeeSandboxMemoryRoot(sandbox.employeeDir, opcEmployeeMemoryHash(employeeId, ws)),
     "MEMORY.md",

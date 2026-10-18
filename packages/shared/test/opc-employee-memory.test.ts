@@ -40,6 +40,9 @@ describe("OPC 员工持久记忆（沙箱解析与隔离策略）", () => {
     expect(resolveOpcEmployeeSandbox("/ws/a", undefined)).toBeNull();
     // 缺 :: 分隔 → null
     expect(resolveOpcEmployeeSandbox("/ws/a", "opc-employee/noid")).toBeNull();
+    // "." / ".." 员工 id 会让 data 根逃出 employees/ 一层 → null（防构造性穿越）
+    expect(resolveOpcEmployeeSandbox("/ws/a", "opc-employee//ws/a::.")).toBeNull();
+    expect(resolveOpcEmployeeSandbox("/ws/a", "opc-employee//ws/a::..")).toBeNull();
   });
 
   it("记忆根在员工 data dir 的 CLI 布局下（data dir 沙箱形态）", () => {

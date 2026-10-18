@@ -152,7 +152,10 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      OPC 技能正文工作；subagent profiles 由 host 侧从主实例准备后注入，不受影响）；
      mailbox 根仍随 HOME（跨 agent 信箱不隔离）；员工会话不参与 zcode-go 的
      silent fork 轮换（会话体不在主库，触发链在观察点直接跳过；compaction
-     本身仍由 CLI 原生执行，仅失去 fork 式历史瘦身优化）。
+     本身仍由 CLI 原生执行，仅失去 fork 式历史瘦身优化）；记忆隔离 denylist
+     覆盖 Read/Write/Edit 工具，Bash 类工具（cat 等读其它员工目录）不受
+     toolDenylist 拦截——同一工作区内的员工间为软隔离（与委派 prompt 约束
+     叠加），跨工作区为物理隔离。
    - **反思与分层凝练（记忆金字塔 L2/L4）**：工作项进入 done（有 assignee、
      非 read-only、距上次反思 ≥6h 节流）时，以员工自己身份派发一轮**反思
      会话**（临时 headless，委派 prompt 即反思任务）：通读记忆目录 → 把

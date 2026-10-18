@@ -37,6 +37,9 @@ export function resolveOpcEmployeeSandbox(
   const ws = rest.slice(0, sepIdx);
   const employeeId = rest.slice(sepIdx + 2);
   if (!ws || !employeeId || ws !== workspacePath) return null;
+  // 员工 id 拼进 data 根路径："." 与 ".." 会让目录逃出 employees/ 一层
+  //（系统生成的 id 不会如此，防构造性穿越）。
+  if (employeeId === "." || employeeId === "..") return null;
   const employeeDir = `${workspacePath}/.opc/employees/${employeeId}`;
   return {
     employeeId,
