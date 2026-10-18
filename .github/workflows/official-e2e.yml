@@ -412,7 +412,7 @@ jobs:
               sleep 2
               export ZCODE_GO_E2E_DISPLAY="$DISPLAY"
               rc=0
-              for e in goal-verify silent-fork-auto lazy-history takeover marketplace-install fresh-model opc; do
+              for e in goal-verify silent-fork-auto lazy-history takeover marketplace-install fresh-model opc opc-employee-memory; do
                 echo "== E2E: $e =="
                 # runner 环境临界项偶发：失败重试一次，两轮都挂才计 rc
                 node "scripts/e2e/$e-e2e.mjs" || {
@@ -425,7 +425,7 @@ jobs:
             '
           else
             rc=0
-            for e in goal-verify silent-fork-auto lazy-history takeover marketplace-install fresh-model opc; do
+            for e in goal-verify silent-fork-auto lazy-history takeover marketplace-install fresh-model opc opc-employee-memory; do
               echo "== E2E: $e =="
               # runner 环境临界项偶发：失败重试一次，两轮都挂才计 rc
               node "scripts/e2e/$e-e2e.mjs" || {
