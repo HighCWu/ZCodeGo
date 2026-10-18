@@ -281,7 +281,9 @@ for (const [name, id] of [
   );
   assert(
     typeof st.employeeMemoryPaths?.[id] === "string" &&
-      st.employeeMemoryPaths[id].endsWith(join(".zcode", "cli", "memories", "projects", `project-${memoryHash(WORKSPACE, id)}`, "memory")),
+      st.employeeMemoryPaths[id].endsWith(
+        `/.zcode/cli/memories/projects/project-${memoryHash(WORKSPACE, id)}/memory`,
+      ),
     `${name} employeeMemoryPaths 回读记忆根相对路径`,
   );
 }

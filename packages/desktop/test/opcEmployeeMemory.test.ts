@@ -18,22 +18,14 @@ afterAll(async () => {
 
 const logger = { info: () => {}, warn: () => {} };
 
-/** 员工记忆根（<ws>/.opc/employees/<id>/.zcode/cli/memories/projects/project-<hash>/memory）*/
+/** 员工记忆根（<ws>/.opc/employees/<id>/.zcode/cli/memories/projects/project-<hash>/memory）。
+ * 路径拼接与 shared 同款手写 POSIX 尾段（ws 原样 + / 分隔）：main 的
+ * memoryDirDisplay 正是记忆根去掉 ws 前缀的相对路径，Windows 上 join() 的
+ * 反斜杠会与之失配。 */
 function memoryRoot(ws: string, employeeId: string): string {
   const identity = opcEmployeeMemoryIdentity(employeeId, ws);
   const hash = createHash("sha256").update(identity).digest("hex").slice(0, 16);
-  return join(
-    ws,
-    ".opc",
-    "employees",
-    employeeId,
-    ".zcode",
-    "cli",
-    "memories",
-    "projects",
-    `project-${hash}`,
-    "memory",
-  );
+  return `${ws}/.opc/employees/${employeeId}/.zcode/cli/memories/projects/project-${hash}/memory`;
 }
 
 describe("员工记忆绑定（data dir 沙箱形态）", () => {

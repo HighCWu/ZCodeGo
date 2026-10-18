@@ -103,6 +103,11 @@ export function observeZcodeGoSilentForkFrame(
     break;
   }
   if (!compactSucceeded) return;
+  // 携带 workspaceIdentity 的会话（远端 SSH/WSL、OPC 员工）会话体不在本地主库：
+  // 静默 fork 事务按 sessionId 查主库必然良性拒绝（no compaction boundary），
+  // 白白多一次 host→main 往返——源头不 arm（与 synthetic history 的 identity
+  // 守卫同一判据）。compaction 本身仍由 CLI 原生执行，不受影响。
+  if (workspace.workspaceIdentity?.trim()) return;
 
   if (!armedSessions.has(sessionId)) {
     armedSessions.set(sessionId, {

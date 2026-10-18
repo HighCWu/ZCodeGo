@@ -377,3 +377,57 @@ test("轮换去重泄漏回归：首次 arm 通知成功后，同会话的后续
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("identity 会话（远端/OPC 员工）不 arm：会话体不在本地主库，触发链源头跳过", async () => {
+  resetZcodeGoSilentForkForTest();
+  resetZcodeGoSessionRedirectCacheForTest();
+  try {
+    const S = "sess_identity_skip01";
+    const notified: string[] = [];
+    setZcodeGoSilentForkDelegate({
+      notifyArm: (p) => notified.push(p.sessionId),
+      checkQuiescence: async () => true,
+      log: () => {},
+    });
+    const compactWire = {
+      topic: `conversation/${S}`,
+      subscriptionId: "sub",
+      deliveryKind: "online",
+      kind: "complete",
+      logicalFrameId: "lf1",
+      logicalFrameOrdinal: 1,
+      frame: {
+        topic: `conversation/${S}`,
+        subscriptionId: "sub",
+        fromSeq: 0,
+        toSeq: 1,
+        sentAt: 0,
+        payload: {
+          kind: "deltas",
+          deltas: [
+            {
+              op: "row.appended",
+              row: { kind: "timelineMarker", marker: { type: "compact", status: "success" } },
+            },
+          ],
+        },
+      },
+    } as never;
+    // 远端与 OPC 员工两种 identity 形态：观测点直接跳过，不 arm、不 notify
+    observeZcodeGoSilentForkFrame(
+      { workspacePath: "/w", workspaceIdentity: "remote-ws-1" },
+      compactWire,
+    );
+    observeZcodeGoSilentForkFrame(
+      { workspacePath: "/w", workspaceIdentity: "opc-employee//w::emp-1" },
+      compactWire,
+    );
+    backdateZcodeGoSilentForkArmedAtForTest(S, 10_000);
+    await checkArmedSessionsAndTrigger();
+    assert.equal(notified.length, 0, "identity 会话静默 fork 不触发（源头不 arm）");
+  } finally {
+    setZcodeGoSilentForkDelegate(null);
+    resetZcodeGoSilentForkForTest();
+    resetZcodeGoSessionRedirectCacheForTest();
+  }
+});
