@@ -95,8 +95,10 @@ export async function ensureOpcEmployeeMemory(
     if (!employeeId || /[/\\]/.test(employeeId)) {
       return { memoryIndex: null, bound: false };
     }
-    const memoryDir = opcEmployeeMemoryDir(ws, employeeId);
-    const cliMemoryDir = opcEmployeeCliMemoryDir(ws, employeeId);
+    // 链接目标 = 员工目录本体：CLI 记忆根（<link>/memory）穿透后正是
+    // .opc/employees/<id>/memory/——注入读取与 CLI 写入同一物理位置。
+    const employeeDir = join(ws, ".opc", "employees", employeeId);
+    const memoryDir = join(employeeDir, "memory");
     const linkPath = opcEmployeeMemoryCliLinkPath(
       resolveCliStorageRoot(),
       employeeId,
@@ -104,7 +106,7 @@ export async function ensureOpcEmployeeMemory(
       opcEmployeeMemoryHash(employeeId, workspacePath),
     );
     await mkdir(memoryDir, { recursive: true });
-    await ensureDirLink(linkPath, cliMemoryDir);
+    await ensureDirLink(linkPath, employeeDir);
     let memoryIndex: string | null = null;
     try {
       memoryIndex = await readFile(join(memoryDir, "MEMORY.md"), "utf8");

@@ -379,5 +379,5 @@ try {
 } catch {
   /* 已退出 */
 }
-rmSync(ws, { recursive: true, force: true });
+// rmSync(ws, { recursive: true, force: true }); // 诊断期保留现场
 process.exit(0);
