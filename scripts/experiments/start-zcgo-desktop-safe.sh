@@ -42,6 +42,13 @@ ZCODE_PREVIEW_IDENTITY=1 npx tsup >>"$STATE_DIR/desktop-launch.log" 2>&1 || fail
 ZCODE_PREVIEW_IDENTITY=1 npx vite build >>"$STATE_DIR/desktop-launch.log" 2>&1 || fail "vite 构建失败（见 $STATE_DIR/desktop-launch.log）"
 grep -q "EXP_MODE" out/main/index.js || fail "构建产物不含 EXP_MODE 共存逻辑——产物与源码不符"
 grep -q "ZCODE_GO_EXP_HTTP" out/main/index.js || fail "构建产物不含试验接口挂载"
+# sandbox preload 守卫：preload bundle 不得 require node 内置模块（shared
+# barrel 若被塞入 node 依赖会让 preload 整体加载失败、桌面 IPC 全灭——
+# 2026-10-18 员工记忆模块 node:path/crypto 事故）。白名单=Electron 官方四件。
+if grep -qE 'require\\("(assert|buffer|child_process|cluster|crypto|dgram|dns|domain|events|fs|http|https|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|timers|tls|trace_events|tty|url|util|v8|vm|worker_threads|zlib)"\\)' out/preload/index.cjs 2>/dev/null; then
+  fail "preload bundle 含 node 内置 require——shared barrel 被塞入 node 依赖（sandbox preload 禁止）"
+fi
+log "preload 守卫通过：无 node 内置 require"
 log "产物校验通过：out/main/index.js 含 EXP_MODE 与试验接口逻辑"
 
 # 5) 组装（ensure 幂等）并验证组装产物同样含 EXP_MODE

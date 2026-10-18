@@ -10,7 +10,9 @@
  * 一致（sha256(keySource) 前 16 位十六进制，slug 固定 "project"）——CLI
  * 侧不可修改，本文件改动必须双向同步注释。
  */
-import { join } from "node:path";
+// 无任何 import：本文件经 shared barrel 被 sandbox preload 打包，node 内置
+// 模块（path/crypto/...）一律不可用——路径拼接用手写 POSIX 风格（node fs 在
+// Windows 同样接受 / 分隔符）。
 
 const MEMORY_IDENTITY_PREFIX = "opc-employee/";
 
@@ -48,24 +50,17 @@ export function opcEmployeeMemoryCliLinkPath(
   workspacePath: string,
   memoryHash: string,
 ): string {
-  return join(
-    home,
-    ".zcode",
-    "cli",
-    "memories",
-    "projects",
-    opcEmployeeMemoryProjectDirName(memoryHash),
-  );
+  return `${home}/.zcode/cli/memories/projects/${opcEmployeeMemoryProjectDirName(memoryHash)}`;
 }
 
 /** 员工记忆的物理目录（.opc 内，随工作区/公司包走）。 */
 export function opcEmployeeMemoryDir(workspacePath: string, employeeId: string): string {
-  return join(workspacePath, ".opc", "employees", employeeId, "memory");
+  return `${workspacePath}/.opc/employees/${employeeId}/memory`;
 }
 
 /** 链接目标目录（CLI 管线的记忆根；CLI 会在其下使用 memory/ 结构）。 */
 export function opcEmployeeCliMemoryDir(workspacePath: string, employeeId: string): string {
-  return join(workspacePath, ".opc", "employees", employeeId, "cli-memory");
+  return `${workspacePath}/.opc/employees/${employeeId}/cli-memory`;
 }
 
 /**

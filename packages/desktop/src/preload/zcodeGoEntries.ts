@@ -3,7 +3,9 @@
  * import + 对象内一行 spread）。全部经 ipcRenderer.invoke/on 与 main 通讯。
  */
 import type { Electron } from "electron";
-import { PlatformChannels } from "@zcode/shared";
+// 子路径直取纯常量文件：shared barrel 会被打满 node 依赖，sandbox preload
+// 禁用全部 node 内置模块（node:path/crypto 均实测崩 preload → window.zcode 全灭）。
+import { PlatformChannels } from "@zcode/shared/channels";
 
 export function installZcodeGoPreloadEntries({
   ipcRenderer,
