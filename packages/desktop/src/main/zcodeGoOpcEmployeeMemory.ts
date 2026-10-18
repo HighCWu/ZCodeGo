@@ -8,7 +8,7 @@
  * 目录内一切读写穿透到 .opc。这里只做纯 fs 副作用，纯计算在 shared 的
  * opc-employee-memory.ts（hash 算法与 CLI project-root.ts 双向同步）。
  */
-import { lstat, mkdir, readlink, readFile, rm, symlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, readlink, readFile, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -76,11 +76,20 @@ function resolveCliStorageRoot(): string {
  * 由 ZcodeGoOpcGetState（既有通道）在 main 内批量调用——不新增 IPC 通道、
  * 不改 preload（bind 全部副作用留在 main）。
  */
+export interface OpcEmployeeMemoryEnsureResult {
+  memoryIndex: string | null;
+  /** persona.md 摘要（前 ~500 字，委派 prompt 的人格注入段） */
+  personaDigest: string | null;
+  /** 原则文件 name 清单（frontmatter type: principle） */
+  principles: string[];
+  bound: boolean;
+}
+
 export async function ensureOpcEmployeeMemory(
   logger: OpcEmployeeMemoryLogger,
   workspacePath: string,
   employeeId: string,
-): Promise<{ memoryIndex: string | null; bound: boolean }> {
+): Promise<OpcEmployeeMemoryEnsureResult> {
   try {
     const ws = resolve(workspacePath);
     if (!employeeId || /[/\\]/.test(employeeId)) {
@@ -102,10 +111,34 @@ export async function ensureOpcEmployeeMemory(
     } catch {
       memoryIndex = null; // 新员工无索引，prompt 段走「初期」分支
     }
-    return { memoryIndex, bound: true };
+    let personaDigest: string | null = null;
+    try {
+      personaDigest = (await readFile(join(memoryDir, "persona.md"), "utf8")).slice(0, 600);
+    } catch {
+      personaDigest = null; // 无画像文件
+    }
+    // 原则文件清单：读各 md 的 frontmatter type（principle 为 L2 归纳产物）
+    const principles: string[] = [];
+    try {
+      const files = (await readdir(memoryDir)).filter((f) => f.endsWith(".md") && f !== "MEMORY.md" && f !== "persona.md");
+      for (const file of files.slice(0, 200)) {
+        try {
+          const body = await readFile(join(memoryDir, file), "utf8");
+          if (/^---[\s\S]*?type:\s*principle/m.test(body)) {
+            const name = /^name:\s*(.+)$/m.exec(body)?.[1]?.trim() ?? file.replace(/\.md$/, "");
+            principles.push(name);
+          }
+        } catch {
+          /* 单文件读失败跳过 */
+        }
+      }
+    } catch {
+      /* 目录读失败按无原则处理 */
+    }
+    return { memoryIndex, personaDigest, principles, bound: true };
   } catch (error) {
     logger.warn("[zcode-go] OPC 员工记忆绑定失败", { employeeId, error });
-    return { memoryIndex: null, bound: false };
+    return { memoryIndex: null, personaDigest: null, principles: [], bound: false };
   }
 }
 

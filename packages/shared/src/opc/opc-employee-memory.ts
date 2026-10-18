@@ -86,6 +86,42 @@ export function buildOpcEmployeeMemoryDenylist(
   return denied;
 }
 
+/** 反思轮的节流窗（同一员工 6h 内只跑一次）。 */
+export const OPC_REFLECTION_THROTTLE_MS = 6 * 60 * 60 * 1000;
+
+/** 节流判定（纯函数）：距上次反思不足节流窗则跳过。 */
+export function shouldRunOpcReflection(input: {
+  lastReflectAtMs: number;
+  nowMs: number;
+  throttleMs?: number;
+}): boolean {
+  const throttle = input.throttleMs ?? OPC_REFLECTION_THROTTLE_MS;
+  return input.nowMs - input.lastReflectAtMs >= throttle;
+}
+
+/** persona 注入摘要上限（字符）。 */
+export const OPC_PERSONA_DIGEST_LIMIT = 500;
+
+/**
+ * 委派 prompt 的「人格画像」段（金字塔 L4 注入：风格先于事实）。
+ * persona 摘要缺失（新员工）时不注入——人格由经历长周期沉淀，不预设。
+ */
+export function buildOpcPersonaPromptSection(personaDigest: string | null): string | null {
+  const digest = personaDigest?.trim();
+  if (!digest) return null;
+  const clipped =
+    digest.length > OPC_PERSONA_DIGEST_LIMIT
+      ? digest.slice(0, OPC_PERSONA_DIGEST_LIMIT) + "…"
+      : digest;
+  return [
+    "## 你的行事风格画像（来自长期工作的沉淀）",
+    "",
+    clipped,
+    "",
+    "（以上画像由你的历史工作沉淀而来，供参考而非硬约束；发现与当前任务不符时以任务为准。）",
+  ].join("\n");
+}
+
 /**
  * 委派 prompt 的「持久记忆」段：MEMORY.md 索引全文 + 维护指令。
  * 索引缺失（新员工）时仅声明目录与职责。
@@ -110,3 +146,60 @@ export function buildOpcEmployeeMemoryPromptSection(input: {
     "收口时写入记忆目录并同步 MEMORY.md 索引行；已存在但发生变化的记忆要更新而非新建。",
   ].join("\n");
 }
+
+
+/** 反思轮的输入：记忆清单与返工信号（由触发方从 state 组装）。 */
+export interface OpcReflectionInput {
+  employeeName: string;
+  /** MEMORY.md 索引全文（可能为空=早期阶段） */
+  memoryIndex: string | null;
+  /** 记忆目录里的原则文件名清单（*.md 中 type: principle 的 name 集合） */
+  existingPrinciples: readonly string[];
+  /** 本轮收口工作项的返工次数合计（负反馈信号；0 表示无返工） */
+  reworkCount: number;
+  /** 触发本轮反思的工作项主题（一条一行） */
+  finishedTopics: readonly string[];
+}
+
+/**
+ * 反思会话的委派 prompt（金字塔 L2 归纳 + L4 人格更新，员工自己执行）：
+ * 通读记忆目录 → 重复模式归纳为原则（≥2 条证据）→ 更新被证实/证伪的原则 →
+ * 更新 persona 行为倾向 → 同步 MEMORY.md。产出全部经 Write/Edit 落盘。
+ */
+export function buildOpcReflectionPrompt(input: OpcReflectionInput): string {
+  const principles = input.existingPrinciples.length
+    ? input.existingPrinciples.map((p) => "- " + p).join("\n")
+    : "（尚无原则文件——出现重复模式时建立第一批）";
+  const reworkNote =
+    input.reworkCount > 0
+      ? "\n本轮收口的工作项中有 " + input.reworkCount + " 次返工记录——请重点检查相关记忆/原则是否存在误导，需要修正就修正。"
+      : "";
+  return [
+    "（" + input.employeeName + "的记忆整理时间）这是你自己的记忆反思轮：通读你的记忆目录，",
+    "把重复出现的模式归纳为原则，并更新你的行事风格画像。这是你的长期记忆维护，放心写。",
+    "",
+    "【你的 MEMORY.md 索引（当前内容）】",
+    input.memoryIndex?.trim() || "（空——尚无记忆文件）",
+    "",
+    "【已有原则文件】",
+    principles,
+    "",
+    "【本轮收口的工作项】",
+    ...input.finishedTopics.map((t) => "- " + t),
+    reworkNote,
+    "",
+    "任务：",
+    "1. 通读记忆目录全部文件（含 frontmatter type: principle 的原则文件）。",
+    "2. 归纳：同一条经验/模式在 ≥2 处出现时，写成一条原则文件（type: principle，",
+    "   正文用 [[双链]] 引用支持它的证据记忆；不足两条证据不要造原则）。",
+    "3. 修订：已有原则被新经历证实（补证据链接）或证伪（改写/删除）时就地更新。",
+    "4. 画像：persona.md 的行为倾向小节按最新经历更新（每条倾向后注明依据；",
+    "   新倾向标「暂定」，被再次证实后升「确认」）。",
+    "5. 同步 MEMORY.md 索引（新增/变更的行）。",
+    "6. 节制：没有真正的模式就不要制造原则；这是整理，不是创作。",
+    "",
+    "全部产出用 Write/Edit 写入你的记忆目录（这是你唯一允许写的位置），",
+    "完成后回复 done 与一句话变更摘要。",
+  ].join("\n");
+}
+

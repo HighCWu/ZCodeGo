@@ -12,6 +12,7 @@ import {
   buildOpcToolDenylist,
   buildOpcEmployeeMemoryDenylist,
   buildOpcEmployeeMemoryPromptSection,
+  buildOpcPersonaPromptSection,
   isOpcWorkItemRunnable,
   opcEmployeeMemoryIdentity,
   type OpcCompanyState,
@@ -30,6 +31,10 @@ export interface OpcOrchestratorDeps {
   /** 员工持久记忆的 MEMORY.md 索引（GetState 时 main 批量绑定并回读，
    * key=employeeId）。缺员工条目视为索引未建（prompt 走初期分支）。 */
   employeeMemoryIndexes?: Record<string, string | null>;
+  /** 员工人格画像摘要（persona.md 前 ~600 字，GetState 回读） */
+  employeePersonaDigests?: Record<string, string | null>;
+  /** 员工原则文件 name 清单（L2 归纳产物；反思轮的既有原则清单） */
+  employeePrinciples?: Record<string, string[]>;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
   /**
@@ -143,6 +148,9 @@ export async function dispatchReadyWorkItems(
     }
     // 员工持久记忆：绑定（.opc + ~/.zcode 链接）→ 索引注入 prompt；
     // 会话身份切到员工键（记忆根与会话隔离同键，spec「员工持久记忆」）。
+    const personaSection = buildOpcPersonaPromptSection(
+      deps.employeePersonaDigests?.[employee.id] ?? null,
+    );
     let memorySection: string | null = null;
     if (permissionLevel !== "read-only") {
       // read-only 员工无写工具，记忆维护指令会与权限约束矛盾——不注入
@@ -168,7 +176,9 @@ export async function dispatchReadyWorkItems(
       await taskService.sendPrompt({
         taskId: created.taskId,
         traceId: workItem.id,
-        content: memorySection ? `${prompt}\n\n${memorySection}` : prompt,
+        content:
+          (personaSection ? personaSection + "\n\n" : "") +
+          (memorySection ? `${prompt}\n\n${memorySection}` : prompt),
         // 会话级硬约束：按员工权限级别隐藏写入/执行类工具（无界面会话由我们
         // 创建，参数即真约束；手动 composer 路径仍为委派 prompt 级边界）。
         // 追加员工记忆隔离：其它员工记忆目录读写拒绝 + 公司状态写保护。

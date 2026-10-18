@@ -33,6 +33,8 @@ interface ZcodeGoOpcBridge {
     state: OpcCompanyState | null;
     inbox?: OpcInboxItem[];
     employeeMemoryIndexes?: Record<string, string | null>;
+    employeePersonaDigests?: Record<string, string | null>;
+    employeePrinciples?: Record<string, string[]>;
     roleTemplateBodies?: Record<string, string>;
     skillBodies?: Record<string, string>;
     error?: string;
@@ -123,6 +125,10 @@ export interface OpcStoreState {
   inbox: OpcInboxItem[];
   /** 员工持久记忆的 MEMORY.md 索引（GetState 时 main 批量绑定并回读） */
   employeeMemoryIndexes: Record<string, string | null>;
+  /** 员工人格画像摘要（persona.md 前 ~600 字；反思轮沉淀） */
+  employeePersonaDigests: Record<string, string | null>;
+  /** 员工原则文件 name 清单（L2 归纳产物；反思 prompt 的既有原则清单） */
+  employeePrinciples: Record<string, string[]>;
   loading: boolean;
   error: string | null;
   /** 最近一次 apply 触发的晋升（UI toast 用，消费后 clearRecentPromotions）。 */
@@ -168,6 +174,8 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
   bodies: { roleTemplateBodies: {}, skillBodies: {} },
   inbox: [],
   employeeMemoryIndexes: {},
+  employeePersonaDigests: {},
+  employeePrinciples: {},
   loading: false,
   error: null,
   recentPromotedSkillIds: [],
@@ -209,6 +217,8 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           state: result.state,
           inbox: result.inbox ?? [],
           employeeMemoryIndexes: result.employeeMemoryIndexes ?? {},
+          employeePersonaDigests: result.employeePersonaDigests ?? {},
+          employeePrinciples: result.employeePrinciples ?? {},
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},
@@ -254,6 +264,8 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           state: result.state,
           inbox: result.inbox ?? [],
           employeeMemoryIndexes: result.employeeMemoryIndexes ?? {},
+          employeePersonaDigests: result.employeePersonaDigests ?? {},
+          employeePrinciples: result.employeePrinciples ?? {},
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},

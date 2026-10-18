@@ -438,6 +438,8 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           // 员工持久记忆：面板打开即批量绑定（.opc 目录 + ~/.zcode 链接）
           // 并回读各员工 MEMORY.md 索引——绑定副作用全部留在 main。
           const employeeMemoryIndexes: Record<string, string | null> = {};
+          const employeePersonaDigests: Record<string, string | null> = {};
+          const employeePrinciples: Record<string, string[]> = {};
           for (const employee of state.employees) {
             if (employee.status === "departed") continue;
             const bound = await ensureOpcEmployeeMemory(
@@ -446,12 +448,16 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
               employee.id,
             );
             employeeMemoryIndexes[employee.id] = bound.memoryIndex;
+            employeePersonaDigests[employee.id] = bound.personaDigest;
+            employeePrinciples[employee.id] = bound.principles;
           }
           return {
             ok: true as const,
             state,
             inbox,
             employeeMemoryIndexes,
+            employeePersonaDigests,
+            employeePrinciples,
             ...(await readBodies(workspaceRoot, state)),
           };
         } catch (error) {

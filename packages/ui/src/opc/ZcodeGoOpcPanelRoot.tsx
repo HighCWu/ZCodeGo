@@ -6,7 +6,7 @@
  * window CustomEvent("zcode-go:opc-open") 即可唤起（草稿驾驶舱/快捷键/菜单）。
  * 全部写路径走 opcStore.apply（IPC → main reducer → 广播），本组件零本地状态事实。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Building2 } from "lucide-react";
 import {
   Dialog,
@@ -51,6 +51,13 @@ import {
   countOrchestratable,
   dispatchReadyWorkItems,
 } from "./opcOrchestrator.js";
+import {
+  buildOpcReflectionPrompt,
+  buildOpcToolDenylist,
+  opcEmployeeMemoryIdentity,
+  shouldRunOpcReflection,
+  OPC_REFLECTION_THROTTLE_MS,
+} from "@zcode/shared";
 import { useZCodeTaskService } from "@/hooks/useZCodeTaskService.js";
 import { useSettings } from "@/hooks/useSettingService.js";
 import {
@@ -104,12 +111,21 @@ export function ZcodeGoOpcPanelRoot({
   const bodies = useOpcStore((s) => s.bodies);
   const inbox = useOpcStore((s) => s.inbox);
   const employeeMemoryIndexes = useOpcStore((s) => s.employeeMemoryIndexes);
+  const employeePersonaDigests = useOpcStore((s) => s.employeePersonaDigests);
+  const employeePrinciples = useOpcStore((s) => s.employeePrinciples);
   const { settings } = useSettings();
   const taskService = useZCodeTaskService(
     workspacePath ?? undefined,
     undefined,
     workspaceIdentity ?? undefined,
   );
+  // 员工记忆反思轮（金字塔 L2/L4）：工作项收口 → 员工身份反思会话
+  //（归纳原则 + 更新 persona），6h 节流（面板会话级内存）。
+  const reflectStateRef = useRef<{
+    lastAt: Map<string, number>;
+    seenDone: Set<string>;
+  }>({ lastAt: new Map(), seenDone: new Set() });
+  const workItems = state?.workItems;
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>("kanban");
   const [workItemDialog, setWorkItemDialog] =
@@ -120,6 +136,67 @@ export function ZcodeGoOpcPanelRoot({
     null,
   );
   const [reworkDialog, setReworkDialog] = useState<OpcWorkItem | null>(null);
+
+  // 员工记忆反思轮触发：检测「新进入 done」的工作项 → 员工身份反思会话
+  //（归纳原则到 memory/principle、更新 persona.md；fire-and-forget——产物
+  // 是记忆文件，无轻量完成判定）。6h 节流按员工（内存级，面板会话有效）。
+  useEffect(() => {
+    if (!workspacePath || !workItems) return;
+    const { lastAt, seenDone } = reflectStateRef.current;
+    const now = Date.now();
+    for (const item of workItems) {
+      if (item.status !== "done") continue;
+      const doneKey = item.id + "@" + (item.updatedAt ?? "");
+      if (seenDone.has(doneKey)) continue;
+      seenDone.add(doneKey);
+      if (seenDone.size > 200) {
+        seenDone.clear();
+      }
+      const employee = state?.employees.find((e) => e.id === item.assigneeId);
+      if (
+        !employee ||
+        employee.status !== "active" ||
+        employee.permissionLevel === "read-only"
+      ) {
+        continue;
+      }
+      if (!shouldRunOpcReflection({ lastReflectAtMs: lastAt.get(employee.id) ?? 0, nowMs: now })) {
+        continue;
+      }
+      lastAt.set(employee.id, now);
+      const reworkCount = item.reworkNotes?.length ?? 0;
+      const prompt = buildOpcReflectionPrompt({
+        employeeName: employee.name,
+        memoryIndex: employeeMemoryIndexes?.[employee.id] ?? null,
+        existingPrinciples: employeePrinciples?.[employee.id] ?? [],
+        reworkCount,
+        finishedTopics: [item.title],
+      });
+      void (async () => {
+        try {
+          const created = await taskService.createTask({
+            workspacePath,
+            workspaceIdentity: opcEmployeeMemoryIdentity(employee.id, workspacePath),
+            v4Create: true,
+            deferPersistenceUntilFirstPrompt: true,
+            permissionScope: "session",
+          });
+          await taskService.sendPrompt({
+            taskId: created.taskId,
+            traceId: `opc-reflect:${item.id}:${now}`,
+            content: prompt,
+            // 反思要读写记忆文件：拒绝 shell/node_repl 等执行通道，保留文件工具
+            toolDenylist: buildOpcToolDenylist("workspace-write"),
+          });
+          logger.info(
+            `[zcode-go][opc] 反思轮已派发：${employee.name}（${item.id}）`,
+          );
+        } catch (error) {
+          logger.warn("[zcode-go][opc] 反思轮派发失败", error);
+        }
+      })();
+    }
+  }, [workItems, workspacePath, state?.employees, employeeMemoryIndexes, employeePrinciples, taskService]);
   const [escalateDialog, setEscalateDialog] = useState<OpcWorkItem | null>(
     null,
   );
@@ -290,7 +367,9 @@ export function ZcodeGoOpcPanelRoot({
       resolveRoleBody,
       resolveSkillBody,
       // 员工持久记忆索引（GetState 时 main 批量绑定并回读）
-      employeeMemoryIndexes: employeeMemoryIndexes ?? {},      onMutations: (mutations) => void apply(mutations),
+      employeeMemoryIndexes: employeeMemoryIndexes ?? {},
+      employeePersonaDigests: employeePersonaDigests ?? {},
+      employeePrinciples: employeePrinciples ?? {},      onMutations: (mutations) => void apply(mutations),
     })
       .then((outcome) => {
         if (outcome.mutations.length > 0) void apply(outcome.mutations);
