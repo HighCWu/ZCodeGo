@@ -25,6 +25,7 @@
  * 的 ~/.zcode-go/electron，同既有 E2E；CI 由 official-e2e.yml 循环拉起）。
  */
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   createHash,
 } from "node:crypto";
@@ -269,6 +270,15 @@ const lisiId = hire.state.employees.find((e) => e.name === "李四").id;
 st = await getState();
 assert(st && st.ok, "二次 GetState（绑定后的回读）");
 
+const nodeRequire = createRequire(import.meta.url);
+function lstatSafe(p) {
+  try {
+    return nodeRequire("node:fs").lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
 // ── 2. 绑定落点断言（fs） ─────────────────────────────────────────────────
 for (const [name, id] of [
   ["老王", laowangId],
@@ -286,14 +296,7 @@ for (const [name, id] of [
   assert(st2 && st2.isSymbolicLink(), `${name} 链接为符号链接（win32 junction 亦报 symlink）`);
 }
 
-const nodeRequire = createRequire(import.meta.url);
-function lstatSafe(p) {
-  try {
-    return nodeRequire("node:fs").lstatSync(p);
-  } catch {
-    return null;
-  }
-}
+
 
 // ── 3. GetState 回读断言（初始态） ────────────────────────────────────────
 for (const [name, id] of [
