@@ -195,7 +195,7 @@ mkdirSync(join(sandboxHome, ".zcode-go"), { recursive: true });
 mkdirSync(WORKSPACE, { recursive: true });
 
 const appArgs = [
-  ELECTRON.startsWith("file:") ? ELECTRON : ELECTRON,
+  ELECTRON,
   `--user-data-dir=${join(sandboxHome, ".zcode-go", PROFILE_TAG)}`,
   `--remote-debugging-port=${CDP_PORT}`,
   ...(process.platform === "linux" ? ["--no-sandbox"] : ["--disable-gpu"]),
@@ -216,9 +216,9 @@ let appProc = spawn(ELECTRON, appArgs, {
   env: appEnv,
   stdio: ["ignore", "pipe", "pipe"],
 });
+const logFs = await import("node:fs/promises");
 async function appendLog(c) {
-  const fs = await import("node:fs");
-  await fs.appendFile(appLog, c).catch(() => {});
+  await logFs.appendFile(appLog, c).catch(() => {});
 }
 appProc.stdout.on("data", appendLog);
 appProc.stderr.on("data", appendLog);
@@ -279,18 +279,17 @@ for (const [name, id] of [
   const link = cliLinkPath(sandboxHome, WORKSPACE, id);
   assert(existsSync(link), `${name} 记忆链接已创建：${link}`);
   assert(
-    readFileSync(join(link, "memory"), { withFileTypes: false }) !== undefined ||
-      existsSync(join(link, "memory")),
+    existsSync(join(link, "memory")),
     `${name} 链接穿透可访问 memory 子目录`,
   );
   const st2 = lstatSafe(link);
   assert(st2 && st2.isSymbolicLink(), `${name} 链接为符号链接（win32 junction 亦报 symlink）`);
 }
 
+const nodeRequire = createRequire(import.meta.url);
 function lstatSafe(p) {
   try {
-    // eslint-disable-next-line no-undef
-    return require("node:fs").lstatSync(p);
+    return nodeRequire("node:fs").lstatSync(p);
   } catch {
     return null;
   }
