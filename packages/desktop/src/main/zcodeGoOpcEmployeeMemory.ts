@@ -12,11 +12,13 @@ import { ipcMain } from "electron";
 import { lstat, mkdir, readlink, readFile, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import {
   PlatformChannels,
   opcEmployeeCliMemoryDir,
   opcEmployeeMemoryCliLinkPath,
   opcEmployeeMemoryDir,
+  opcEmployeeMemoryIdentity,
 } from "@zcode/shared";
 
 export interface OpcEmployeeMemoryLogger {
@@ -55,6 +57,16 @@ async function symlinkDir(targetDir: string, linkPath: string): Promise<void> {
   await symlink(targetDir, linkPath, type);
 }
 
+/** CLI project-root.ts 同款：sha256(keySource) 前 16 位十六进制。
+ * 放在本文件（main）而非 shared：sandbox preload 禁 node 内置模块，
+ * shared barrel 被 preload 打包时不能出现 node:crypto。 */
+function opcEmployeeMemoryHash(employeeId: string, workspacePath: string): string {
+  return createHash("sha256")
+    .update(opcEmployeeMemoryIdentity(employeeId, workspacePath))
+    .digest("hex")
+    .slice(0, 16);
+}
+
 /** CLI 数据根：与 buildHostProcessEnv 的 ZCODE_DATA_BASE_DIR 兜底同源——
  * env 重定向（便携/测试形态）时链接源必须跟着走，否则绑定错位。 */
 function resolveCliStorageRoot(): string {
@@ -76,7 +88,12 @@ export function registerZcodeGoOpcEmployeeMemoryIpc(logger: OpcEmployeeMemoryLog
         }
         const memoryDir = opcEmployeeMemoryDir(workspacePath, payload.employeeId);
         const cliMemoryDir = opcEmployeeCliMemoryDir(workspacePath, payload.employeeId);
-        const linkPath = opcEmployeeMemoryCliLinkPath(resolveCliStorageRoot(), payload.employeeId, workspacePath);
+        const linkPath = opcEmployeeMemoryCliLinkPath(
+          resolveCliStorageRoot(),
+          payload.employeeId,
+          workspacePath,
+          opcEmployeeMemoryHash(payload.employeeId, workspacePath),
+        );
         await mkdir(memoryDir, { recursive: true });
         await ensureDirLink(linkPath, cliMemoryDir);
         let memoryIndex: string | null = null;

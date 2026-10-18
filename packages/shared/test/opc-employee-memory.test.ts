@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   buildOpcEmployeeMemoryDenylist,
@@ -7,7 +6,6 @@ import {
   opcEmployeeCliMemoryDir,
   opcEmployeeMemoryCliLinkPath,
   opcEmployeeMemoryDir,
-  opcEmployeeMemoryHash,
   opcEmployeeMemoryIdentity,
 } from "../src/opc/opc-employee-memory.js";
 
@@ -22,30 +20,10 @@ describe("OPC 员工持久记忆（绑定计算与隔离策略）", () => {
     );
   });
 
-  it("hash 与 CLI project-root.ts 同算法：sha256(keySource) 前 16 位", () => {
-    const expected = createHash("sha256")
-      .update("opc-employee//ws/a::emp-1")
-      .digest("hex")
-      .slice(0, 16);
-    expect(opcEmployeeMemoryHash("emp-1", "/ws/a")).toBe(expected);
-    expect(opcEmployeeMemoryHash("emp-1", "/ws/a")).toMatch(/^[0-9a-f]{16}$/);
-    expect(opcEmployeeMemoryHash("emp-2", "/ws/a")).not.toBe(
-      opcEmployeeMemoryHash("emp-1", "/ws/a"),
-    );
-  });
-
   it("链接源在 ~/.zcode/cli/memories/projects/ 下且键为 project-<hash>", () => {
     const home = "/home/u";
-    const link = opcEmployeeMemoryCliLinkPath(home, "emp-1", "/ws/a");
-    const expected = join(
-      home,
-      ".zcode",
-      "cli",
-      "memories",
-      "projects",
-      `project-${opcEmployeeMemoryHash("emp-1", "/ws/a")}`,
-    );
-    expect(link).toBe(expected);
+    const link = opcEmployeeMemoryCliLinkPath(home, "emp-1", "/ws/a", "abc123");
+    expect(link).toBe(join(home, ".zcode", "cli", "memories", "projects", "project-abc123"));
   });
 
   it("物理目录落在 .opc/employees/<id>/ 且为绝对路径", () => {

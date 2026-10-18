@@ -10,7 +10,6 @@
  * 一致（sha256(keySource) 前 16 位十六进制，slug 固定 "project"）——CLI
  * 侧不可修改，本文件改动必须双向同步注释。
  */
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 const MEMORY_IDENTITY_PREFIX = "opc-employee/";
@@ -19,6 +18,10 @@ const MEMORY_IDENTITY_PREFIX = "opc-employee/";
  * 员工会话的 Workspace Identity（会话隔离与记忆根同键，AGENTS.md 规则）。
  * 含 workspacePath 维度：员工记忆物理上绑定在该工作区的 .opc 内（跨工作区
  * 的同名员工 id 必须落到不同的 ~/.zcode 链接，否则互相覆盖绑定）。
+ *
+ * ⚠️ 本文件被 preload 间接打包（shared barrel → zcodeGoEntries）：sandbox
+ * preload 禁用 node 内置模块——**禁止在本文件 import 任何 node 模块**
+ * （node:crypto 等会让整个 preload 加载失败，window.zcode 全灭）。
  */
 export function opcEmployeeMemoryIdentity(
   employeeId: string,
@@ -27,15 +30,11 @@ export function opcEmployeeMemoryIdentity(
   return `${MEMORY_IDENTITY_PREFIX}${workspacePath}::${employeeId}`;
 }
 
-/** CLI project-root.ts 同款：sha256(keySource) 前 16 位十六进制。 */
-export function opcEmployeeMemoryHash(
-  employeeId: string,
-  workspacePath: string,
-): string {
-  return createHash("sha256")
-    .update(opcEmployeeMemoryIdentity(employeeId, workspacePath))
-    .digest("hex")
-    .slice(0, 16);
+/** CLI project-root.ts 同款的目录键名：`project-<hash>`（hash 由调用方计算：
+ * sha256(keySource) 前 16 位十六进制，CLI project-root.ts 同款；本文件因
+ * preload 打包约束不做 node:crypto 计算）。 */
+export function opcEmployeeMemoryProjectDirName(memoryHash: string): string {
+  return `project-${memoryHash}`;
 }
 
 /**
@@ -47,6 +46,7 @@ export function opcEmployeeMemoryCliLinkPath(
   home: string,
   employeeId: string,
   workspacePath: string,
+  memoryHash: string,
 ): string {
   return join(
     home,
@@ -54,7 +54,7 @@ export function opcEmployeeMemoryCliLinkPath(
     "cli",
     "memories",
     "projects",
-    `project-${opcEmployeeMemoryHash(employeeId, workspacePath)}`,
+    opcEmployeeMemoryProjectDirName(memoryHash),
   );
 }
 

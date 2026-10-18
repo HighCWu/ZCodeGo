@@ -2,7 +2,9 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, lstat } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { ensureDirLink } from "../src/main/zcodeGoOpcEmployeeMemory.js";
+import { opcEmployeeMemoryCliLinkPath } from "@zcode/shared";
 
 const CLEANUP: string[] = [];
 async function makeTmp(): Promise<string> {
@@ -15,6 +17,17 @@ afterAll(async () => {
 });
 
 describe("员工记忆目录链接（symlink/junction 语义）", () => {
+  it("hash 与 CLI project-root.ts 同算法（sha256(keySource) 前 16 位）", () => {
+    // 与 apps/zcode-cli/packages/core/src/memory/project-root.ts 对齐：
+    // keySource = workspaceIdentity（trim 后），sha256 前 16 位十六进制
+    const ws = "/ws/a";
+    const identity = `opc-employee/${ws}::emp-1`;
+    const expected = createHash("sha256").update(identity).digest("hex").slice(0, 16);
+    const link = opcEmployeeMemoryCliLinkPath("/home/u", "emp-1", ws, expected);
+    expect(link).toContain(`project-${expected}`);
+    expect(expected).toMatch(/^[0-9a-f]{16}$/);
+  });
+
   it("创建后读写穿透到 .opc 物理目录；重复创建幂等", async () => {
     const ws = await makeTmp();
     const link = join(ws, "link-root");
