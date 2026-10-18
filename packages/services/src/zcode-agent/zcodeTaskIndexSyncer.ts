@@ -532,11 +532,15 @@ export function createZCodeTaskIndexSyncer(
         contentProfile: "index",
       });
       // 回源收敛是状态/正文同步，不涉及 pin/archive/unread 归属（task_status_changed）。
-      await syncSnapshotAndBroadcast(snapshot, {
-        ...(options?.unreadSignal ? { unreadSignal: options.unreadSignal } : {}),
-        broadcastReason: "task_status_changed",
-        moveGroupedTaskToTop: options?.moveGroupedTaskToTop,
-      });
+      await syncSnapshotAndBroadcast(
+        snapshot,
+        {
+          ...(options?.unreadSignal ? { unreadSignal: options.unreadSignal } : {}),
+          broadcastReason: "task_status_changed",
+          moveGroupedTaskToTop: options?.moveGroupedTaskToTop,
+        },
+        target,
+      );
     } catch (error) {
       logger.warn(
         undefined,
@@ -1685,8 +1689,20 @@ export function createZCodeTaskIndexSyncer(
       unreadSignal?: ZCodeWorkspaceTaskListChanged["unreadSignal"];
       broadcastReason: ZCodeWorkspaceTaskListChanged["reason"];
     },
+    authoritativeWorkspace?: { workspacePath: string; workspaceIdentity?: string },
   ): Promise<ZCodeTaskMeta> {
     const meta = buildMetaFromSnapshot(snapshot, options);
+    // identity 键会话（OPC 员工/远端）的子进程快照投影会把 workspace 归属报坏：
+    // workspacePath 退化成 identity 串、workspaceIdentity 丢空——直接落索引会写坏
+    // 行归属，rememberIndexedTaskMeta 再把内存 task target 一起毒化（后续 send 的
+    // 轮次在子进程「已收纳永不执行」）。订阅目标是 host 权威归属，这里以此修正。
+    if (
+      authoritativeWorkspace?.workspaceIdentity?.trim() &&
+      meta.workspaceIdentity !== authoritativeWorkspace.workspaceIdentity
+    ) {
+      meta.workspacePath = authoritativeWorkspace.workspacePath;
+      meta.workspaceIdentity = authoritativeWorkspace.workspaceIdentity;
+    }
     // 旧 child 标签页的显式 resume 仍会同步快照；只读详情不能重新写成主任务。
     if (snapshot.session.sessionKind === "subagent_child") return meta;
     // 同时把 snapshot.messages 里可见的聊天正文索引下去，

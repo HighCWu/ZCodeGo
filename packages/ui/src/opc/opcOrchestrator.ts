@@ -15,6 +15,7 @@ import {
   buildOpcPersonaPromptSection,
   isOpcWorkItemRunnable,
   opcEmployeeMemoryIdentity,
+  type ModelSelection,
   type OpcCompanyState,
   type OpcMutation,
   type OpcPermissionLevel,
@@ -38,6 +39,12 @@ export interface OpcOrchestratorDeps {
   /** 员工记忆根相对工作区的显示路径（GetState 回读；委派 prompt 的写入指引。
    * 缺条目 = 绑定未就绪，不注入记忆段——指向不存在的目录会误导员工写入。） */
   employeeMemoryPaths?: Record<string, string>;
+  /**
+   * 派发钉定的模型选型（工作区当前选型，含档位）。员工 db 是全新空库，
+   * 不显式钉定时会落到 builtin 默认模型（如 gpt-6-astra）——与用户所选
+   * 模型不符且可能放大调用成本。缺失时宁可不派发（fail-safe）。
+   */
+  modelSelection?: ModelSelection;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
   /**
@@ -118,6 +125,11 @@ export async function dispatchReadyWorkItems(
     (item) => item.status === "in_progress" && item.sessionId,
   ).length;
   const remaining = Math.max(0, cap - runningCount);
+  // fail-safe：无钉定选型不派发——员工空库下不传选型 = 落 builtin 默认模型
+  //（可能是用户没选过的高价模型），宁可留 ready 也不烧错模型的钱。
+  if (!deps.modelSelection) {
+    return { dispatched: [], failed: [], mutations: [] };
+  }
   const dispatchable = state.workItems
     .filter(
       (item) =>
@@ -173,6 +185,8 @@ export async function dispatchReadyWorkItems(
         workspacePath,
         // 员工键覆盖 workspace 键：记忆根与会话隔离落到员工维度
         workspaceIdentity: opcEmployeeMemoryIdentity(employee.id, workspacePath),
+        // 钉定模型：员工会话跟随工作区当前选型（防 builtin 默认兜底烧错模型）
+        modelSelection: deps.modelSelection,
         v4Create: true,
         deferPersistenceUntilFirstPrompt: true,
         permissionScope: "session",

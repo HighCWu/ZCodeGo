@@ -60,6 +60,7 @@ import {
 } from "@zcode/shared";
 import { useZCodeTaskService } from "@/hooks/useZCodeTaskService.js";
 import { useSettings } from "@/hooks/useSettingService.js";
+import { useServices } from "@/hooks/useServices.js";
 import {
   OpcReworkDialog,
   OpcWorkItemDialog,
@@ -114,6 +115,22 @@ export function ZcodeGoOpcPanelRoot({
   const employeePersonaDigests = useOpcStore((s) => s.employeePersonaDigests);
   const employeePrinciples = useOpcStore((s) => s.employeePrinciples);
   const employeeMemoryPaths = useOpcStore((s) => s.employeeMemoryPaths);
+  // 派发/反思时命令式读取当前模型选型（员工空库不传选型会落 builtin 默认
+  // 模型，可能与用户所选不符并放大调用成本）。用 base services（SessionPane
+  // 同款；workspace-scoped 的 getView 在面板上下文会挂起）。不挂选型订阅
+  // hook——命令式 getView 拿 effectiveSelection 且零订阅。
+  const { modelSelectionService } = useServices();
+  const readPinnedModelSelection = useCallback(async () => {
+    try {
+      const view = await modelSelectionService.getView();
+      // preferred = 用户当前在选型器里选中的模型（composer 草稿同语义）；
+      // effective 是叠加账号可用性后的可执行投影，未连接账号时为空——
+      // 派发钉定跟随用户意图（preferred），可执行性由子会话注册表裁决。
+      return view.preferredSelection ?? view.effectiveSelection ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }, [modelSelectionService]);
   const { settings } = useSettings();
   const taskService = useZCodeTaskService(
     workspacePath ?? undefined,
@@ -195,9 +212,13 @@ export function ZcodeGoOpcPanelRoot({
       });
       void (async () => {
         try {
+          // 钉定模型：与派发同一 fail-safe（无选型不派发，防 builtin 默认兜底）
+          const pinnedModelSelection = await readPinnedModelSelection();
+          if (!pinnedModelSelection) return;
           const created = await taskService.createTask({
             workspacePath,
             workspaceIdentity: opcEmployeeMemoryIdentity(employee.id, workspacePath),
+            modelSelection: pinnedModelSelection,
             v4Create: true,
             deferPersistenceUntilFirstPrompt: true,
             permissionScope: "session",
@@ -217,7 +238,7 @@ export function ZcodeGoOpcPanelRoot({
         }
       })();
     }
-  }, [workItems, workspacePath, state?.employees, employeeMemoryIndexes, employeePrinciples, taskService]);
+  }, [workItems, workspacePath, state?.employees, employeeMemoryIndexes, employeePrinciples, taskService, readPinnedModelSelection]);
   const [escalateDialog, setEscalateDialog] = useState<OpcWorkItem | null>(
     null,
   );
@@ -378,27 +399,41 @@ export function ZcodeGoOpcPanelRoot({
   const orchestrateEnabled = settings?.zcodeGoOpcAutoOrchestrate !== false;
   const [orchestrating, setOrchestrating] = useState(false);
   const handleOrchestrate = useCallback(() => {
+    logger.info(
+      `[zcode-go][opc] 编排点击进入：state=${Boolean(state)} ws=${Boolean(workspacePath)} svc=${Boolean(taskService)} busy=${orchestrating}`,
+    );
     if (!state || !workspacePath || !taskService || orchestrating) return;
     setOrchestrating(true);
-    void dispatchReadyWorkItems({
-      state,
-      workspacePath,
-      workspaceIdentity: workspaceIdentity ?? undefined,
-      taskService,
-      resolveRoleBody,
-      resolveSkillBody,
-      // 员工持久记忆索引（GetState 时 main 批量绑定并回读）
-      employeeMemoryIndexes: employeeMemoryIndexes ?? {},
-      employeePersonaDigests: employeePersonaDigests ?? {},
-      employeePrinciples: employeePrinciples ?? {},
-      employeeMemoryPaths: employeeMemoryPaths ?? {},
-      onMutations: (mutations) => void apply(mutations),
-    })
-      .then((outcome) => {
-        if (outcome.mutations.length > 0) void apply(outcome.mutations);
-        logger.info(
-          `[zcode-go][opc] 编排完成：派发 ${outcome.dispatched.length} / 失败 ${outcome.failed.length}`,
-        );
+    void (async () => {
+      // 派发钉定模型：跟随工作区当前选型（缺失则编排器 fail-safe 不派发）
+      const pinnedModelSelection = await readPinnedModelSelection();
+      // 编排是会话生命周期事件：走 lifecycle 通道（生产构建仍经桥落盘，
+      // 普通日志在生产 renderer 是 no-op）。
+      logger.lifecycle.info(
+        `[zcode-go][opc] 编排开始：钉定选型${pinnedModelSelection ? ` ${pinnedModelSelection.providerId}/${pinnedModelSelection.modelId}` : "缺失（fail-safe 不派发）"}`,
+      );
+      const outcome = await dispatchReadyWorkItems({
+        state,
+        workspacePath,
+        workspaceIdentity: workspaceIdentity ?? undefined,
+        taskService,
+        resolveRoleBody,
+        resolveSkillBody,
+        // 员工持久记忆索引（GetState 时 main 批量绑定并回读）
+        employeeMemoryIndexes: employeeMemoryIndexes ?? {},
+        employeePersonaDigests: employeePersonaDigests ?? {},
+        employeePrinciples: employeePrinciples ?? {},
+        employeeMemoryPaths: employeeMemoryPaths ?? {},
+        modelSelection: pinnedModelSelection,
+        onMutations: (mutations) => void apply(mutations),
+      });
+      if (outcome.mutations.length > 0) void apply(outcome.mutations);
+      logger.lifecycle.info(
+        `[zcode-go][opc] 编排完成：派发 ${outcome.dispatched.length} / 失败 ${outcome.failed.length}`,
+      );
+    })()
+      .catch((error) => {
+        logger.warn("[zcode-go][opc] 编排执行异常", error);
       })
       .finally(() => setOrchestrating(false));
   }, [
@@ -410,7 +445,22 @@ export function ZcodeGoOpcPanelRoot({
     resolveSkillBody,
     apply,
     orchestrating,
+    readPinnedModelSelection,
   ]);
+
+  // E2E 句柄（同 __zcodeTabStoreE2E 惯例）：CDP 直调编排回调，绕开 Dialog
+  // portal 内按钮的 DOM 点击可靠性问题；仅暴露既有回调，不新增产品面。
+  useEffect(() => {
+    const host = window as Window & {
+      __zcodeOpcOrchestrateE2E?: () => void;
+    };
+    host.__zcodeOpcOrchestrateE2E = handleOrchestrate;
+    return () => {
+      if (host.__zcodeOpcOrchestrateE2E === handleOrchestrate) {
+        delete host.__zcodeOpcOrchestrateE2E;
+      }
+    };
+  }, [handleOrchestrate]);
 
   const handleStatusChange = useCallback(
     (workItemId: string, status: OpcWorkItem["status"]) => {

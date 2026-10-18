@@ -235,7 +235,11 @@ SKILL.md 及其同目录文本资产）通过「模板包」机制注入，
     （createTask v4Create + deferPersistenceUntilFirstPrompt + sendPrompt——
     bots/automation 同款执行器；并发上限 3，desktop-continuous 链路），
     派发即 in_progress（逐项即时落账；sessionId 幂等锚——已派发项永不重派；
-    并发按「in_progress 且有 sessionId」计数门控）。opc-done 完成标记携带
+    并发按「in_progress 且有 sessionId」计数门控）。**模型钉定**：员工会话
+    显式携带工作区当前选型（modelSelectionService.getView().preferredSelection，
+    composer 选型器同语义）——员工 db 是全新空库，不显式钉定会落 builtin 默认
+    模型（可能与用户所选不符并放大调用成本）；选型缺失时 fail-safe 不派发
+    （宁可留 ready 也不烧错模型的钱）。反思轮同规则。opc-done 完成标记携带
     返工轮次后缀（`:r<n>`），watcher 去重键由标记轮次决定——返工后旧标记
     不再误推。门控：AppSettings.zcodeGoOpcAutoOrchestrate（默认启用，
     ZCode Go 设置页开关）。如实边界：opc-done 完成检测只覆盖有面板的会话，
