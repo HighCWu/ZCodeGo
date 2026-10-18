@@ -150,7 +150,11 @@ export function ZcodeGoOpcPanelRoot({
       if (seenDone.has(doneKey)) continue;
       seenDone.add(doneKey);
       if (seenDone.size > 200) {
+        // 保留最近的 100 条：全清会让历史 done 项被重新视为「未见过」，
+        // 触发一轮不该有的重复反思（节流只能限制频率，不能消除）
+        const keep = Array.from(seenDone).slice(-100);
         seenDone.clear();
+        for (const key of keep) seenDone.add(key);
       }
       const employee = state?.employees.find((e) => e.id === item.assigneeId);
       if (
@@ -160,15 +164,31 @@ export function ZcodeGoOpcPanelRoot({
       ) {
         continue;
       }
+      // 员工有在跑的任务时跳过：反思会话与任务会话并发写同一记忆目录
+      // 会产生文件级竞态（两者同身份、同目录）
+      const busy = state?.workItems.some(
+        (w) =>
+          w.assigneeId === employee.id &&
+          w.status === "in_progress" &&
+          w.sessionId,
+      );
+      if (busy) continue;
       if (!shouldRunOpcReflection({ lastReflectAtMs: lastAt.get(employee.id) ?? 0, nowMs: now })) {
         continue;
       }
       lastAt.set(employee.id, now);
+      if (
+        !employeeMemoryIndexes ||
+        employeePrinciples?.[employee.id] === undefined
+      ) {
+        // GetState 尚未回读（索引/原则清单未加载）——跳过本轮，下次收口再反思
+        continue;
+      }
       const reworkCount = item.reworkNotes?.length ?? 0;
       const prompt = buildOpcReflectionPrompt({
         employeeName: employee.name,
-        memoryIndex: employeeMemoryIndexes?.[employee.id] ?? null,
-        existingPrinciples: employeePrinciples?.[employee.id] ?? [],
+        memoryIndex: employeeMemoryIndexes[employee.id] ?? null,
+        existingPrinciples: employeePrinciples[employee.id] ?? [],
         reworkCount,
         finishedTopics: [item.title],
       });
