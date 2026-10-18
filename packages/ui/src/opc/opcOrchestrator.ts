@@ -10,7 +10,10 @@ import type { IZCodeTaskService } from "@zcode/services";
 import {
   buildOpcDelegationPrompt,
   buildOpcToolDenylist,
+  buildOpcEmployeeMemoryDenylist,
+  buildOpcEmployeeMemoryPromptSection,
   isOpcWorkItemRunnable,
+  opcEmployeeMemoryIdentity,
   type OpcCompanyState,
   type OpcMutation,
   type OpcPermissionLevel,
@@ -24,6 +27,11 @@ export interface OpcOrchestratorDeps {
   taskService: IZCodeTaskService;
   resolveRoleBody: (templateId: string) => string | null;
   resolveSkillBody: (skillId: string) => string | null;
+  /** 员工记忆绑定（桌面 main：.opc 目录 + ~/.zcode 链接）；返回 MEMORY.md 索引。
+   * 缺省（或失败）时仅跳过记忆注入，不阻断派发。 */
+  ensureEmployeeMemory?: (
+    employeeId: string,
+  ) => Promise<{ memoryIndex: string | null }>;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
   /**
@@ -130,10 +138,34 @@ export async function dispatchReadyWorkItems(
       continue;
     }
     const { prompt, permissionLevel } = delegation;
+    const employee = state.employees.find((item) => item.id === workItem.assigneeId);
+    if (!employee) {
+      outcome.failed.push({ workItemId: workItem.id, error: "员工缺失" });
+      continue;
+    }
+    // 员工持久记忆：绑定（.opc + ~/.zcode 链接）→ 索引注入 prompt；
+    // 会话身份切到员工键（记忆根与会话隔离同键，spec「员工持久记忆」）。
+    let memorySection: string | null = null;
+    if (deps.ensureEmployeeMemory) {
+      try {
+        const bound = await deps.ensureEmployeeMemory(employee.id);
+        memorySection = buildOpcEmployeeMemoryPromptSection({
+          memoryDirDisplay: `.opc/employees/${employee.id}/memory`,
+          memoryIndex: bound.memoryIndex,
+        });
+      } catch (error) {
+        console.warn("[zcode-go][opc] 员工记忆绑定失败，跳过记忆注入", error);
+      }
+    }
+    const memoryDenylist = buildOpcEmployeeMemoryDenylist(
+      employee.id,
+      state.employees.map((item) => item.id),
+    );
     try {
       const created = await taskService.createTask({
         workspacePath,
-        workspaceIdentity,
+        // 员工键覆盖 workspace 键：记忆根与会话隔离落到员工维度
+        workspaceIdentity: opcEmployeeMemoryIdentity(employee.id),
         v4Create: true,
         deferPersistenceUntilFirstPrompt: true,
         permissionScope: "session",
@@ -141,10 +173,14 @@ export async function dispatchReadyWorkItems(
       await taskService.sendPrompt({
         taskId: created.taskId,
         traceId: workItem.id,
-        content: prompt,
+        content: memorySection ? `${prompt}\n\n${memorySection}` : prompt,
         // 会话级硬约束：按员工权限级别隐藏写入/执行类工具（无界面会话由我们
         // 创建，参数即真约束；手动 composer 路径仍为委派 prompt 级边界）。
-        toolDenylist: buildOpcToolDenylist(permissionLevel),
+        // 追加员工记忆隔离：其它员工记忆目录读写拒绝 + 公司状态写保护。
+        toolDenylist: [
+          ...(buildOpcToolDenylist(permissionLevel) ?? []),
+          ...memoryDenylist,
+        ],
       });
       outcome.dispatched.push({
         workItemId: workItem.id,

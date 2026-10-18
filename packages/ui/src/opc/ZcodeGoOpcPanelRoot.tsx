@@ -288,6 +288,19 @@ export function ZcodeGoOpcPanelRoot({
       taskService,
       resolveRoleBody,
       resolveSkillBody,
+      // 员工持久记忆绑定（桌面 main：.opc 目录 + ~/.zcode 链接 + 索引回读）
+      ensureEmployeeMemory: (employeeId) =>
+        (window as unknown as {
+          zcode?: {
+            zcodeGoOpcEnsureEmployeeMemory?: (payload: {
+              workspacePath: string;
+              employeeId: string;
+            }) => Promise<{ ok: boolean; memoryIndex: string | null }>;
+          };
+        }).zcode?.zcodeGoOpcEnsureEmployeeMemory?.({
+          workspacePath,
+          employeeId,
+        }) ?? Promise.resolve({ memoryIndex: null }),
       onMutations: (mutations) => void apply(mutations),
     })
       .then((outcome) => {

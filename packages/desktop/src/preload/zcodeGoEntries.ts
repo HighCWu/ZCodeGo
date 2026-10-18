@@ -221,6 +221,16 @@ export function installZcodeGoPreloadEntries({
         PlatformChannels.ZcodeGoOpcReadFingerprintSample,
         payload,
       ),
+    /** zcode-go：确保员工记忆绑定（.opc 目录 + ~/.zcode 链接），返回 MEMORY.md 索引。 */
+    zcodeGoOpcEnsureEmployeeMemory: (payload: {
+      workspacePath: string;
+      employeeId: string;
+    }): Promise<{
+      ok: boolean;
+      memoryIndex: string | null;
+      linked: boolean;
+      error?: string;
+    }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoOpcEnsureEmployeeMemory, payload),
     /** zcode-go：试验接口通道调试（比对 preload 运行时实际使用的通道值）。 */
     __zcExpChannelDebug: (): { runPrompt: string } => ({
       runPrompt: PlatformChannels.ZcodeGoExpRunPrompt,

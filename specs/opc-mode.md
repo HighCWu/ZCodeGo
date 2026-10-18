@@ -111,6 +111,29 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
 7. 技能/角色模板导入：兼容两种上游格式——OpenOPC talent 目录（`*.md`，五字段
    frontmatter）与 claude-skills 目录（递归发现 `SKILL.md`）。导入即解析入
    company.json / skills/，重复 id 以「版本覆盖」处理（正文与元数据更新，changelog 追加）。
+8. **员工持久记忆**（复用 CLI 记忆文件约定，管线全部在桌面层，不改 CLI）：
+   - 存储位置：`<工作区>/.opc/employees/<employeeId>/memory/`（一事实一 md，
+     frontmatter 含 name/description/type，type 取 CLI 同款四类
+     user/feedback/project/reference），`MEMORY.md` 为索引（一行一条 hook）。
+     物理数据随工作区/公司包走，员工离职记忆留在 .opc 归档，不跟人消失。
+   - **CLI 管线绑定（符号链接）**：员工首次派发时桌面创建
+     `~/.zcode/cli/memories/projects/project-<hash>` → `.opc/employees/<id>/cli-memory/`
+     的目录链接（win32 junction / 其余 symlink；hash = sha256("opc-employee/<id>")
+     前 16 位十六进制，算法与 CLI project-root.ts 一致并双向同步注释）。
+     CLI 的注入/抽取/dream/selector 全链按 `~/.zcode` 路径工作，物理数据落 .opc。
+     链接在会话创建时校验（失效重建）；Windows junction 免特权，UNC 网络盘
+     workspace 不支持自动绑定（记忆退回 `~/.zcode`，功能保留）。
+   - **会话身份**：员工会话 `workspaceIdentity = opc-employee/<employeeId>`
+     （与 AGENTS.md 的 Workspace Identity 规则同构，记忆与会话隔离同键）。
+   - **召回（注入）**：委派 prompt 尾部追加「持久记忆」段——员工 MEMORY.md
+     索引全文 + 维护指令（重要事实写入记忆文件并同步索引行；这是员工自己的
+     长期记忆，跨任务保留）。CLI 记忆管线的 default-index 注入与本段并存不冲突。
+   - **隔离**：员工 toolDenylist 动态追加——其它员工 `.opc/employees/<otherId>/**`
+     的 Read/Write/Edit 拒绝；`.opc/company.json` 等公司状态的写拒绝。员工写
+     自己记忆目录属 workspace 内写，天然允许。
+   - **增强开关（可选）**：setting `memoryEnabled: true` 时 CLI 的自动抽取/
+     dream 巩固额外生效（共享 setting，是否开启由用户决定）；关闭时核心闭环
+     （注入 + 员工自行维护）不受影响。
 
 ## 模板包（packs）：dev/打包期注入，开箱即用
 

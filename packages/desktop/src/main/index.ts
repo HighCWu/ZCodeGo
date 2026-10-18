@@ -206,6 +206,7 @@ import { initZcodeGoOpcStore } from "./zcodeGoOpcStore.js";
 // zcode-go：OPC 渠道桥（Telegram 长轮询 → 入站队列；无配置零足迹，见 specs「入站队列」节）
 import { initZcodeGoOpcChannels } from "./zcodeGoOpcChannels.js";
 import { initZcodeGoExpServer } from "./zcodeGoExpServer.js";
+import { registerZcodeGoOpcEmployeeMemoryIpc } from "./zcodeGoOpcEmployeeMemory.js";
 import {
   registerForkFullHistoryFromParent,
   runContinuousForkFullHistoryBackfill,
@@ -3093,6 +3094,7 @@ app.whenReady().then(async () => {
   initZcodeGoRendererRecovery(logger);
   // zcode-go：OPC 模式公司状态存储（<workspace>/.opc/ 读写与广播，纯 IPC 门控）。
   initZcodeGoOpcStore(logger);
+  registerZcodeGoOpcEmployeeMemoryIpc(logger);
   // zcode-go：OPC 渠道桥（仅在 ~/.zcode-go/config.json 配置了 telegram token 时启动轮询）。
   initZcodeGoOpcChannels(logger);
   // zcode-go：试验 HTTP 接口（env ZCODE_GO_EXP_HTTP=1 门控，默认关闭）

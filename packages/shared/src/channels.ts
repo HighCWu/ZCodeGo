@@ -546,6 +546,8 @@ export const PlatformChannels = {
   ZcodeGoOpcStateChanged: "zcode:zcode-go-opc-state-changed",
   /** Renderer → Main：消费入站队列条目（转工作项或忽略；文件名须纯 basename） */
   ZcodeGoOpcConsumeInbox: "zcode:zcode-go-opc-consume-inbox",
+  /** Renderer → Main：确保员工记忆绑定（.opc 目录 + ~/.zcode 符号链接），返回 MEMORY.md 索引 */
+  ZcodeGoOpcEnsureEmployeeMemory: "zcode:zcode-go-opc-ensure-employee-memory",
   /** Renderer → Main：读模型指纹采集样本（.opc/fingerprint/<纯 basename>.json） */
   ZcodeGoOpcReadFingerprintSample: "zcode:zcode-go-opc-read-fingerprint-sample",
   /** Main → Renderer：试验执行请求（临时会话跑一条 prompt，回复写 .opc/exp/） */
