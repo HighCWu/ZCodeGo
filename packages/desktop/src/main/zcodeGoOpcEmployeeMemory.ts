@@ -24,7 +24,8 @@ export interface OpcEmployeeMemoryLogger {
   warn: (message: string, ...args: unknown[]) => void;
 }
 
-async function ensureDirLink(linkPath: string, targetDir: string): Promise<void> {
+/** 创建/校验/修复目录链接（导出供测试：链接语义是该模块的安全关键）。 */
+export async function ensureDirLink(linkPath: string, targetDir: string): Promise<void> {
   let existingStat: Awaited<ReturnType<typeof lstat>> | null = null;
   try {
     existingStat = await lstat(linkPath);
@@ -54,6 +55,12 @@ async function symlinkDir(targetDir: string, linkPath: string): Promise<void> {
   await symlink(targetDir, linkPath, type);
 }
 
+/** CLI 数据根：与 buildHostProcessEnv 的 ZCODE_DATA_BASE_DIR 兜底同源——
+ * env 重定向（便携/测试形态）时链接源必须跟着走，否则绑定错位。 */
+function resolveCliStorageRoot(): string {
+  return process.env.ZCODE_DATA_BASE_DIR?.trim() || homedir();
+}
+
 export function registerZcodeGoOpcEmployeeMemoryIpc(logger: OpcEmployeeMemoryLogger): void {
   ipcMain.removeHandler(PlatformChannels.ZcodeGoOpcEnsureEmployeeMemory);
   ipcMain.handle(
@@ -69,7 +76,7 @@ export function registerZcodeGoOpcEmployeeMemoryIpc(logger: OpcEmployeeMemoryLog
         }
         const memoryDir = opcEmployeeMemoryDir(workspacePath, payload.employeeId);
         const cliMemoryDir = opcEmployeeCliMemoryDir(workspacePath, payload.employeeId);
-        const linkPath = opcEmployeeMemoryCliLinkPath(homedir(), payload.employeeId);
+        const linkPath = opcEmployeeMemoryCliLinkPath(resolveCliStorageRoot(), payload.employeeId, workspacePath);
         await mkdir(memoryDir, { recursive: true });
         await ensureDirLink(linkPath, cliMemoryDir);
         let memoryIndex: string | null = null;

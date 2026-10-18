@@ -15,15 +15,25 @@ import { join } from "node:path";
 
 const MEMORY_IDENTITY_PREFIX = "opc-employee/";
 
-/** 员工会话的 Workspace Identity（会话隔离与记忆根同键，AGENTS.md 规则）。 */
-export function opcEmployeeMemoryIdentity(employeeId: string): string {
-  return MEMORY_IDENTITY_PREFIX + employeeId;
+/**
+ * 员工会话的 Workspace Identity（会话隔离与记忆根同键，AGENTS.md 规则）。
+ * 含 workspacePath 维度：员工记忆物理上绑定在该工作区的 .opc 内（跨工作区
+ * 的同名员工 id 必须落到不同的 ~/.zcode 链接，否则互相覆盖绑定）。
+ */
+export function opcEmployeeMemoryIdentity(
+  employeeId: string,
+  workspacePath: string,
+): string {
+  return `${MEMORY_IDENTITY_PREFIX}${workspacePath}::${employeeId}`;
 }
 
 /** CLI project-root.ts 同款：sha256(keySource) 前 16 位十六进制。 */
-export function opcEmployeeMemoryHash(employeeId: string): string {
+export function opcEmployeeMemoryHash(
+  employeeId: string,
+  workspacePath: string,
+): string {
   return createHash("sha256")
-    .update(opcEmployeeMemoryIdentity(employeeId))
+    .update(opcEmployeeMemoryIdentity(employeeId, workspacePath))
     .digest("hex")
     .slice(0, 16);
 }
@@ -33,14 +43,18 @@ export function opcEmployeeMemoryHash(employeeId: string): string {
  * 桌面在此路径创建目录链接（win32 junction / 其余 symlink），指向
  * opcEmployeeCliMemoryDir 的物理目录。
  */
-export function opcEmployeeMemoryCliLinkPath(home: string, employeeId: string): string {
+export function opcEmployeeMemoryCliLinkPath(
+  home: string,
+  employeeId: string,
+  workspacePath: string,
+): string {
   return join(
     home,
     ".zcode",
     "cli",
     "memories",
     "projects",
-    `project-${opcEmployeeMemoryHash(employeeId)}`,
+    `project-${opcEmployeeMemoryHash(employeeId, workspacePath)}`,
   );
 }
 

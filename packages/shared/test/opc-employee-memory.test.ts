@@ -12,30 +12,38 @@ import {
 } from "../src/opc/opc-employee-memory.js";
 
 describe("OPC 员工持久记忆（绑定计算与隔离策略）", () => {
-  it("identity 固定为 opc-employee/ 前缀 + 员工 id", () => {
-    expect(opcEmployeeMemoryIdentity("emp-1")).toBe("opc-employee/emp-1");
+  it("identity 含 workspace 维度（跨工作区同名员工隔离）", () => {
+    expect(opcEmployeeMemoryIdentity("emp-1", "/ws/a")).toBe(
+      "opc-employee//ws/a::emp-1",
+    );
+    // 不同工作区的同名员工 → 不同 identity → 不同链接（绑定互不覆盖）
+    expect(opcEmployeeMemoryIdentity("emp-1", "/ws/b")).not.toBe(
+      opcEmployeeMemoryIdentity("emp-1", "/ws/a"),
+    );
   });
 
   it("hash 与 CLI project-root.ts 同算法：sha256(keySource) 前 16 位", () => {
     const expected = createHash("sha256")
-      .update("opc-employee/emp-1")
+      .update("opc-employee//ws/a::emp-1")
       .digest("hex")
       .slice(0, 16);
-    expect(opcEmployeeMemoryHash("emp-1")).toBe(expected);
-    expect(opcEmployeeMemoryHash("emp-1")).toMatch(/^[0-9a-f]{16}$/);
-    expect(opcEmployeeMemoryHash("emp-2")).not.toBe(opcEmployeeMemoryHash("emp-1"));
+    expect(opcEmployeeMemoryHash("emp-1", "/ws/a")).toBe(expected);
+    expect(opcEmployeeMemoryHash("emp-1", "/ws/a")).toMatch(/^[0-9a-f]{16}$/);
+    expect(opcEmployeeMemoryHash("emp-2", "/ws/a")).not.toBe(
+      opcEmployeeMemoryHash("emp-1", "/ws/a"),
+    );
   });
 
   it("链接源在 ~/.zcode/cli/memories/projects/ 下且键为 project-<hash>", () => {
     const home = "/home/u";
-    const link = opcEmployeeMemoryCliLinkPath(home, "emp-1");
+    const link = opcEmployeeMemoryCliLinkPath(home, "emp-1", "/ws/a");
     const expected = join(
       home,
       ".zcode",
       "cli",
       "memories",
       "projects",
-      `project-${opcEmployeeMemoryHash("emp-1")}`,
+      `project-${opcEmployeeMemoryHash("emp-1", "/ws/a")}`,
     );
     expect(link).toBe(expected);
   });

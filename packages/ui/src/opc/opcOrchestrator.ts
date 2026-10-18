@@ -146,15 +146,17 @@ export async function dispatchReadyWorkItems(
     // 员工持久记忆：绑定（.opc + ~/.zcode 链接）→ 索引注入 prompt；
     // 会话身份切到员工键（记忆根与会话隔离同键，spec「员工持久记忆」）。
     let memorySection: string | null = null;
-    if (deps.ensureEmployeeMemory) {
+    if (deps.ensureEmployeeMemory && permissionLevel !== "read-only") {
+      // read-only 员工无写工具，记忆维护指令会与权限约束矛盾——不注入不绑定
+      // （其记忆依赖 CLI 管线的自动抽取，spec 边界已注明）。
       try {
         const bound = await deps.ensureEmployeeMemory(employee.id);
         memorySection = buildOpcEmployeeMemoryPromptSection({
           memoryDirDisplay: `.opc/employees/${employee.id}/memory`,
           memoryIndex: bound.memoryIndex,
         });
-      } catch (error) {
-        console.warn("[zcode-go][opc] 员工记忆绑定失败，跳过记忆注入", error);
+      } catch {
+        // 绑定失败静默跳过记忆注入（不阻断派发；面板回调层负责告警）
       }
     }
     const memoryDenylist = buildOpcEmployeeMemoryDenylist(
@@ -165,7 +167,7 @@ export async function dispatchReadyWorkItems(
       const created = await taskService.createTask({
         workspacePath,
         // 员工键覆盖 workspace 键：记忆根与会话隔离落到员工维度
-        workspaceIdentity: opcEmployeeMemoryIdentity(employee.id),
+        workspaceIdentity: opcEmployeeMemoryIdentity(employee.id, workspacePath),
         v4Create: true,
         deferPersistenceUntilFirstPrompt: true,
         permissionScope: "session",
