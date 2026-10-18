@@ -35,6 +35,7 @@ interface ZcodeGoOpcBridge {
     employeeMemoryIndexes?: Record<string, string | null>;
     employeePersonaDigests?: Record<string, string | null>;
     employeePrinciples?: Record<string, string[]>;
+    employeeMemoryPaths?: Record<string, string>;
     roleTemplateBodies?: Record<string, string>;
     skillBodies?: Record<string, string>;
     error?: string;
@@ -129,6 +130,8 @@ export interface OpcStoreState {
   employeePersonaDigests: Record<string, string | null>;
   /** 员工原则文件 name 清单（L2 归纳产物；反思 prompt 的既有原则清单） */
   employeePrinciples: Record<string, string[]>;
+  /** 员工记忆根相对工作区的显示路径（main 计算并回读；委派 prompt 写入指引） */
+  employeeMemoryPaths: Record<string, string>;
   loading: boolean;
   error: string | null;
   /** 最近一次 apply 触发的晋升（UI toast 用，消费后 clearRecentPromotions）。 */
@@ -176,6 +179,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
   employeeMemoryIndexes: {},
   employeePersonaDigests: {},
   employeePrinciples: {},
+  employeeMemoryPaths: {},
   loading: false,
   error: null,
   recentPromotedSkillIds: [],
@@ -205,6 +209,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
             // 失败即清残留：换工作区失败时不能留着上一区的入站条目
             inbox: [],
           employeeMemoryIndexes: {},
+          employeeMemoryPaths: {},
             workspaceKey,
             workspacePath,
             bodies: { roleTemplateBodies: {}, skillBodies: {} },
@@ -219,6 +224,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           employeeMemoryIndexes: result.employeeMemoryIndexes ?? {},
           employeePersonaDigests: result.employeePersonaDigests ?? {},
           employeePrinciples: result.employeePrinciples ?? {},
+          employeeMemoryPaths: result.employeeMemoryPaths ?? {},
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},
@@ -266,6 +272,7 @@ export const useOpcStore = create<OpcStoreState>()((set, get) => ({
           employeeMemoryIndexes: result.employeeMemoryIndexes ?? {},
           employeePersonaDigests: result.employeePersonaDigests ?? {},
           employeePrinciples: result.employeePrinciples ?? {},
+          employeeMemoryPaths: result.employeeMemoryPaths ?? {},
           bodies: {
             roleTemplateBodies: result.roleTemplateBodies ?? {},
             skillBodies: result.skillBodies ?? {},

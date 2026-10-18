@@ -113,6 +113,7 @@ export function ZcodeGoOpcPanelRoot({
   const employeeMemoryIndexes = useOpcStore((s) => s.employeeMemoryIndexes);
   const employeePersonaDigests = useOpcStore((s) => s.employeePersonaDigests);
   const employeePrinciples = useOpcStore((s) => s.employeePrinciples);
+  const employeeMemoryPaths = useOpcStore((s) => s.employeeMemoryPaths);
   const { settings } = useSettings();
   const taskService = useZCodeTaskService(
     workspacePath ?? undefined,
@@ -389,7 +390,9 @@ export function ZcodeGoOpcPanelRoot({
       // 员工持久记忆索引（GetState 时 main 批量绑定并回读）
       employeeMemoryIndexes: employeeMemoryIndexes ?? {},
       employeePersonaDigests: employeePersonaDigests ?? {},
-      employeePrinciples: employeePrinciples ?? {},      onMutations: (mutations) => void apply(mutations),
+      employeePrinciples: employeePrinciples ?? {},
+      employeeMemoryPaths: employeeMemoryPaths ?? {},
+      onMutations: (mutations) => void apply(mutations),
     })
       .then((outcome) => {
         if (outcome.mutations.length > 0) void apply(outcome.mutations);

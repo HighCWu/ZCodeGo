@@ -1,10 +1,12 @@
 /**
- * zcode-go OPC 员工持久记忆（存储绑定与隔离策略，纯函数零依赖）。
+ * zcode-go OPC 员工持久记忆（存储隔离与 prompt 策略，纯函数零依赖）。
  *
- * 设计（spec「员工持久记忆」）：物理数据在
- * `<工作区>/.opc/employees/<employeeId>/`（随公司包/工作区走），CLI 记忆
- * 管线经符号链接按 `~/.zcode` 路径原样工作。本模块只做纯计算（路径、键、
- * 规则、prompt 段），链接创建与校验在 desktop main（fs 副作用）。
+ * 设计（spec「员工持久记忆」）：员工会话的 agent data 根由 host
+ * resolveSpawnEnv 注入 ZCODE_DATA_BASE_DIR 路由到
+ * `<工作区>/.opc/employees/<employeeId>/`（随公司包/工作区走）——会话库、
+ * 记忆、任务索引全部物理隔离在 .opc 内，官版与主实例零可见；CLI 记忆管线
+ * 按该 data 根原样工作。本模块只做纯计算（沙箱解析、路径、键、规则、
+ * prompt 段），fs 副作用在 services spawn env 与 desktop main。
  *
  * hash 算法与 apps/zcode-cli/packages/core/src/memory/project-root.ts 保持
  * 一致（sha256(keySource) 前 16 位十六进制，slug 固定 "project"）——CLI
@@ -15,11 +17,46 @@
 // Windows 同样接受 / 分隔符）。
 
 const MEMORY_IDENTITY_PREFIX = "opc-employee/";
+export const OPC_EMPLOYEE_IDENTITY_PREFIX = MEMORY_IDENTITY_PREFIX;
+
+/**
+ * 员工沙箱解析（纯字符串，供 host spawn env 注入与桌面回读共用）。
+ * identity 形如 `opc-employee/<workspacePath>::<employeeId>`——内嵌的
+ * workspacePath 必须与传入的一致（防跨工作区误路由），不一致返回 null。
+ * 返回的 dataBaseDir 即员工 agent 的 ZCODE_DATA_BASE_DIR：其下 .zcode/
+ * 子树（会话库/记忆/任务索引）物理隔离在工作区 .opc 内。
+ */
+export function resolveOpcEmployeeSandbox(
+  workspacePath: string,
+  identity: string | undefined,
+): { employeeId: string; employeeDir: string; identityKey: string } | null {
+  if (!identity || !identity.startsWith(OPC_EMPLOYEE_IDENTITY_PREFIX)) return null;
+  const rest = identity.slice(OPC_EMPLOYEE_IDENTITY_PREFIX.length);
+  const sepIdx = rest.indexOf("::");
+  if (sepIdx <= 0) return null;
+  const ws = rest.slice(0, sepIdx);
+  const employeeId = rest.slice(sepIdx + 2);
+  if (!ws || !employeeId || ws !== workspacePath) return null;
+  const employeeDir = `${workspacePath}/.opc/employees/${employeeId}`;
+  return {
+    employeeId,
+    employeeDir,
+    identityKey: identity,
+  };
+}
+
+/** 员工记忆根（CLI project-root 同款布局：dataBaseDir 下 .zcode/cli/memories）。 */
+export function opcEmployeeSandboxMemoryRoot(
+  employeeDir: string,
+  memoryHash: string,
+): string {
+  return `${employeeDir}/.zcode/cli/memories/projects/project-${memoryHash}/memory`;
+}
 
 /**
  * 员工会话的 Workspace Identity（会话隔离与记忆根同键，AGENTS.md 规则）。
- * 含 workspacePath 维度：员工记忆物理上绑定在该工作区的 .opc 内（跨工作区
- * 的同名员工 id 必须落到不同的 ~/.zcode 链接，否则互相覆盖绑定）。
+ * 含 workspacePath 维度：员工 data dir 物理上落在该工作区的 .opc 内（跨工作区
+ * 的同名员工 id 必须路由到不同的 data 根，否则互相覆盖）。
  *
  * ⚠️ 本文件被 preload 间接打包（shared barrel → zcodeGoEntries）：sandbox
  * preload 禁用 node 内置模块——**禁止在本文件 import 任何 node 模块**
@@ -30,37 +67,6 @@ export function opcEmployeeMemoryIdentity(
   workspacePath: string,
 ): string {
   return `${MEMORY_IDENTITY_PREFIX}${workspacePath}::${employeeId}`;
-}
-
-/** CLI project-root.ts 同款的目录键名：`project-<hash>`（hash 由调用方计算：
- * sha256(keySource) 前 16 位十六进制，CLI project-root.ts 同款；本文件因
- * preload 打包约束不做 node:crypto 计算）。 */
-export function opcEmployeeMemoryProjectDirName(memoryHash: string): string {
-  return `project-${memoryHash}`;
-}
-
-/**
- * CLI 记忆根的链接源（`~/.zcode/cli/memories/projects/project-<hash>`）。
- * 桌面在此路径创建目录链接（win32 junction / 其余 symlink），指向
- * opcEmployeeCliMemoryDir 的物理目录。
- */
-export function opcEmployeeMemoryCliLinkPath(
-  home: string,
-  employeeId: string,
-  workspacePath: string,
-  memoryHash: string,
-): string {
-  return `${home}/.zcode/cli/memories/projects/${opcEmployeeMemoryProjectDirName(memoryHash)}`;
-}
-
-/** 员工记忆的物理目录（.opc 内，随工作区/公司包走）。 */
-export function opcEmployeeMemoryDir(workspacePath: string, employeeId: string): string {
-  return `${workspacePath}/.opc/employees/${employeeId}/memory`;
-}
-
-/** 链接目标目录（CLI 管线的记忆根；CLI 会在其下使用 memory/ 结构）。 */
-export function opcEmployeeCliMemoryDir(workspacePath: string, employeeId: string): string {
-  return `${workspacePath}/.opc/employees/${employeeId}/cli-memory`;
 }
 
 /**

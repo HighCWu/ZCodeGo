@@ -1,40 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { isAbsolute, join, resolve } from "node:path";
 import {
   buildOpcEmployeeMemoryDenylist,
   buildOpcEmployeeMemoryPromptSection,
-  opcEmployeeCliMemoryDir,
-  opcEmployeeMemoryCliLinkPath,
-  opcEmployeeMemoryDir,
   opcEmployeeMemoryIdentity,
+  opcEmployeeSandboxMemoryRoot,
+  resolveOpcEmployeeSandbox,
 } from "../src/opc/opc-employee-memory.js";
 
-describe("OPC 员工持久记忆（绑定计算与隔离策略）", () => {
+describe("OPC 员工持久记忆（沙箱解析与隔离策略）", () => {
   it("identity 含 workspace 维度（跨工作区同名员工隔离）", () => {
     expect(opcEmployeeMemoryIdentity("emp-1", "/ws/a")).toBe(
       "opc-employee//ws/a::emp-1",
     );
-    // 不同工作区的同名员工 → 不同 identity → 不同链接（绑定互不覆盖）
+    // 不同工作区的同名员工 → 不同 identity → 不同 data 根（互不覆盖）
     expect(opcEmployeeMemoryIdentity("emp-1", "/ws/b")).not.toBe(
       opcEmployeeMemoryIdentity("emp-1", "/ws/a"),
     );
   });
 
-  it("链接源在 ~/.zcode/cli/memories/projects/ 下且键为 project-<hash>", () => {
-    const home = "/home/u";
-    const link = opcEmployeeMemoryCliLinkPath(home, "emp-1", "/ws/a", "abc123");
-    expect(link).toBe(join(home, ".zcode", "cli", "memories", "projects", "project-abc123"));
+  it("沙箱解析：identity 内嵌 ws 与传入一致时返回员工 data 根", () => {
+    const ws = "/ws/a";
+    const sandbox = resolveOpcEmployeeSandbox(
+      ws,
+      opcEmployeeMemoryIdentity("emp-1", ws),
+    );
+    expect(sandbox).not.toBeNull();
+    expect(sandbox!.employeeId).toBe("emp-1");
+    expect(sandbox!.employeeDir).toBe(`${ws}/.opc/employees/emp-1`);
+    expect(sandbox!.identityKey).toBe(`opc-employee/${ws}::emp-1`);
   });
 
-  it("物理目录落在 .opc/employees/<id>/ 且为绝对路径", () => {
-    const ws = resolve("/ws");
-    expect(opcEmployeeMemoryDir(ws, "emp-1")).toBe(
-      join(ws, ".opc", "employees", "emp-1", "memory"),
+  it("沙箱解析拒绝跨工作区/异形 identity（防误路由）", () => {
+    // identity 内嵌的 workspacePath 与传入不一致 → null（绝不跨区路由）
+    expect(
+      resolveOpcEmployeeSandbox("/ws/b", opcEmployeeMemoryIdentity("emp-1", "/ws/a")),
+    ).toBeNull();
+    // 非 opc-employee 前缀（普通会话）→ null
+    expect(resolveOpcEmployeeSandbox("/ws/a", "sess_abc")).toBeNull();
+    expect(resolveOpcEmployeeSandbox("/ws/a", undefined)).toBeNull();
+    // 缺 :: 分隔 → null
+    expect(resolveOpcEmployeeSandbox("/ws/a", "opc-employee/noid")).toBeNull();
+  });
+
+  it("记忆根在员工 data dir 的 CLI 布局下（data dir 沙箱形态）", () => {
+    const employeeDir = "/ws/a/.opc/employees/emp-1";
+    expect(opcEmployeeSandboxMemoryRoot(employeeDir, "abc123")).toBe(
+      `${employeeDir}/.zcode/cli/memories/projects/project-abc123/memory`,
     );
-    expect(opcEmployeeCliMemoryDir(ws, "emp-1")).toBe(
-      join(ws, ".opc", "employees", "emp-1", "cli-memory"),
-    );
-    expect(isAbsolute(opcEmployeeMemoryDir(ws, "emp-1"))).toBe(true);
   });
 
   it("denylist：拒绝其它员工记忆目录的读/写/改，豁免自己；公司状态只拒写", () => {
@@ -54,19 +66,20 @@ describe("OPC 员工持久记忆（绑定计算与隔离策略）", () => {
   });
 
   it("prompt 段：有索引带全文，无索引进初期分支；两者都声明目录与维护职责", () => {
+    const display = ".opc/employees/emp-1/.zcode/cli/memories/projects/project-abc123/memory";
     const withIndex = buildOpcEmployeeMemoryPromptSection({
-      memoryDirDisplay: ".opc/employees/emp-1/memory",
+      memoryDirDisplay: display,
       memoryIndex: "- [供应商延期](vendor-delay.md) — 先冻结需求",
     });
     expect(withIndex).toContain("供应商延期");
-    expect(withIndex).toContain(".opc/employees/emp-1/memory");
+    expect(withIndex).toContain(display);
 
     const withoutIndex = buildOpcEmployeeMemoryPromptSection({
-      memoryDirDisplay: ".opc/employees/emp-1/memory",
+      memoryDirDisplay: display,
       memoryIndex: null,
     });
     expect(withoutIndex).toContain("当前为空");
-    expect(withoutIndex).toContain(".opc/employees/emp-1/memory");
+    expect(withoutIndex).toContain(display);
     expect(withIndex).toContain("MEMORY.md");
   });
 });

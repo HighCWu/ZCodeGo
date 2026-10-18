@@ -1,38 +1,34 @@
 #!/usr/bin/env node
 /* oxlint-disable eslint(max-lines) -- zcode-go 机制/E2E/插件宿主文件：单文件收口（同 SessionPane 惯例）。 */
 /**
- * zcode-go E2E：OPC 员工持久记忆（symlink 绑定 + GetState 回读 + 重启持久）。
+ * zcode-go E2E：OPC 员工持久记忆（data dir 沙箱 + GetState 回读 + 重启持久）。
  *
- * 与 opc-e2e 同一套 HOME 沙箱 + CDP 基建（HOME=沙箱 → 员工记忆的 ~/.zcode
- * 符号链接落点天然被沙箱覆盖，绝不触碰真实机器的 ~/.zcode）。
+ * 与 opc-e2e 同一套 HOME 沙箱 + CDP 基建（HOME=沙箱 → 员工 data dir 与
+ * 主实例 ~/.zcode 物理隔离天然成立，绝不触碰真实机器的 ~/.zcode）。
  *
  * 断言链：
- *   1. GetState 触发批量绑定：.opc/employees/<id>/memory/ 目录创建；
- *      ~/.zcode/cli/memories/projects/project-<hash> 为指向
- *      .opc/employees/<id>/cli-memory 的符号链接（hash 算法与 CLI
- *      project-root.ts 一致：sha256(identity) 前 16 位，identity 含
- *      workspacePath 维度）；
+ *   1. GetState 触发批量初始化：员工记忆根目录
+ *      .opc/employees/<id>/.zcode/cli/memories/projects/project-<hash>/memory/
+ *      创建（hash 算法与 CLI project-root.ts 一致：sha256(identity) 前 16 位，
+ *      identity 含 workspacePath 维度）；employeeMemoryPaths 回读该相对路径；
  *   2. GetState 回读：新员工 memoryIndex/personaDigest 为 null、principles
  *      为空数组（绑定就绪、内容为空的初始态）；
- *   3. 穿透语义：经 ~/.zcode 路径写入 MEMORY.md，.opc 侧同内容可读（数据
- *      唯一真实落点在 .opc）；再 GetState，employeeMemoryIndexes 回读含该
- *      内容（main 从 .opc 侧穿透读取——全链闭合）；
- *   4. 重启持久：杀 app 重启（同 profile）→ 链接按幂等重建 → GetState 索引
- *      仍在（数据在 .opc，不随进程丢失）；
- *   5. 隔离：两名员工的链接/目录互不相扰（各自 hash 独立）。
+ *   3. 沙箱语义：CLI 视角（员工 data 根）写入 MEMORY.md，GetState 回读含该
+ *      内容（main 与 CLI 同一物理落点——全链闭合）；
+ *   4. 重启持久：杀 app 重启（同 profile）→ 记忆根仍在 → GetState 索引仍在
+ *      （数据在 .opc，不随进程丢失）；
+ *   5. 隔离：两名员工的记忆根互不相扰（各自 hash 独立）。
  *
  * 运行：node scripts/e2e/opc-employee-memory-e2e.mjs（需 Xvfb 显示与已装配
  * 的 ~/.zcode-go/electron，同既有 E2E；CI 由 official-e2e.yml 循环拉起）。
  */
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import {
   createHash,
 } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -98,18 +94,19 @@ function memoryHash(workspacePath, employeeId) {
     .digest("hex")
     .slice(0, 16);
 }
-function cliLinkPath(home, workspacePath, employeeId) {
+function sandboxMemoryRoot(workspacePath, employeeId) {
   return join(
-    home,
+    workspacePath,
+    ".opc",
+    "employees",
+    employeeId,
     ".zcode",
     "cli",
     "memories",
     "projects",
     `project-${memoryHash(workspacePath, employeeId)}`,
+    "memory",
   );
-}
-function physicalMemoryDir(workspacePath, employeeId) {
-  return join(workspacePath, ".opc", "employees", employeeId, "memory");
 }
 
 async function cdp() {
@@ -270,30 +267,23 @@ const lisiId = hire.state.employees.find((e) => e.name === "李四").id;
 st = await getState();
 assert(st && st.ok, "二次 GetState（绑定后的回读）");
 
-const nodeRequire = createRequire(import.meta.url);
-function lstatSafe(p) {
-  try {
-    return nodeRequire("node:fs").lstatSync(p);
-  } catch {
-    return null;
-  }
-}
-
-// ── 2. 绑定落点断言（fs） ─────────────────────────────────────────────────
+// ── 2. 绑定落点断言（fs + 回读路径） ──────────────────────────────────────
 for (const [name, id] of [
   ["老王", laowangId],
   ["李四", lisiId],
 ]) {
-  const phys = physicalMemoryDir(WORKSPACE, id);
-  assert(existsSync(phys), `${name} 记忆目录已创建：${phys}`);
-  const link = cliLinkPath(sandboxHome, WORKSPACE, id);
-  assert(existsSync(link), `${name} 记忆链接已创建：${link}`);
+  const root = sandboxMemoryRoot(WORKSPACE, id);
+  assert(existsSync(root), `${name} 记忆根已创建（员工 data dir 内）：${root}`);
+  // symlink 时代已退役：主 HOME 的 ~/.zcode 下不再产生员工链接
   assert(
-    existsSync(join(link, "memory")),
-    `${name} 链接穿透可访问 memory 子目录`,
+    !existsSync(join(sandboxHome, ".zcode", "cli", "memories", "projects", `project-${memoryHash(WORKSPACE, id)}`)),
+    `${name} 主 HOME 无员工记忆链接（链接形态已退役）`,
   );
-  const st2 = lstatSafe(link);
-  assert(st2 && st2.isSymbolicLink(), `${name} 链接为符号链接（win32 junction 亦报 symlink）`);
+  assert(
+    typeof st.employeeMemoryPaths?.[id] === "string" &&
+      st.employeeMemoryPaths[id].endsWith(join(".zcode", "cli", "memories", "projects", `project-${memoryHash(WORKSPACE, id)}`, "memory")),
+    `${name} employeeMemoryPaths 回读记忆根相对路径`,
+  );
 }
 
 
@@ -317,20 +307,14 @@ for (const [name, id] of [
   );
 }
 
-// ── 4. 穿透语义：~/.zcode 侧写入 → .opc 侧同读 → GetState 回读 ────────────
+// ── 4. 沙箱语义：CLI 视角（员工 data 根）写入 → GetState 回读 ─────────────
 {
-  const link = cliLinkPath(sandboxHome, WORKSPACE, laowangId);
-  const viaLink = join(link, "memory", "MEMORY.md");
-  writeFileSync(viaLink, "- [供应商延期](vendor-delay.md) — 先冻结需求\n", "utf8");
-  const viaPhysical = physicalMemoryDir(WORKSPACE, laowangId);
-  assert(
-    readFileSync(join(viaPhysical, "MEMORY.md"), "utf8").includes("先冻结需求"),
-    "穿透：~/.zcode 侧写入，.opc 物理侧同读（数据唯一真实落点在 .opc）",
-  );
+  const root = sandboxMemoryRoot(WORKSPACE, laowangId);
+  writeFileSync(join(root, "MEMORY.md"), "- [供应商延期](vendor-delay.md) — 先冻结需求\n", "utf8");
   st = await getState();
   assert(
     st.employeeMemoryIndexes[laowangId]?.includes("先冻结需求"),
-    "GetState 回读的索引含写入内容（main 从 .opc 侧穿透读取——全链闭合）",
+    "GetState 回读的索引含写入内容（main 与 CLI 同一物理落点——全链闭合）",
   );
   // 李四未写，索引仍为 null
   assert(
@@ -339,7 +323,7 @@ for (const [name, id] of [
   );
 }
 
-// ── 5. 重启持久：杀 app → 重启 → 链接幂等重建、索引仍在 ───────────────────
+// ── 5. 重启持久：杀 app → 重启 → 记忆根仍在、索引仍在 ────────────────────
 appProc.kill("SIGTERM");
 await sleep(3000);
 try {
@@ -365,12 +349,11 @@ st = await getState();
 assert(st && st.ok, "重启后 GetState");
 assert(
   st.employeeMemoryIndexes[laowangId]?.includes("先冻结需求"),
-  "重启后索引仍在（链接幂等重建，数据在 .opc 不随进程丢失）",
+  "重启后索引仍在（数据在 .opc 的员工 data dir 内，不随进程丢失）",
 );
 {
-  const link = cliLinkPath(sandboxHome, WORKSPACE, laowangId);
-  const st2 = lstatSafe(link);
-  assert(st2 && st2.isSymbolicLink(), "重启后链接仍为符号链接（幂等重建）");
+  const root = sandboxMemoryRoot(WORKSPACE, laowangId);
+  assert(existsSync(root), "重启后记忆根目录仍在（幂等 ensure）");
 }
 
 // ── 收尾 ──────────────────────────────────────────────────────────────────

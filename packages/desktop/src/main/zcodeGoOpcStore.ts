@@ -435,11 +435,12 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             state = synced;
           }
           const inbox = await scanInbox(workspaceRoot);
-          // 员工持久记忆：面板打开即批量绑定（.opc 目录 + ~/.zcode 链接）
-          // 并回读各员工 MEMORY.md 索引——绑定副作用全部留在 main。
+          // 员工持久记忆：面板打开即批量初始化（.opc data dir 内的记忆根 +
+          // 旧数据迁移）并回读各员工 MEMORY.md 索引——fs 副作用全部留在 main。
           const employeeMemoryIndexes: Record<string, string | null> = {};
           const employeePersonaDigests: Record<string, string | null> = {};
           const employeePrinciples: Record<string, string[]> = {};
+          const employeeMemoryPaths: Record<string, string> = {};
           for (const employee of state.employees) {
             if (employee.status === "departed") continue;
             const bound = await ensureOpcEmployeeMemory(
@@ -450,6 +451,9 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             employeeMemoryIndexes[employee.id] = bound.memoryIndex;
             employeePersonaDigests[employee.id] = bound.personaDigest;
             employeePrinciples[employee.id] = bound.principles;
+            if (bound.memoryDirDisplay) {
+              employeeMemoryPaths[employee.id] = bound.memoryDirDisplay;
+            }
           }
           return {
             ok: true as const,
@@ -458,6 +462,7 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
             employeeMemoryIndexes,
             employeePersonaDigests,
             employeePrinciples,
+            employeeMemoryPaths,
             ...(await readBodies(workspaceRoot, state)),
           };
         } catch (error) {

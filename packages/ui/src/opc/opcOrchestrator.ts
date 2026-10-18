@@ -35,6 +35,9 @@ export interface OpcOrchestratorDeps {
   employeePersonaDigests?: Record<string, string | null>;
   /** 员工原则文件 name 清单（L2 归纳产物；反思轮的既有原则清单） */
   employeePrinciples?: Record<string, string[]>;
+  /** 员工记忆根相对工作区的显示路径（GetState 回读；委派 prompt 的写入指引。
+   * 缺条目 = 绑定未就绪，不注入记忆段——指向不存在的目录会误导员工写入。） */
+  employeeMemoryPaths?: Record<string, string>;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
   /**
@@ -146,17 +149,18 @@ export async function dispatchReadyWorkItems(
       outcome.failed.push({ workItemId: workItem.id, error: "员工缺失" });
       continue;
     }
-    // 员工持久记忆：绑定（.opc + ~/.zcode 链接）→ 索引注入 prompt；
+    // 员工持久记忆：绑定（.opc data dir 内的记忆根）→ 索引注入 prompt；
     // 会话身份切到员工键（记忆根与会话隔离同键，spec「员工持久记忆」）。
     const personaSection = buildOpcPersonaPromptSection(
       deps.employeePersonaDigests?.[employee.id] ?? null,
     );
     let memorySection: string | null = null;
-    if (permissionLevel !== "read-only") {
+    const memoryDirDisplay = deps.employeeMemoryPaths?.[employee.id] ?? null;
+    if (permissionLevel !== "read-only" && memoryDirDisplay) {
       // read-only 员工无写工具，记忆维护指令会与权限约束矛盾——不注入
       // （其记忆依赖 CLI 管线的自动抽取，spec 边界已注明）。
       memorySection = buildOpcEmployeeMemoryPromptSection({
-        memoryDirDisplay: `.opc/employees/${employee.id}/memory`,
+        memoryDirDisplay,
         memoryIndex: deps.employeeMemoryIndexes?.[employee.id] ?? null,
       });
     }

@@ -1,10 +1,12 @@
 import { IGenUiService } from "./gen-ui/contract.js";
 import { createGenUiService } from "./gen-ui/node.js";
 import { channelReplyHostRequestSchema, channelReplyResultSchema } from "@zcode/shared";
+import { resolveOpcEmployeeSandbox } from "@zcode/shared/opc-employee-memory";
+import { cpSync } from "node:fs";
 /* eslint-disable max-lines -- host process 服务注册和启动装配需要集中维护，拆散后会更难追踪依赖注入顺序 */
 // Node.js service implementations — NOT safe to import in browser code
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -2124,6 +2126,18 @@ export function createLocalServices(options: {
     // 设置页的 HTTP 代理、No Proxy + 自定义 CA 按 spawn 时读取注入 agent 子进程 env，
     // 覆盖模型 API / MCP / Bash 出口流量并信任用户显式配置的证书；改动后下次启动 agent 生效。
     resolveSpawnEnv: async (context) => {
+      // OPC 员工沙箱：员工会话（identity 前缀 opc-employee/）的 agent data 根
+      // 路由到工作区 .opc/employees/<id>/（凭据/v2、会话库、记忆物理隔离在
+      // .opc 内，官版与主实例零可见；任务列表索引由 host 持有、按 identity
+      // 分区）。首次 spawn 前初始化骨架与共享文件复制组（credentials/provider/
+      // setting 复制主副本；runtime 整链复制）。
+      const opcSandbox = resolveOpcEmployeeSandbox(context.workspacePath, context.workspaceIdentity);
+      if (opcSandbox) {
+        const v2Dir = join(opcSandbox.employeeDir, ".zcode", "v2");
+        mkdirSync(v2Dir, { recursive: true });
+        // 主副本 v2 源取 host 同款 data 根解析（env 重定向的便携形态下不落空）。
+        copySharedIntoEmployeeSandbox(resolveAppConfigDir(), v2Dir);
+      }
       const [settings] = await Promise.all([settingService.get(), providerRuntime.start()]);
       // 本地 Host 准备解析快照；远程 CLI 继续由自己的文件 loader 读取和迁移配置。
       if (!isDesktopAttachedRemote) await subagentsService.prepareRuntimeState(context);
@@ -2171,7 +2185,25 @@ export function createLocalServices(options: {
       // Host 是旧配置迁移的唯一写入者。Agent spawn 前等待初始化完成，避免 Worker
       // 先拿到尚不存在的 provider_config.json 并发布短暂空 Registry。
       await providerConfigRuntime.start();
+      // 员工 env 路由三件套（键名与 CLI env-config/provider-runtime 适配层对齐）：
+      // - ZCODE_DATA_BASE_DIR → ~/.zcode 语义的 data 根（v2：凭据/provider/遥测）
+      // - ZCODE_STORAGE_DIR → storage.dir → cliStorageRoot（记忆根/skills/plugins）
+      // - ZCODE_SESSION_DB_PATH → 会话库 db.sqlite（默认按 HOME 解析，须显式路由）
+      const opcEmployeeEnv: Record<string, string> = opcSandbox
+        ? {
+            ZCODE_DATA_BASE_DIR: join(opcSandbox.employeeDir),
+            ZCODE_STORAGE_DIR: join(opcSandbox.employeeDir, ".zcode"),
+            ZCODE_SESSION_DB_PATH: join(
+              opcSandbox.employeeDir,
+              ".zcode",
+              "cli",
+              "db",
+              "db.sqlite",
+            ),
+          }
+        : {};
       return {
+        ...opcEmployeeEnv,
         ...buildAgentRuntimeEnv({
           httpProxy: agentNetwork.httpProxy,
           noProxy: agentNetwork.noProxy,
@@ -2903,3 +2935,26 @@ export async function disposeServiceResourcesAndWait(services: ServiceCollection
     .catch(() => {});
 }
 export { localRuntimeNetworkCapture } from "./zcode-agent/localRuntimeNetworkCapture.js";
+
+// OPC 员工沙箱初始化：共享文件同步（凭据/供应商/setting——每次 spawn 用主
+// 副本覆盖，凭据/配置刷新在下一次派发即生效；runtime 目录只做首次物化，
+// 后续版本由 CLI 自身的 TTL 刷新接管）。
+function copySharedIntoEmployeeSandbox(homeV2: string, v2Dir: string): void {
+  for (const sharedFile of [
+    "credentials.json",
+    "provider_config.json",
+    "coding-plan-cache.json",
+    "setting.json",
+  ]) {
+    const src = join(homeV2, sharedFile);
+    const dst = join(v2Dir, sharedFile);
+    if (existsSync(src)) {
+      cpSync(src, dst, { recursive: true, force: true, errorOnExist: false });
+    }
+  }
+  const runtimeSrc = join(homeV2, "runtime");
+  const runtimeDst = join(v2Dir, "runtime");
+  if (existsSync(runtimeSrc) && !existsSync(runtimeDst)) {
+    cpSync(runtimeSrc, runtimeDst, { recursive: true, force: false, errorOnExist: false });
+  }
+}

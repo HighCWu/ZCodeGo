@@ -111,32 +111,45 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
 7. 技能/角色模板导入：兼容两种上游格式——OpenOPC talent 目录（`*.md`，五字段
    frontmatter）与 claude-skills 目录（递归发现 `SKILL.md`）。导入即解析入
    company.json / skills/，重复 id 以「版本覆盖」处理（正文与元数据更新，changelog 追加）。
-8. **员工持久记忆**（复用 CLI 记忆文件约定，管线全部在桌面层，不改 CLI）：
-   - 存储位置：`<工作区>/.opc/employees/<employeeId>/memory/`（一事实一 md，
-     frontmatter 含 name/description/type，type 取 CLI 同款四类
-     user/feedback/project/reference），`MEMORY.md` 为索引（一行一条 hook）。
-     物理数据随工作区/公司包走，员工离职记忆留在 .opc 归档，不跟人消失。
-   - **CLI 管线绑定（符号链接）**：员工首次派发时桌面创建
-     `~/.zcode/cli/memories/projects/project-<hash>` → `.opc/employees/<id>/cli-memory/`
-     的目录链接（win32 junction / 其余 symlink；hash = sha256("opc-employee/<id>")
-     前 16 位十六进制，算法与 CLI project-root.ts 一致并双向同步注释）。
-     CLI 的注入/抽取/dream/selector 全链按 `~/.zcode` 路径工作，物理数据落 .opc。
-     链接在会话创建时校验（失效重建）；Windows junction 免特权，UNC 网络盘
-     workspace 不支持自动绑定（记忆退回 `~/.zcode`，功能保留）。
-   - **会话身份**：员工会话 `workspaceIdentity = opc-employee/<employeeId>`
-     （与 AGENTS.md 的 Workspace Identity 规则同构，记忆与会话隔离同键）。
+8. **员工持久记忆**（复用 CLI 记忆文件约定，管线全部在桌面/host 层，不改 CLI）：
+   - **员工 data dir 沙箱**：员工会话（identity 前缀 `opc-employee/`）的 agent
+     data 根由 host resolveSpawnEnv 按 identity 路由到
+     `<工作区>/.opc/employees/<employeeId>/`——env 三件套：`ZCODE_DATA_BASE_DIR`
+     （v2：凭据/provider/遥测）、`ZCODE_STORAGE_DIR`（storage.dir → cliStorageRoot：
+     记忆根/skills/plugins）、`ZCODE_SESSION_DB_PATH`（会话库 db.sqlite；该项默认
+     按 HOME 解析，须显式路由）。凭据/provider/setting 每次派发用主副本覆盖同步
+     （刷新即时生效）；runtime 目录仅首次物化（后续由 CLI 自身 TTL 刷新接管）。
+     主实例与官版 zcode 对员工 data dir 零可见；任务列表索引（tasks-index.sqlite）
+     为 host 单例，按 workspaceIdentity 分区，不随沙箱路由。
+   - 存储位置：`<工作区>/.opc/employees/<employeeId>/.zcode/cli/memories/projects/
+     project-<hash>/memory/`（CLI project-root 同款布局；hash = sha256(identity)
+     前 16 位十六进制，identity = `opc-employee/<workspacePath>::<employeeId>`，
+     算法与 CLI project-root.ts 一致并双向同步注释。一事实一 md，frontmatter 含
+     name/description/type，type 取 CLI 同款四类 user/feedback/project/reference，
+     `MEMORY.md` 为索引）。物理数据随工作区/公司包走，员工离职记忆留在 .opc
+     归档，不跟人消失。symlink 绑定时代的旧 `.opc/employees/<id>/memory/` 数据
+     由 GetState ensure 一次性迁移进新记忆根（新根非空绝不覆盖；旧目录保留）。
+   - **会话身份**：员工会话 `workspaceIdentity = opc-employee/<workspacePath>::
+     <employeeId>`（含 workspacePath 维度：跨工作区同名员工必须落到不同 data 根；
+     与 AGENTS.md 的 Workspace Identity 规则同构，记忆与会话隔离同键）。
    - **绑定时点与召回（注入）**：绑定挂在 **ZcodeGoOpcGetState 既有通道**
-     （面板打开时 main 批量绑定全部在职员工并回读各员工 MEMORY.md 索引，
-     返回 `employeeMemoryIndexes`）——零新 IPC 通道、零 preload 改动、
-     副作用全部留在 main。委派 prompt 尾部追加「持久记忆」段（员工 MEMORY.md
-     索引全文 + 维护指令）；read-only 员工跳过（无写工具，维护指令与权限
-     约束矛盾）。CLI 记忆管线的 default-index 注入与本段并存不冲突。
+     （面板打开时 main 批量 ensure 全部在职员工的记忆根并回读 MEMORY.md 索引、
+     persona 摘要、原则清单与记忆根显示路径，返回 `employeeMemoryIndexes` /
+     `employeePersonaDigests` / `employeePrinciples` / `employeeMemoryPaths`）——
+     零新 IPC 通道、零 preload 改动、副作用全部留在 main。委派 prompt 尾部追加
+     「持久记忆」段（记忆根显示路径 + 员工 MEMORY.md 索引全文 + 维护指令）；
+     read-only 员工跳过（无写工具，维护指令与权限约束矛盾）；绑定未就绪（无
+     显示路径）也跳过——指向不存在的目录会误导员工写入。CLI 记忆管线的
+     default-index 注入与本段并存不冲突。
    - **隔离**：员工 toolDenylist 动态追加——其它员工 `.opc/employees/<otherId>/**`
      的 Read/Write/Edit 拒绝；`.opc/company.json` 等公司状态的写拒绝。员工写
      自己记忆目录属 workspace 内写，天然允许。
    - **增强开关（可选）**：setting `memoryEnabled: true` 时 CLI 的自动抽取/
      dream 巩固额外生效（共享 setting，是否开启由用户决定）；关闭时核心闭环
      （注入 + 员工自行维护）不受影响。
+   - **已知边界**：员工沙箱把 cliStorageRoot 路由进 data dir，主实例
+     `~/.zcode/cli/plugins` 的已装插件对员工会话不可见（v1 员工以内置工具 +
+     OPC 技能正文工作）；mailbox 根仍随 HOME（跨 agent 信箱不隔离）。
    - **反思与分层凝练（记忆金字塔 L2/L4）**：工作项进入 done（有 assignee、
      非 read-only、距上次反思 ≥6h 节流）时，以员工自己身份派发一轮**反思
      会话**（临时 headless，委派 prompt 即反思任务）：通读记忆目录 → 把
@@ -144,7 +157,7 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      正文 `[[双链]]` 引用证据记忆，不足两条证据不造原则）→ 被新经历证实/
      证伪的已有原则就地更新 → 顺带更新 `persona.md` 的行为倾向小节（每条
      倾向带证据引用与「暂定/确认」标记）→ 同步 MEMORY.md 索引。
-   - **人格画像（persona.md）**：`.opc/employees/<id>/persona.md`，行为
+   - **人格画像（persona.md）**：员工记忆根下的 `persona.md`，行为
      倾向画像（风格/偏好/决策倾向），由反思轮长周期沉淀；**管理者可显式
      重置**（防早期误反馈固化错误倾向）。委派 prompt 顶部注入 persona
      摘要（前 ~500 字，GetState 回读）——员工「以什么风格做事」先于琐碎

@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile, lstat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { ensureDirLink } from "../src/main/zcodeGoOpcEmployeeMemory.js";
-import { opcEmployeeMemoryCliLinkPath } from "@zcode/shared";
+import { ensureOpcEmployeeMemory } from "../src/main/zcodeGoOpcEmployeeMemory.js";
+import { opcEmployeeMemoryIdentity } from "@zcode/shared";
 
 const CLEANUP: string[] = [];
 async function makeTmp(): Promise<string> {
@@ -16,68 +16,100 @@ afterAll(async () => {
   for (const dir of CLEANUP) await rm(dir, { recursive: true, force: true });
 });
 
-describe("员工记忆目录链接（symlink/junction 语义）", () => {
-  it("hash 与 CLI project-root.ts 同算法（sha256(keySource) 前 16 位）", () => {
-    // 与 apps/zcode-cli/packages/core/src/memory/project-root.ts 对齐：
-    // keySource = workspaceIdentity（trim 后），sha256 前 16 位十六进制
-    const ws = "/ws/a";
-    const identity = `opc-employee/${ws}::emp-1`;
-    const expected = createHash("sha256").update(identity).digest("hex").slice(0, 16);
-    const link = opcEmployeeMemoryCliLinkPath("/home/u", "emp-1", ws, expected);
-    expect(link).toContain(`project-${expected}`);
-    expect(expected).toMatch(/^[0-9a-f]{16}$/);
+const logger = { info: () => {}, warn: () => {} };
+
+/** 员工记忆根（<ws>/.opc/employees/<id>/.zcode/cli/memories/projects/project-<hash>/memory）*/
+function memoryRoot(ws: string, employeeId: string): string {
+  const identity = opcEmployeeMemoryIdentity(employeeId, ws);
+  const hash = createHash("sha256").update(identity).digest("hex").slice(0, 16);
+  return join(
+    ws,
+    ".opc",
+    "employees",
+    employeeId,
+    ".zcode",
+    "cli",
+    "memories",
+    "projects",
+    `project-${hash}`,
+    "memory",
+  );
+}
+
+describe("员工记忆绑定（data dir 沙箱形态）", () => {
+  it("ensure 在员工 data dir 内创建记忆根并回读索引/persona/原则", async () => {
+    const ws = await makeTmp();
+    const root = memoryRoot(ws, "e1");
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      join(root, "MEMORY.md"),
+      "- [供应商延期](vendor-delay.md) — 先冻结需求\n",
+      "utf8",
+    );
+    await writeFile(join(root, "persona.md"), "谨慎、先对齐再动手", "utf8");
+    await writeFile(
+      join(root, "p-verify.md"),
+      "---\ntype: principle\nname: 先验证后提交\n---\n正文",
+      "utf8",
+    );
+
+    const result = await ensureOpcEmployeeMemory(logger, ws, "e1");
+    expect(result.bound).toBe(true);
+    expect(result.memoryIndex).toContain("先冻结需求");
+    expect(result.personaDigest).toContain("谨慎");
+    expect(result.principles).toEqual(["先验证后提交"]);
+    // 显示路径为 workspace 相对（委派 prompt 的写入指引与 denylist glob 同一坐标系）
+    expect(result.memoryDirDisplay).toBe(root.slice(ws.length + 1));
   });
 
-  it("创建后读写穿透到 .opc 物理目录；重复创建幂等", async () => {
+  it("新员工：目录就地创建，索引/persona 为 null、原则为空", async () => {
     const ws = await makeTmp();
-    const link = join(ws, "link-root");
-    const target = join(ws, ".opc", "employees", "e1", "cli-memory");
-    await ensureDirLink(link, target);
-    // 穿透写：经链接路径写，物理路径可读
-    await writeFile(join(link, "MEMORY.md"), "- hook\n", "utf8");
-    expect(await readFile(join(target, "MEMORY.md"), "utf8")).toBe("- hook\n");
-    // 幂等：重复 ensure 不破坏数据
-    await ensureDirLink(link, target);
-    expect(await readFile(join(link, "MEMORY.md"), "utf8")).toBe("- hook\n");
-    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    const result = await ensureOpcEmployeeMemory(logger, ws, "fresh-id");
+    expect(result.bound).toBe(true);
+    expect(result.memoryIndex).toBeNull();
+    expect(result.personaDigest).toBeNull();
+    expect(result.principles).toEqual([]);
+    // 记忆根目录已在员工 data dir 内就绪
+    await expect(readdir(memoryRoot(ws, "fresh-id"))).resolves.toEqual([]);
   });
 
-  it("指向漂移时重建链接且不删除旧目标数据", async () => {
+  it("一次性迁移：symlink 时代的 .opc/<id>/memory 旧数据迁入新记忆根", async () => {
     const ws = await makeTmp();
-    const oldTarget = join(ws, "old-target");
-    await mkdir(oldTarget, { recursive: true });
-    const link = join(ws, "link-root");
-    await ensureDirLink(link, oldTarget);
-    await writeFile(join(link, "keep.md"), "数据本体", "utf8");
+    const legacy = join(ws, ".opc", "employees", "e2", "memory");
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, "MEMORY.md"), "- 旧索引行\n", "utf8");
+    await writeFile(join(legacy, "old-note.md"), "旧记忆正文", "utf8");
 
-    const newTarget = join(ws, ".opc", "employees", "e1", "cli-memory");
-    await ensureDirLink(link, newTarget);
-    // 链接已改指新目标（对旧目标的物理数据未删除）
-    expect(await readFile(join(oldTarget, "keep.md"), "utf8")).toBe("数据本体");
-    // 新目标可穿透读写
-    await writeFile(join(link, "new.md"), "新", "utf8");
-    expect(await readFile(join(newTarget, "new.md"), "utf8")).toBe("新");
+    const result = await ensureOpcEmployeeMemory(logger, ws, "e2");
+    expect(result.bound).toBe(true);
+    expect(result.memoryIndex).toContain("旧索引行");
+    // 迁移后新记忆根持有数据，旧目录保留（废弃现场不删）
+    expect(await readFile(join(memoryRoot(ws, "e2"), "old-note.md"), "utf8")).toBe(
+      "旧记忆正文",
+    );
+    await expect(readFile(join(legacy, "MEMORY.md"), "utf8")).resolves.toContain(
+      "旧索引行",
+    );
   });
 
-  it("非链接实体占用链接路径时拒绝并抛错（不破坏数据）", async () => {
+  it("新记忆根已有内容时不迁移（绝不覆盖 CLI 已写数据）", async () => {
     const ws = await makeTmp();
-    const link = join(ws, "occupied");
-    await mkdir(link, { recursive: true });
-    await writeFile(join(link, "precious.txt"), "勿删", "utf8");
-    const target = join(ws, "elsewhere");
-    await expect(ensureDirLink(link, target)).rejects.toThrow(/被非链接实体占用/);
-    // 占位数据完好
-    expect(await readFile(join(link, "precious.txt"), "utf8")).toBe("勿删");
-    // 目标未被创建占用
-    await expect(readFile(join(target, "x"))).rejects.toThrow();
+    const legacy = join(ws, ".opc", "employees", "e3", "memory");
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, "MEMORY.md"), "- 旧索引\n", "utf8");
+    const root = memoryRoot(ws, "e3");
+    await mkdir(root, { recursive: true });
+    await writeFile(join(root, "MEMORY.md"), "- 新索引（CLI 已写）\n", "utf8");
+
+    const result = await ensureOpcEmployeeMemory(logger, ws, "e3");
+    expect(result.memoryIndex).toContain("新索引（CLI 已写）");
+    expect(await readdir(root)).toEqual(["MEMORY.md"]);
   });
 
-  it("链接类型符合平台（win32 junction / 其余 symlink）", async () => {
+  it("异形 employeeId（含路径分隔符）拒绝绑定", async () => {
     const ws = await makeTmp();
-    const link = join(ws, "typed-link");
-    const target = join(ws, "t");
-    await ensureDirLink(link, target);
-    const st = await lstat(link);
-    expect(st.isSymbolicLink()).toBe(true);
+    const result = await ensureOpcEmployeeMemory(logger, ws, "../escape");
+    expect(result.bound).toBe(false);
+    expect(result.memoryIndex).toBeNull();
   });
 });
