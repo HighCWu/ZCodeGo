@@ -241,6 +241,9 @@ export function ZcodeGoOpcPanelRoot({
           // 补全（无有效档位 = 不可执行，fail-safe 不派发）
           const pinnedModelSelection: ModelSelection | undefined =
             await readPinnedModelSelection(employee);
+          logger.lifecycle.info(
+            `[zcode-go][opc] 反思钉定：${pinnedModelSelection ? `${pinnedModelSelection.providerId}/${pinnedModelSelection.modelId}` : "缺失（跳过反思）"}`,
+          );
           if (!pinnedModelSelection) return;
           const created = await taskService.createTask({
             workspacePath,
@@ -258,11 +261,14 @@ export function ZcodeGoOpcPanelRoot({
             // 反思要读写记忆文件：拒绝 shell/node_repl 等执行通道，保留文件工具
             toolDenylist: buildOpcToolDenylist("workspace-write"),
           });
-          logger.info(
+          logger.lifecycle.info(
             `[zcode-go][opc] 反思轮已派发：${employee.name}（${item.id}）`,
           );
         } catch (error) {
-          logger.warn("[zcode-go][opc] 反思轮派发失败", error);
+          logger.lifecycle.warn(
+            `[zcode-go][opc] 反思轮派发失败：${employee.name}（${item.id}）`,
+            error,
+          );
         }
       })();
     }

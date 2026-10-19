@@ -6,7 +6,6 @@ import { useEffect } from "react";
 import { useIsOpcMode } from "@/hooks/useInterfaceMode.js";
 import { ZcodeGoOpcPanelRoot } from "@/opc/ZcodeGoOpcPanelRoot.js";
 import { useOpcStore } from "@/store/opcStore.js";
-import { useZCodeGoExpBridge } from "./useZCodeGoExpBridge.js";
 
 export function ZcodeGoOpcPanelMount({
   workspacePath,
@@ -16,8 +15,6 @@ export function ZcodeGoOpcPanelMount({
   workspaceIdentity?: string | null;
 }) {
   const initialize = useOpcStore((s) => s.initialize);
-  // 试验执行桥：外部脚本（记忆压缩试验等）经 main HTTP 转发的临时会话执行
-  useZCodeGoExpBridge(workspacePath);
   // 预热门控到 OPC 模式：非 OPC 用户（含全部既有 E2E）启动期零 OPC 开销
   // （main 侧 initialize 会写 company.json + 24 技能文件 + packs 扫描，慢盘
   // 环境与既有 E2E 的渲染窗口竞争）；面板打开时 initialize 幂等短路兜底。

@@ -148,9 +148,13 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
    - **隔离**：员工 toolDenylist 动态追加——其它员工 `.opc/employees/<otherId>/**`
      的 Read/Write/Edit 拒绝；`.opc/company.json` 等公司状态的写拒绝。员工写
      自己记忆目录属 workspace 内写，天然允许。
-   - **增强开关（可选）**：setting `memoryEnabled: true` 时 CLI 的自动抽取/
-     dream 巩固额外生效（共享 setting，是否开启由用户决定）；关闭时核心闭环
-     （注入 + 员工自行维护）不受影响。
+   - **CLI 原生记忆管线（员工会话常开）**：自动抽取（L1 事实文件自动
+     形成）与 dream 巩固（L1→L2 整理）是记忆阶段的固有形成通道——员工
+     会话在 runtime 偏好解析时强制 `memoryEnabled: true`（host 按
+     workspaceIdentity 识别员工后覆盖，不随全局 setting 关闭；主实例
+     行为不变）。CLI 的 default-index 注入与委派 prompt 注入并存不冲突。
+   - **增强开关（可选）**：主实例会话仍按全局 setting `memoryEnabled`
+     决定是否启用记忆管线。
    - **已知边界**：员工沙箱把 cliStorageRoot 路由进 data dir，主实例
      `~/.zcode/cli/plugins` 的已装插件对员工会话不可见（v1 员工以内置工具 +
      OPC 技能正文工作；subagent profiles 由 host 侧从主实例准备后注入，不受影响）；
@@ -443,8 +447,7 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   /opt/ZCode/resources/glm/zcode.cjs -p "<prompt>"`（把 Electron 二进制当
   node v24.14.0 跑 zcode.cjs，与桌面拉起 zcode-cli 子进程同款：argv0 改写
   + ELECTRON_RUN_AS_NODE）。该通路已实测跑通（干净 stdout、GLM coding
-  plan 登录态复用、不影响运行中的桌面实例），记忆压缩试验脚本经
-  `--cli <wrapper>` 使用此通路。
+  plan 登录态复用、不影响运行中的桌面实例）。
 - **抽象字符编解码路线（已舍弃，2026-10-17 定稿）**：随机 token 种子 +
   「自家压缩产物还原」指令的解码路线被否定——GLM-5.3-Flash 与
   gpt-6-astra 双模型、三通路（subagent/CLI/示例预制）、两档指令强度
@@ -455,30 +458,6 @@ lastChangedAt, acknowledgedAt? }`。首次采集直接落 baseline（无判定�
   前提是编码侧注入真实信息痕迹（数字直存/可读结构），纯种子寻址在当前
   对齐水平不可实现**；「模型自创语言」的可提示通用编码器未证成，模型
   特异性仅以拆字/形近代号等自发痕迹形态存在（v5 实证）。
-- **记忆压缩试验（scripts/experiments/memory-compress*.mjs，四版结论）**：
-  提示词诱导的模型特定编码（LM Babel/PromptQuine/TextGrad 思想），
-  276 字符/10 事实样本上的实证边界——
-  (a) 纯随机映射 F=0（无共享状态无法重建映射，模型元认知亦拒绝）；
-  (b) 无意义化与浓缩不冲突（gzip 同理），模型自发产出 gzip-b64 掩护、
-  盲文私有编码、ROT13 成体系代号，「模型特定编码」机制存在且可复用；
-  (c) 压缩边界（token 口径，GLM-5.3-Flash tokenizer 实测）：原文 178 tokens；
-  韩文/盲文等罕见字符集被 tokenizer 拆 2-3 token/字符——v2 韩文系编码字符口径
-  0.31 是假象，token 口径反而膨胀（1.02-1.19）；ASCII+常用汉字混合（数字
-  直存+代号）才是正确字符集。
-  **v5 定版（token 感知协议）：R_token=0.152（27/178，38 字符密文
-  `2:187(40/50/10)18;弓日11/15;12/1>20;运营李婷`），无编码上下文的独立
-  新会话解码必答事实 8/8（两次会话一致）**——「弓日」= 张明的拆字代号。
-  协议要点：gzip 类比定性（压缩格式自然属性，不承担对抗保密——「外部观察者
-  完全无法读懂」的对抗性表述会触发模型元认知拒绝「无共享密钥无法兼顾」）、
-  字符集白名单（禁罕见字符）、数字边界强制分隔、长实体（编号/邮箱）授权
-  丢弃、反馈补入缺失事实（+4 tokens）。10%（18 tokens）信息论可达但当前
-  模型在该预算下丢必答事实，15% 为实测平衡点；
-  (d) 解码失败反馈重编码（TextGrad 式）在 L1 有效（F 0→满分），但反馈
-  prompt 必须约束「已可还原部分保持原编码不动」，否则整体重写倒退；
-  (e) 判定口径：还原允许语法重组，关键词匹配存在「3期/三期」类误杀。
-  试验暂不产品化（协议纯函数 opc-memory-compress.ts 保留 v1 提示词，
-  迭代到试验结论等拍板）；token 口径 R 与跨模型对照 G 未做（headless
-  无 usage；多模型需员工 modelSelection 路径）。
 - **探测会话保留 Write 权限**（写指纹样本文件所必需，prompt 契约限定
   单文件）：被测模型理论上可写其他文件——与 workspace-write 员工同级
   的威胁口径，依赖会话隔离边界。

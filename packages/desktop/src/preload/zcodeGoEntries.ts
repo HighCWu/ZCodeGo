@@ -223,50 +223,6 @@ export function installZcodeGoPreloadEntries({
         PlatformChannels.ZcodeGoOpcReadFingerprintSample,
         payload,
       ),
-    /** zcode-go：试验接口通道调试（比对 preload 运行时实际使用的通道值）。 */
-    __zcExpChannelDebug: (): { runPrompt: string } => ({
-      runPrompt: PlatformChannels.ZcodeGoExpRunPrompt,
-    }),
-    /** zcode-go：试验拉模式——renderer 轮询取待执行请求（无请求返回 null）。 */
-    takeZcodeGoExpPending: (payload: {
-      workspacePath: string;
-    }): Promise<{
-      request: {
-        requestId: string;
-        workspacePath: string;
-        content: string;
-        fileTag: string;
-        model?: string;
-      } | null;
-    }> => ipcRenderer.invoke(PlatformChannels.ZcodeGoExpTakePending, payload),
-    /** zcode-go：试验执行请求（main → renderer；临时会话跑 prompt 并写 .opc/exp/）。 */
-    onZcodeGoExpRunPrompt: (
-      handler: (payload: {
-        requestId: string;
-        workspacePath: string;
-        content: string;
-        fileTag: string;
-        model?: string;
-      }) => void,
-    ): (() => void) => {
-      const listener = (
-        _event: Electron.IpcRendererEvent,
-        payload: {
-          requestId: string;
-          workspacePath: string;
-          content: string;
-          fileTag: string;
-          model?: string;
-        },
-      ) => handler(payload);
-      ipcRenderer.on(PlatformChannels.ZcodeGoExpRunPrompt, listener);
-      return () =>
-        ipcRenderer.removeListener(
-          PlatformChannels.ZcodeGoExpRunPrompt,
-          listener,
-        );
-    },
-    /** zcode-go：OPC 模式——公司状态变化事件；返回退订函数。 */
     onZcodeGoOpcStateChanged: (
       handler: (payload: { workspacePath: string }) => void,
     ): (() => void) => {

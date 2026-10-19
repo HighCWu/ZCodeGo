@@ -778,6 +778,60 @@ try {
     );
   }
 
+  // ── 7.6 L2 反思轮验收：done → 员工身份反思会话出现 ──
+  // 转换表：in_progress → review → done（直接 in_progress → done 被 reducer
+  // 判非法静默 no-op，响应 ok 但状态不变——必须断言响应内的实际状态）。
+  {
+    const reviewApply = await applyMutations([
+      { kind: "workitem.status", workItemId, status: "review" },
+    ]);
+    assert(
+      reviewApply &&
+        reviewApply.ok &&
+        reviewApply.state?.workItems?.find((w) => w.id === workItemId)
+          ?.status === "review",
+      "工作项转 review（验收门）",
+    );
+    const doneApply = await applyMutations([
+      { kind: "workitem.status", workItemId, status: "done" },
+    ]);
+    assert(
+      doneApply &&
+        doneApply.ok &&
+        doneApply.state?.workItems?.find((w) => w.id === workItemId)
+          ?.status === "done",
+      "工作项转 done（触发反思轮）",
+    );
+    const employeeDb = join(
+      WORKSPACE,
+      ".opc",
+      "employees",
+      laowangId,
+      ".zcode",
+      "cli",
+      "db",
+      "db.sqlite",
+    );
+    let reflected = false;
+    for (let i = 0; i < 24 && !reflected; i += 1) {
+      await sleep(5000);
+      if (!existsSync(employeeDb)) continue;
+      try {
+        const db = new DatabaseSync(employeeDb, { readOnly: true });
+        const rows = db
+          .prepare(
+            "select session_id, substr(text, 1, 200) as head from input_history where text like '%记忆反思轮%'",
+          )
+          .all();
+        db.close();
+        if (rows.length > 0) reflected = true;
+      } catch {
+        /* 库忙 */
+      }
+    }
+    assert(reflected, "反思会话已派发（input_history 含记忆反思轮 prompt）");
+  }
+
   // ── 8. tasks-index：任务行 identity = 员工键（主列表不被污染） ─────────────
   {
     const indexDb = join(sandboxHome, ".zcode", "v2", "tasks-index.sqlite");

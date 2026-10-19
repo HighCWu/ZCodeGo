@@ -205,7 +205,6 @@ import { trimForkedSessionHistory } from "./zcodeGoForkTrim.js";
 import { initZcodeGoOpcStore } from "./zcodeGoOpcStore.js";
 // zcode-go：OPC 渠道桥（Telegram 长轮询 → 入站队列；无配置零足迹，见 specs「入站队列」节）
 import { initZcodeGoOpcChannels } from "./zcodeGoOpcChannels.js";
-import { initZcodeGoExpServer } from "./zcodeGoExpServer.js";
 import {
   registerForkFullHistoryFromParent,
   runContinuousForkFullHistoryBackfill,
@@ -3096,7 +3095,6 @@ app.whenReady().then(async () => {
   // zcode-go：OPC 渠道桥（仅在 ~/.zcode-go/config.json 配置了 telegram token 时启动轮询）。
   initZcodeGoOpcChannels(logger);
   // zcode-go：试验 HTTP 接口（env ZCODE_GO_EXP_HTTP=1 门控，默认关闭）
-  initZcodeGoExpServer(logger);
   registerDesktopResourceTelemetry(logger);
   // 主窗口 renderer 的 60 秒 heap 样本入口；随 App 生命周期常驻，只注册一次。
   registerRendererHeapSampleIpc();

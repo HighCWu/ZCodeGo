@@ -4,6 +4,7 @@ import {
   requestVerificationInteractionAvailable,
 } from "@zcode/shared";
 import { zcodeMcpUiSamplingResultSchema } from "@zcode/shared";
+import { OPC_EMPLOYEE_IDENTITY_PREFIX } from "@zcode/shared";
 import { MCP_APPS_SAMPLING_TRANSPORT_TIMEOUT_MS } from "@zcode/shared/mcp-apps";
 import {
   channelReplyRequestSchema,
@@ -2491,6 +2492,16 @@ export function createZCodeAgentService(
                     workspace.workspaceIdentity &&
                     isRemoteWorkspaceIdentity(workspace.workspaceIdentity)
                   );
+                // OPC 员工会话强制开启记忆子系统（CLI 原生抽取/dream/索引注入）：
+                // 这是记忆金字塔 L1 的自动形成与 L1→L2 巩固通道，不随全局
+                // memoryEnabled 设置关闭（主实例行为不变）。
+                if (
+                  workspace.workspaceIdentity?.trim().startsWith(
+                    OPC_EMPLOYEE_IDENTITY_PREFIX,
+                  )
+                ) {
+                  preferences.memoryEnabled = true;
+                }
               } catch (error) {
                 await client.respondError(request.id, {
                   code: -32603,

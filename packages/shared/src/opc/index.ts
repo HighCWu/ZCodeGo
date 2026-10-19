@@ -7,7 +7,6 @@ export * from "./opc-types.js";
 export * from "./opc-template-format.js";
 export * from "./opc-evolution.js";
 export * from "./opc-fingerprint.js";
-export * from "./opc-memory-compress.js";
 export * from "./opc-reducer.js";
 export * from "./opc-prompts.js";
 export * from "./opc-packs.js";
