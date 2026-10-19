@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- zcode-go OPC 组织视图：员工卡片（内联模型偏好编辑、画像重置两段确认）与岗位槽位/招聘/导入导出收口在单文件，拆散会更难追踪（同 SessionPane 惯例）。 */
 /**
  * zcode-go OPC 组织视图：岗位槽位 + 员工卡片（复盘/暂停/离职/挂接技能）。
  */
