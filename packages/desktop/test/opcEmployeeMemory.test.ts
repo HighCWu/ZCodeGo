@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { ensureOpcEmployeeMemory } from "../src/main/zcodeGoOpcEmployeeMemory.js";
@@ -18,14 +18,27 @@ afterAll(async () => {
 
 const logger = { info: () => {}, warn: () => {} };
 
-/** 员工记忆根（<ws>/.opc/employees/<id>/.zcode/cli/memories/projects/project-<hash>/memory）。
+/** CLI resolveProjectMemoryRoot 同款（无 identity 输入分支）的项目目录名：
+ * slug=工作区目录名（≤48）、hash=sha256(绝对路径)[:16]。 */
+function memoryProjectDirName(ws: string): string {
+  const normalized = resolve(ws);
+  const keySource = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  const hash = createHash("sha256").update(keySource).digest("hex").slice(0, 16);
+  const slug =
+    basename(normalized)
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project";
+  return `${slug}-${hash}`;
+}
+
+/** 员工记忆根（<ws>/.opc/employees/<id>/.zcode/cli/memories/projects/<dir>/memory）。
  * 路径拼接与 shared 同款手写 POSIX 尾段（ws 原样 + / 分隔）：main 的
  * memoryDirDisplay 正是记忆根去掉 ws 前缀的相对路径，Windows 上 join() 的
  * 反斜杠会与之失配。 */
 function memoryRoot(ws: string, employeeId: string): string {
-  const identity = opcEmployeeMemoryIdentity(employeeId, ws);
-  const hash = createHash("sha256").update(identity).digest("hex").slice(0, 16);
-  return `${ws}/.opc/employees/${employeeId}/.zcode/cli/memories/projects/project-${hash}/memory`;
+  return `${ws}/.opc/employees/${employeeId}/.zcode/cli/memories/projects/${memoryProjectDirName(ws)}/memory`;
 }
 
 describe("员工记忆绑定（data dir 沙箱形态）", () => {

@@ -10,7 +10,7 @@
  * opc-employee-memory.ts（hash 算法与 CLI project-root.ts 双向同步）。
  */
 import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve, basename } from "node:path";
 import { createHash } from "node:crypto";
 import {
   opcEmployeeMemoryIdentity,
@@ -23,14 +23,35 @@ export interface OpcEmployeeMemoryLogger {
   warn: (message: string, ...args: unknown[]) => void;
 }
 
-/** CLI project-root.ts 同款：sha256(keySource) 前 16 位十六进制。
- * 放在本文件（main）而非 shared：sandbox preload 禁 node 内置模块，
- * shared barrel 被 preload 打包时不能出现 node:crypto。 */
-function opcEmployeeMemoryHash(employeeId: string, workspacePath: string): string {
-  return createHash("sha256")
-    .update(opcEmployeeMemoryIdentity(employeeId, workspacePath))
+/** CLI resolveProjectMemoryRoot 同款的记忆根目录名（无 identity 输入分支）：
+ * v4 子进程的 runtime 不携带员工 identity（v4 workspaceId 必须为可执行真实
+ * 路径，见 adapter createSession），记忆根按「路径键」解析——slug=工作区目录
+ * 名（≤48 截断，fallback project）、hash=sha256(绝对路径，win32 小写)[:16]。
+ * 员工间隔离由每员工独立 storage root（env 三键路由）物理保证。 */
+function opcEmployeeMemoryProjectDir(workspacePath: string): string {
+  const normalized = resolve(workspacePath);
+  const keySource =
+    process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  const hash = createHash("sha256")
+    .update(keySource)
     .digest("hex")
     .slice(0, 16);
+  const slug =
+    basename(normalized)
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project";
+  return `${slug}-${hash}`;
+}
+
+/** symlink 时代遗留（identity 键哈希）的记忆根目录名——迁移源之一。 */
+function legacyIdentityMemoryProjectDir(employeeId: string, workspacePath: string): string {
+  const hash = createHash("sha256")
+    .update(opcEmployeeMemoryIdentity(employeeId, resolve(workspacePath)))
+    .digest("hex")
+    .slice(0, 16);
+  return `project-${hash}`;
 }
 
 /**
@@ -76,12 +97,18 @@ export async function ensureOpcEmployeeMemory(
     if (!sandbox) {
       return FAILED_ENSURE;
     }
+    const projectsDir = join(sandbox.employeeDir, ".zcode", "cli", "memories", "projects");
     const memoryDir = opcEmployeeSandboxMemoryRoot(
       sandbox.employeeDir,
-      opcEmployeeMemoryHash(employeeId, ws),
+      opcEmployeeMemoryProjectDir(ws),
     );
     await mkdir(memoryDir, { recursive: true });
     await migrateLegacyMemoryDir(join(ws, ".opc", "employees", employeeId, "memory"), memoryDir);
+    // symlink 时代 identity 键哈希根（project-<sha256(identity)>）一并迁移。
+    await migrateLegacyMemoryDir(
+      join(projectsDir, legacyIdentityMemoryProjectDir(employeeId, ws)),
+      memoryDir,
+    );
     let memoryIndex: string | null = null;
     try {
       memoryIndex = await readFile(join(memoryDir, "MEMORY.md"), "utf8");
@@ -161,7 +188,7 @@ export async function resetOpcEmployeePersona(
     const sandbox = resolveOpcEmployeeSandbox(ws, opcEmployeeMemoryIdentity(employeeId, ws));
     if (!sandbox) return false;
     const personaPath = join(
-      opcEmployeeSandboxMemoryRoot(sandbox.employeeDir, opcEmployeeMemoryHash(employeeId, ws)),
+      opcEmployeeSandboxMemoryRoot(sandbox.employeeDir, opcEmployeeMemoryProjectDir(ws)),
       "persona.md",
     );
     await rm(personaPath, { force: true });
@@ -182,7 +209,7 @@ export function opcEmployeeMemoryIndexPath(
     return join(ws, ".opc", "employees", employeeId, "memory", "MEMORY.md");
   }
   return join(
-    opcEmployeeSandboxMemoryRoot(sandbox.employeeDir, opcEmployeeMemoryHash(employeeId, ws)),
+    opcEmployeeSandboxMemoryRoot(sandbox.employeeDir, opcEmployeeMemoryProjectDir(ws)),
     "MEMORY.md",
   );
 }

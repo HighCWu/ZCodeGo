@@ -35,7 +35,7 @@ import {
 } from "node:fs";
 import { cpSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const REAL_STATE_DIR = join(homedir(), ".zcode-go");
@@ -89,13 +89,17 @@ function assert(condition, message) {
 function memoryIdentity(workspacePath, employeeId) {
   return `opc-employee/${workspacePath}::${employeeId}`;
 }
-function memoryHash(workspacePath, employeeId) {
+function memoryHash(workspacePath) {
   return createHash("sha256")
-    .update(memoryIdentity(workspacePath, employeeId))
+    .update(resolve(workspacePath))
     .digest("hex")
     .slice(0, 16);
 }
 function sandboxMemoryRoot(workspacePath, employeeId) {
+  // 与 CLI resolveProjectMemoryRoot（无 identity 输入分支）同款：v4 子进程
+  // 的 runtime 不携带员工 identity，记忆根按「路径键」解析——slug=目录名、
+  // hash=sha256(绝对路径)[:16]。隔离由每员工独立 storage root 物理保证。
+  const slug = basename(workspacePath).toLowerCase() || "project";
   return join(
     workspacePath,
     ".opc",
@@ -105,7 +109,7 @@ function sandboxMemoryRoot(workspacePath, employeeId) {
     "cli",
     "memories",
     "projects",
-    `project-${memoryHash(workspacePath, employeeId)}`,
+    `${slug}-${memoryHash(workspacePath)}`,
     "memory",
   );
 }

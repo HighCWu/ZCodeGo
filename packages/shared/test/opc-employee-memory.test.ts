@@ -45,10 +45,10 @@ describe("OPC 员工持久记忆（沙箱解析与隔离策略）", () => {
     expect(resolveOpcEmployeeSandbox("/ws/a", "opc-employee//ws/a::..")).toBeNull();
   });
 
-  it("记忆根在员工 data dir 的 CLI 布局下（data dir 沙箱形态）", () => {
+  it("记忆根在员工 data dir 的 CLI 布局下（projectDirName 由调用方按路径键计算）", () => {
     const employeeDir = "/ws/a/.opc/employees/emp-1";
-    expect(opcEmployeeSandboxMemoryRoot(employeeDir, "abc123")).toBe(
-      `${employeeDir}/.zcode/cli/memories/projects/project-abc123/memory`,
+    expect(opcEmployeeSandboxMemoryRoot(employeeDir, "workspace-abc123")).toBe(
+      `${employeeDir}/.zcode/cli/memories/projects/workspace-abc123/memory`,
     );
   });
 

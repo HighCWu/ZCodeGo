@@ -48,12 +48,14 @@ export function resolveOpcEmployeeSandbox(
   };
 }
 
-/** 员工记忆根（CLI project-root 同款布局：dataBaseDir 下 .zcode/cli/memories）。 */
+/** 员工记忆根（CLI project-root 同款布局：员工 data root 下 .zcode/cli/memories）。
+ * projectDirName 由调用方按 CLI resolveProjectMemoryRoot 的键规则计算
+ * （无 identity 时 = `${目录名 slug}-${sha256(绝对路径)[:16]}`，见 desktop main）。 */
 export function opcEmployeeSandboxMemoryRoot(
   employeeDir: string,
-  memoryHash: string,
+  projectDirName: string,
 ): string {
-  return `${employeeDir}/.zcode/cli/memories/projects/project-${memoryHash}/memory`;
+  return `${employeeDir}/.zcode/cli/memories/projects/${projectDirName}/memory`;
 }
 
 /**

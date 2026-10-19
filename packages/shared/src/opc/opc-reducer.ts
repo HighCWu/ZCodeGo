@@ -231,8 +231,20 @@ function applyOnce(
         (item) => item.id === mutation.employeeId,
       );
       if (!previous) return { state, events: [] };
+      // modelSelection 的 null 哨兵归一为键删除（IPC 克隆会丢 undefined 键，
+      // 显式清除必须经 null 表达）。
+      const { modelSelection: modelSelectionPatch, ...restPatch } = mutation.patch;
+      const patch: Partial<OpcEmployee> =
+        modelSelectionPatch === null
+          ? { ...restPatch, modelSelection: undefined }
+          : {
+              ...restPatch,
+              ...(modelSelectionPatch !== undefined
+                ? { modelSelection: modelSelectionPatch }
+                : {}),
+            };
       const employees = state.employees.map((item) =>
-        item.id === mutation.employeeId ? { ...item, ...mutation.patch } : item,
+        item.id === mutation.employeeId ? { ...item, ...patch } : item,
       );
       // 换岗位时同步槽位占用（老槽位让出、新槽位绑定）。
       const roleSlots =

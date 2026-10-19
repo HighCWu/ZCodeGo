@@ -121,13 +121,17 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      （刷新即时生效）；runtime 目录仅首次物化（后续由 CLI 自身 TTL 刷新接管）。
      主实例与官版 zcode 对员工 data dir 零可见；任务列表索引（tasks-index.sqlite）
      为 host 单例，按 workspaceIdentity 分区，不随沙箱路由。
-   - 存储位置：`<工作区>/.opc/employees/<employeeId>/.zcode/cli/memories/projects/
-     project-<hash>/memory/`（CLI project-root 同款布局；hash = sha256(identity)
-     前 16 位十六进制，identity = `opc-employee/<workspacePath>::<employeeId>`，
-     算法与 CLI project-root.ts 一致并双向同步注释。一事实一 md，frontmatter 含
-     name/description/type，type 取 CLI 同款四类 user/feedback/project/reference，
-     `MEMORY.md` 为索引）。物理数据随工作区/公司包走，员工离职记忆留在 .opc
-     归档，不跟人消失。symlink 绑定时代的旧 `.opc/employees/<id>/memory/` 数据
+   - 存储位置：`<工作区>/.opc/employees/<employeeId>/.zcode/cli/memories/
+     projects/<slug>-<hash>/memory/`（CLI resolveProjectMemoryRoot「无 identity
+     输入分支」同款布局：slug = 工作区目录名（sanitize ≤48，fallback project）、
+     hash = sha256(绝对路径)[:16]——v4 子进程的 runtime 不携带员工 identity
+     （workspaceId 必须为可执行真实路径，见「模型钉定」节的 workspaceId 约束），
+     记忆根按「路径键」解析；员工间隔离由每员工独立 storage root 物理保证，
+     hash 键源不承担隔离职责。一事实一 md，frontmatter 含 name/description/
+     type，type 取 CLI 同款四类 user/feedback/project/reference，`MEMORY.md`
+     为索引）。物理数据随工作区/公司包走，员工离职记忆留在 .opc 归档，不跟
+     人消失。symlink 时代（`.opc/<id>/memory/` 与 identity 键哈希根）的旧数据
+     由 GetState ensure 一次性迁移进现记忆根（新根非空绝不覆盖；旧目录保留）。symlink 绑定时代的旧 `.opc/employees/<id>/memory/` 数据
      由 GetState ensure 一次性迁移进新记忆根（新根非空绝不覆盖；旧目录保留）。
    - **会话身份**：员工会话 `workspaceIdentity = opc-employee/<workspacePath>::
      <employeeId>`（含 workspacePath 维度：跨工作区同名员工必须落到不同 data 根；

@@ -40,11 +40,14 @@ export interface OpcOrchestratorDeps {
    * 缺条目 = 绑定未就绪，不注入记忆段——指向不存在的目录会误导员工写入。） */
   employeeMemoryPaths?: Record<string, string>;
   /**
-   * 派发钉定的模型选型（工作区当前选型，含档位）。员工 db 是全新空库，
-   * 不显式钉定时会落到 builtin 默认模型（如 gpt-6-astra）——与用户所选
-   * 模型不符且可能放大调用成本。缺失时宁可不派发（fail-safe）。
+   * 按员工解析派发选型（员工级偏好优先 → 工作区当前选型；档位由选型视图
+   * 注册表补全）。返回 undefined = 选型不可执行/缺失——fail-safe 不派发：
+   * 员工 db 是全新空库，不显式钉定会落 builtin 默认模型（可能与用户所选
+   * 不符并放大调用成本），不完整选型会让轮次在子进程静默判死。
    */
-  modelSelection?: ModelSelection;
+  resolveDispatchModelSelection?: (employee: {
+    modelSelection?: { providerId: string; modelId: string };
+  }) => Promise<ModelSelection | undefined>;
   /** 并发上限（同时 headless 会话数）；超出留待下一轮手动编排。 */
   cap?: number;
   /**
@@ -125,11 +128,6 @@ export async function dispatchReadyWorkItems(
     (item) => item.status === "in_progress" && item.sessionId,
   ).length;
   const remaining = Math.max(0, cap - runningCount);
-  // fail-safe：无钉定选型不派发——员工空库下不传选型 = 落 builtin 默认模型
-  //（可能是用户没选过的高价模型），宁可留 ready 也不烧错模型的钱。
-  if (!deps.modelSelection) {
-    return { dispatched: [], failed: [], mutations: [] };
-  }
   const dispatchable = state.workItems
     .filter(
       (item) =>
@@ -161,20 +159,14 @@ export async function dispatchReadyWorkItems(
       outcome.failed.push({ workItemId: workItem.id, error: "员工缺失" });
       continue;
     }
-    // 模型优先级：员工级偏好（spec「员工级模型偏好」）→ 工作区当前选型。
-    // 员工偏好只含 providerId/modelId；档位借用当前选型（同模型时），
-    // 否则不带 options 交由子会话注册表补默认档位。
-    const modelSelection: ModelSelection | undefined = employee.modelSelection
-      ? {
-          ...employee.modelSelection,
-          ...(deps.modelSelection &&
-          deps.modelSelection.modelId === employee.modelSelection.modelId
-            ? { options: deps.modelSelection.options }
-            : {}),
-        }
-      : deps.modelSelection;
+    // 模型优先级：员工级偏好（spec「员工级模型偏好」）→ 工作区当前选型，
+    // 档位由选型视图注册表补全；解析失败 = 不可执行，fail-safe 跳过。
+    const modelSelection = await deps.resolveDispatchModelSelection?.(employee);
     if (!modelSelection) {
-      outcome.failed.push({ workItemId: workItem.id, error: "模型选型缺失（fail-safe 不派发）" });
+      outcome.failed.push({
+        workItemId: workItem.id,
+        error: "模型选型缺失或不可执行（fail-safe 不派发）",
+      });
       continue;
     }
     // 员工持久记忆：绑定（.opc data dir 内的记忆根）→ 索引注入 prompt；

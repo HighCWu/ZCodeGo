@@ -224,12 +224,13 @@ describe("员工级模型偏好与画像重置", () => {
     expect(
       withModel.employees.find((item) => item.id === employee.id)?.modelSelection,
     ).toEqual({ providerId: "zcode-go-fake", modelId: "fake-model" });
+    // null 哨兵清除（IPC 结构化克隆会丢 undefined 键，显式清除走 null）
     const cleared = applyOpcMutation(
       withModel,
       {
         kind: "employee.update",
         employeeId: employee.id,
-        patch: { modelSelection: undefined },
+        patch: { modelSelection: null },
       },
       NOW + 2,
     ).state;

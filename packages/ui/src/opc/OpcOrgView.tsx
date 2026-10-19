@@ -27,7 +27,7 @@ export interface OpcOrgViewProps {
     employeeId: string,
     patch: {
       status?: "active" | "paused";
-      modelSelection?: { providerId: string; modelId: string };
+      modelSelection?: { providerId: string; modelId: string } | null;
     },
   ) => void;
   onDepart: (employeeId: string) => void;
@@ -299,10 +299,11 @@ export function OpcOrgView({
                         const providerId = parts[0];
                         const modelId = parts.slice(1).join("/");
                         onUpdateEmployee(employee.id, {
+                          // null = 清除员工级偏好（undefined 会被 IPC 克隆丢键）
                           modelSelection:
                             providerId && modelId
                               ? { providerId, modelId }
-                              : undefined,
+                              : null,
                         });
                         setModelEditingId(null);
                       }}

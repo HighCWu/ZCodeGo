@@ -336,19 +336,26 @@ export type OpcMutation =
   | {
       kind: "employee.update";
       employeeId: string;
-      patch: Partial<
-        Pick<
-          OpcEmployee,
-          | "name"
-          | "seniority"
-          | "status"
-          | "vibe"
-          | "description"
-          | "roleId"
-          | "permissionLevel"
-          | "modelSelection"
-        >
-      >;
+      patch: Omit<
+        Partial<
+          Pick<
+            OpcEmployee,
+            | "name"
+            | "seniority"
+            | "status"
+            | "vibe"
+            | "description"
+            | "roleId"
+            | "permissionLevel"
+            | "modelSelection"
+          >
+        >,
+        "modelSelection"
+      > & {
+        /** null = 清除员工级偏好（回落工作区当前选型）；IPC 结构化克隆会丢
+         * undefined 键，显式清除必须用 null 哨兵。 */
+        modelSelection?: { providerId: string; modelId: string } | null;
+      };
     }
   | { kind: "employee.depart"; employeeId: string }
   | {

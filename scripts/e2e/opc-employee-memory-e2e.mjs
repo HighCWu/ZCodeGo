@@ -8,9 +8,9 @@
  *
  * 断言链：
  *   1. GetState 触发批量初始化：员工记忆根目录
- *      .opc/employees/<id>/.zcode/cli/memories/projects/project-<hash>/memory/
- *      创建（hash 算法与 CLI project-root.ts 一致：sha256(identity) 前 16 位，
- *      identity 含 workspacePath 维度）；employeeMemoryPaths 回读该相对路径；
+ *      .opc/employees/<id>/.zcode/cli/memories/projects/<slug>-<hash>/memory/
+ *      创建（与 CLI resolveProjectMemoryRoot 无 identity 分支同款：slug=目录
+ *      名、hash=sha256(绝对路径)[:16]）；employeeMemoryPaths 回读该相对路径；
  *   2. GetState 回读：新员工 memoryIndex/personaDigest 为 null、principles
  *      为空数组（绑定就绪、内容为空的初始态）；
  *   3. 沙箱语义：CLI 视角（员工 data 根）写入 MEMORY.md，GetState 回读含该
@@ -33,7 +33,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REAL_STATE_DIR = join(homedir(), ".zcode-go");
@@ -88,13 +88,14 @@ function assert(condition, message) {
 function memoryIdentity(workspacePath, employeeId) {
   return `opc-employee/${workspacePath}::${employeeId}`;
 }
-function memoryHash(workspacePath, employeeId) {
-  return createHash("sha256")
-    .update(memoryIdentity(workspacePath, employeeId))
-    .digest("hex")
-    .slice(0, 16);
+function memoryHash(workspacePath) {
+  return createHash("sha256").update(resolve(workspacePath)).digest("hex").slice(0, 16);
 }
 function sandboxMemoryRoot(workspacePath, employeeId) {
+  // 与 CLI resolveProjectMemoryRoot（无 identity 输入分支）同款：v4 子进程
+  // 的 runtime 不携带员工 identity，记忆根按「路径键」解析——slug=目录名、
+  // hash=sha256(绝对路径)[:16]。隔离由每员工独立 storage root 物理保证。
+  const slug = basename(workspacePath).toLowerCase() || "project";
   return join(
     workspacePath,
     ".opc",
@@ -104,7 +105,7 @@ function sandboxMemoryRoot(workspacePath, employeeId) {
     "cli",
     "memories",
     "projects",
-    `project-${memoryHash(workspacePath, employeeId)}`,
+    `${slug}-${memoryHash(workspacePath)}`,
     "memory",
   );
 }
@@ -282,7 +283,7 @@ for (const [name, id] of [
   assert(
     typeof st.employeeMemoryPaths?.[id] === "string" &&
       st.employeeMemoryPaths[id].endsWith(
-        `/.zcode/cli/memories/projects/project-${memoryHash(WORKSPACE, id)}/memory`,
+        `/.zcode/cli/memories/projects/workspace-${memoryHash(WORKSPACE)}/memory`,
       ),
     `${name} employeeMemoryPaths 回读记忆根相对路径`,
   );

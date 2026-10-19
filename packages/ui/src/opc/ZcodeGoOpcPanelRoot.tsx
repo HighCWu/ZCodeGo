@@ -121,17 +121,41 @@ export function ZcodeGoOpcPanelRoot({
   // 同款；workspace-scoped 的 getView 在面板上下文会挂起）。不挂选型订阅
   // hook——命令式 getView 拿 effectiveSelection 且零订阅。
   const { modelSelectionService } = useServices();
-  const readPinnedModelSelection = useCallback(async () => {
-    try {
-      const view = await modelSelectionService.getView();
-      // preferred = 用户当前在选型器里选中的模型（composer 草稿同语义）；
-      // effective 是叠加账号可用性后的可执行投影，未连接账号时为空——
-      // 派发钉定跟随用户意图（preferred），可执行性由子会话注册表裁决。
-      return view.preferredSelection ?? view.effectiveSelection ?? undefined;
-    } catch {
-      return undefined;
-    }
-  }, [modelSelectionService]);
+  const readPinnedModelSelection = useCallback(
+    async (employee?: { modelSelection?: { providerId: string; modelId: string } }) => {
+      try {
+        const view = await modelSelectionService.getView();
+        // 档位补全：视图注册表里该模型的有效档位取最高档（registry completion
+        // 同语义）。员工自填的 providerId/modelId 在注册表找不到（拼写错误/
+        // 已下架）时返回 undefined——fail-safe 不派发，避免不完整选型让轮次
+        // 在子进程静默判死。
+        const complete = (
+          sel: { providerId: string; modelId: string; options?: { reasoningLevel?: string } },
+        ): ModelSelection | undefined => {
+          if (sel.options?.reasoningLevel) return sel as ModelSelection;
+          const provider = view.providers.find((p) => p.providerId === sel.providerId);
+          const model = provider?.models.find((m) => m.modelId === sel.modelId);
+          const values = model?.config?.optionSpecs?.reasoningLevel?.values;
+          if (!values || values.length === 0) return undefined;
+          return {
+            providerId: sel.providerId,
+            modelId: sel.modelId,
+            options: { reasoningLevel: values[values.length - 1] },
+          };
+        };
+        // 员工级偏好优先；否则跟随工作区当前选型（preferred = 用户在选型器里
+        // 选中的模型，composer 草稿同语义；effective 是叠加账号可用性后的
+        // 可执行投影，未连接账号时为空）。
+        if (employee?.modelSelection) return complete(employee.modelSelection);
+        const base = view.preferredSelection ?? view.effectiveSelection ?? undefined;
+        if (!base) return undefined;
+        return complete(base);
+      } catch {
+        return undefined;
+      }
+    },
+    [modelSelectionService],
+  );
   const { settings } = useSettings();
   const taskService = useZCodeTaskService(
     workspacePath ?? undefined,
@@ -213,17 +237,10 @@ export function ZcodeGoOpcPanelRoot({
       });
       void (async () => {
         try {
-          // 钉定模型：员工级偏好优先 → 工作区当前选型；两者皆缺失 fail-safe 不派发
-          const workspaceSelection = await readPinnedModelSelection();
-          const pinnedModelSelection: ModelSelection | undefined = employee.modelSelection
-            ? {
-                ...employee.modelSelection,
-                ...(workspaceSelection &&
-                workspaceSelection.modelId === employee.modelSelection.modelId
-                  ? { options: workspaceSelection.options }
-                  : {}),
-              }
-            : workspaceSelection;
+          // 钉定模型：员工级偏好优先 → 工作区当前选型；档位由视图注册表
+          // 补全（无有效档位 = 不可执行，fail-safe 不派发）
+          const pinnedModelSelection: ModelSelection | undefined =
+            await readPinnedModelSelection(employee);
           if (!pinnedModelSelection) return;
           const created = await taskService.createTask({
             workspacePath,
@@ -416,13 +433,9 @@ export function ZcodeGoOpcPanelRoot({
     if (!state || !workspacePath || !taskService || orchestrating) return;
     setOrchestrating(true);
     void (async () => {
-      // 派发钉定模型：跟随工作区当前选型（缺失则编排器 fail-safe 不派发）
-      const pinnedModelSelection = await readPinnedModelSelection();
       // 编排是会话生命周期事件：走 lifecycle 通道（生产构建仍经桥落盘，
-      // 普通日志在生产 renderer 是 no-op）。
-      logger.lifecycle.info(
-        `[zcode-go][opc] 编排开始：钉定选型${pinnedModelSelection ? ` ${pinnedModelSelection.providerId}/${pinnedModelSelection.modelId}` : "缺失（fail-safe 不派发）"}`,
-      );
+      // 普通日志在生产 renderer 是 no-op）。模型按员工在编排器内逐项解析。
+      logger.lifecycle.info("[zcode-go][opc] 编排开始");
       const outcome = await dispatchReadyWorkItems({
         state,
         workspacePath,
@@ -435,7 +448,8 @@ export function ZcodeGoOpcPanelRoot({
         employeePersonaDigests: employeePersonaDigests ?? {},
         employeePrinciples: employeePrinciples ?? {},
         employeeMemoryPaths: employeeMemoryPaths ?? {},
-        modelSelection: pinnedModelSelection,
+        resolveDispatchModelSelection: (employee) =>
+          readPinnedModelSelection(employee),
         onMutations: (mutations) => void apply(mutations),
       });
       if (outcome.mutations.length > 0) void apply(outcome.mutations);
