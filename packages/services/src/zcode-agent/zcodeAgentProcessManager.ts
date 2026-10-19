@@ -270,6 +270,12 @@ function redactAgentDiagnostic(value: string): string {
 }
 
 const debugLog = (...args: unknown[]) => {
+  // 诊断开关：ZCODE_AGENT_STDERR_LOG=1 时生产也可观测子进程 stderr 逐行
+  //（headless 轮次静默问题的取证通道；正常部署勿开，量大人噪）。
+  if (process.env.ZCODE_AGENT_STDERR_LOG === "1") {
+    serviceLog.info(undefined, "[agent-stderr]", ...args);
+    return;
+  }
   if (!isEffectiveDevelopmentNodeEnv()) {
     return;
   }

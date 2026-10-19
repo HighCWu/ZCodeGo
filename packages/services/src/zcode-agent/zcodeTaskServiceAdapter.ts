@@ -2026,7 +2026,11 @@ export function createZCodeTaskServiceAdapter(
                 type: "createSession",
                 sessionId: null,
                 payload: {
-                  workspaceId: target.workspaceIdentity?.trim() || target.workspacePath,
+                  // v4 workspaceId 必须是可执行的真实路径：子进程把它同时用作
+                  // workingDirectory（identity 串会让轮次在 Gen UI 绝对路径校验
+                  // 处静默判死）。员工记忆隔离由 env 三键的独立 storage root
+                  // 物理保证，索引行归属由下方 baseMeta 修正兜底。
+                  workspaceId: target.workspacePath,
                   ...(params.permissionScope ? { permissionScope: params.permissionScope } : {}),
                   config: {
                     ...(model ? { provider: model.providerId, model: model.modelId } : {}),

@@ -405,6 +405,10 @@ const appEnv = {
         LOCALAPPDATA: join(sandboxHome, "AppData", "Local"),
       }),
   ZCODE_DESKTOP_APPLICATION_NAME: "ZCode Go E2E",
+  // 子进程 stderr 逐行取证（identity 轮次静默问题的诊断通道）；
+  // development 运行时打开子进程 debug 级轮次轨迹。
+  ZCODE_AGENT_STDERR_LOG: "1",
+  ZCODE_RUNTIME_ENV: "development",
 };
 let appProc = spawn(ELECTRON, appArgs, {
   env: appEnv,
