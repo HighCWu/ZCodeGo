@@ -25,17 +25,19 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { cpSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 const REAL_STATE_DIR = join(homedir(), ".zcode-go");
@@ -44,7 +46,7 @@ const ELECTRON =
 const CDP_PORT = 9348;
 const PROFILE_TAG = "zg-opc-dispatch-e2e-profile";
 
-const ws = join(tmpdir(), `zg-opc-dispatch-e2e-${Date.now()}`);
+let ws = join(tmpdir(), `zg-opc-dispatch-e2e-${Date.now()}`);
 {
   const { spawnSync: ps, execSync } = await import("node:child_process");
   try {
@@ -60,7 +62,7 @@ const ws = join(tmpdir(), `zg-opc-dispatch-e2e-${Date.now()}`);
 }
 const sandboxHome = join(ws, "home");
 const workspace = join(ws, "workspace");
-const WORKSPACE = workspace;
+let WORKSPACE = workspace;
 const appLog = join(ws, "app.log");
 const providerLog = join(ws, "provider.jsonl");
 const portFile = join(ws, "provider.port");
@@ -90,8 +92,11 @@ function memoryIdentity(workspacePath, employeeId) {
   return `opc-employee/${workspacePath}::${employeeId}`;
 }
 function memoryHash(workspacePath) {
+  // 与桌面 main 同款：win32 需小写化（路径键大小写不敏感语义）
+  const normalized = resolve(workspacePath);
+  const keySource = process.platform === "win32" ? normalized.toLowerCase() : normalized;
   return createHash("sha256")
-    .update(resolve(workspacePath))
+    .update(keySource)
     .digest("hex")
     .slice(0, 16);
 }
@@ -99,7 +104,12 @@ function sandboxMemoryRoot(workspacePath, employeeId) {
   // 与 CLI resolveProjectMemoryRoot（无 identity 输入分支）同款：v4 子进程
   // 的 runtime 不携带员工 identity，记忆根按「路径键」解析——slug=目录名、
   // hash=sha256(绝对路径)[:16]。隔离由每员工独立 storage root 物理保证。
-  const slug = basename(workspacePath).toLowerCase() || "project";
+  const slug =
+    basename(workspacePath)
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project";
   return join(
     workspacePath,
     ".opc",
@@ -223,6 +233,9 @@ async function applyMutations(mutations) {
 mkdirSync(join(sandboxHome, ".zcode", "v2"), { recursive: true });
 mkdirSync(join(sandboxHome, ".zcode-go"), { recursive: true });
 mkdirSync(WORKSPACE, { recursive: true });
+// Windows CI 的 tmp 路径含 8.3 短名（RUNNER~1）：app 内部规范化会展开，
+// E2E 侧必须用同一规范化串，否则记忆根 hash/路径断言三方分叉。
+WORKSPACE = realpathSync(WORKSPACE);
 
 const realOfficial = join(REAL_STATE_DIR, "official.json");
 if (process.env.ZCODE_OFFICIAL_BIN) {
@@ -315,7 +328,7 @@ writeFileSync(
 const providerProc = spawn(
   process.execPath,
   [
-    join(dirname(new URL(import.meta.url).pathname), "fake-provider.mjs"),
+    fileURLToPath(new URL("fake-provider.mjs", import.meta.url)),
     "--port-file",
     portFile,
     "--script",

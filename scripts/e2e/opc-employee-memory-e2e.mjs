@@ -26,12 +26,7 @@ import { spawn } from "node:child_process";
 import {
   createHash,
 } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,7 +55,7 @@ const ws = join(tmpdir(), `zg-opc-empmem-e2e-${Date.now()}`);
 }
 const sandboxHome = join(ws, "home");
 const workspace = join(ws, "workspace");
-const WORKSPACE = workspace;
+let WORKSPACE = workspace;
 const appLog = join(ws, "app.log");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -89,13 +84,20 @@ function memoryIdentity(workspacePath, employeeId) {
   return `opc-employee/${workspacePath}::${employeeId}`;
 }
 function memoryHash(workspacePath) {
-  return createHash("sha256").update(resolve(workspacePath)).digest("hex").slice(0, 16);
+  const normalized = resolve(workspacePath);
+  const keySource = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return createHash("sha256").update(keySource).digest("hex").slice(0, 16);
 }
 function sandboxMemoryRoot(workspacePath, employeeId) {
   // 与 CLI resolveProjectMemoryRoot（无 identity 输入分支）同款：v4 子进程
   // 的 runtime 不携带员工 identity，记忆根按「路径键」解析——slug=目录名、
   // hash=sha256(绝对路径)[:16]。隔离由每员工独立 storage root 物理保证。
-  const slug = basename(workspacePath).toLowerCase() || "project";
+  const slug =
+    basename(workspacePath)
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project";
   return join(
     workspacePath,
     ".opc",
@@ -192,6 +194,7 @@ if (process.platform === "win32") {
 }
 mkdirSync(join(sandboxHome, ".zcode-go"), { recursive: true });
 mkdirSync(WORKSPACE, { recursive: true });
+WORKSPACE = realpathSync(WORKSPACE);
 
 const appArgs = [
   ELECTRON,
