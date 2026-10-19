@@ -523,6 +523,39 @@ try {
     sessionId = dispatched.sessionId;
   }
 
+  // ── 3.5 usage 落库等待（轮次收尾后聚合落账，约 20s）──
+  {
+    const employeeDb = join(
+      WORKSPACE, ".opc", "employees", employeeId, ".zcode", "cli", "db", "db.sqlite",
+    );
+    const usageRows = () => {
+      try {
+        const db = new DatabaseSync(employeeDb, { readOnly: true });
+        const rows = db
+          .prepare("select status, model_id, input_tokens, output_tokens from model_usage")
+          .all();
+        db.close();
+        return rows;
+      } catch {
+        return [];
+      }
+    };
+    let usageOk = false;
+    for (let i = 0; i < 12 && !usageOk; i += 1) {
+      await sleep(10000);
+      usageOk = usageRows().some(
+        (r) => r.status === "completed" && r.model_id === MODEL_ID && r.input_tokens > 0,
+      );
+    }
+    const rows = usageRows();
+    const completedRow = rows.find((r) => r.status === "completed");
+    assert(Boolean(completedRow), "model_usage 有 completed 行（usage 链路复用 zcode 原版）");
+    assert(
+      completedRow && completedRow.model_id === MODEL_ID,
+      `model_usage 模型 = ${MODEL_ID}（实际 ${completedRow?.model_id}）`,
+    );
+  }
+
   // ── 4. 等真实端点轮次完成 ──
   {
     const employeeDb = join(
