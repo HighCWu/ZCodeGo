@@ -182,7 +182,8 @@ export type OpcEvolutionEventKind =
   | "promote"
   | "skill-upgrade"
   | "skill-import"
-  | "template-import";
+  | "template-import"
+  | "persona-reset";
 
 export interface OpcEvolutionEvent {
   id: string;
@@ -345,10 +346,18 @@ export type OpcMutation =
           | "description"
           | "roleId"
           | "permissionLevel"
+          | "modelSelection"
         >
       >;
     }
   | { kind: "employee.depart"; employeeId: string }
+  | {
+      /** 管理者显式重置员工人格画像（spec「人格画像」）：删除记忆根下的
+       * persona.md（记忆事实文件不动），防早期误反馈固化错误倾向。
+       * fs 副作用在 desktop Apply handler；reducer 只落进化事件。 */
+      kind: "employee.resetPersona";
+      employeeId: string;
+    }
   | {
       kind: "employee.assignSkill";
       employeeId: string;

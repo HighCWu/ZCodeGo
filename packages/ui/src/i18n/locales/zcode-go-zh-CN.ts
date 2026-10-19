@@ -124,6 +124,13 @@ export const zcodeGoMessagesZhCN: Record<string, string> = {
   "opc.org.pause": "暂停",
   "opc.org.resume": "恢复",
   "opc.org.depart": "离职",
+  "opc.org.model": "模型",
+  "opc.org.modelSave": "保存",
+  "opc.org.modelHint": "格式 providerId/modelId；留空保存即清除员工级偏好，回落工作区当前选型。",
+  "opc.org.cancel": "取消",
+  "opc.org.personaReset": "重置画像",
+  "opc.org.personaResetConfirm": "删除该员工的画像（persona.md），记忆事实保留？",
+  "opc.org.personaResetYes": "确认重置",
   "opc.org.retro": "复盘",
   "opc.market.hint":
     "内置 24 个角色模板（与 OpenOPC talent 格式兼容），也可从目录批量导入。",

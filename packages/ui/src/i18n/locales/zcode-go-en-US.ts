@@ -128,6 +128,13 @@ export const zcodeGoMessagesEnUs: Record<string, string> = {
   "opc.org.pause": "Pause",
   "opc.org.resume": "Resume",
   "opc.org.depart": "Depart",
+  "opc.org.model": "Model",
+  "opc.org.modelSave": "Save",
+  "opc.org.modelHint": "Format providerId/modelId; save empty to clear the per-employee preference and fall back to the workspace selection.",
+  "opc.org.cancel": "Cancel",
+  "opc.org.personaReset": "Reset persona",
+  "opc.org.personaResetConfirm": "Delete this employee's persona (persona.md)? Memory facts are kept.",
+  "opc.org.personaResetYes": "Confirm reset",
   "opc.org.retro": "Retrospective",
   "opc.market.hint":
     "24 built-in role templates (OpenOPC talent-format compatible); import more from a folder.",

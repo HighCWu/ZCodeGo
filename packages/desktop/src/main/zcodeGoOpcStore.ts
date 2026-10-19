@@ -55,7 +55,10 @@ import {
   writeTextAtomic,
 } from "./zcodeGoOpcFiles.js";
 import { syncOpcPacks } from "./zcodeGoOpcPacks.js";
-import { ensureOpcEmployeeMemory } from "./zcodeGoOpcEmployeeMemory.js";
+import {
+  ensureOpcEmployeeMemory,
+  resetOpcEmployeePersona,
+} from "./zcodeGoOpcEmployeeMemory.js";
 
 interface OpcStoreLogger {
   info: (...args: unknown[]) => void;
@@ -496,6 +499,22 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           }
           await persistSkillBodies(workspaceRoot, payload.mutations);
           await persistRoleTemplateBodies(workspaceRoot, payload.mutations);
+          // 人格画像重置的 fs 副作用（reducer 只落进化事件；删除失败不影响
+          // 状态落账——GetState 回读时 personaDigest 仍会如实反映现状）。
+          for (const mutation of payload.mutations) {
+            if (mutation.kind === "employee.resetPersona") {
+              const removed = await resetOpcEmployeePersona(
+                payload.workspacePath,
+                mutation.employeeId,
+              );
+              if (!removed) {
+                logger.warn(
+                  "[zcode-go] OPC 员工人格画像删除失败",
+                  mutation.employeeId,
+                );
+              }
+            }
+          }
           return current;
         },
       );

@@ -21,9 +21,13 @@ export interface OpcOrgViewProps {
   onExportArchitecture: () => void;
   onImportArchitecture: (file: File) => void;
   onRetrospective: (employee: OpcEmployee) => void;
+  onResetPersona: (employeeId: string) => void;
   onUpdateEmployee: (
     employeeId: string,
-    patch: { status?: "active" | "paused" },
+    patch: {
+      status?: "active" | "paused";
+      modelSelection?: { providerId: string; modelId: string };
+    },
   ) => void;
   onDepart: (employeeId: string) => void;
 }
@@ -39,10 +43,16 @@ export function OpcOrgView({
   onExportArchitecture,
   onImportArchitecture,
   onRetrospective,
+  onResetPersona,
   onUpdateEmployee,
   onDepart,
 }: OpcOrgViewProps) {
   const { intl } = useZCodeIntl();
+  // 员工级模型偏好编辑（providerId/modelId，格式同招聘对话框）与
+  // 人格画像重置的两段确认状态。
+  const [modelEditingId, setModelEditingId] = useState<string | null>(null);
+  const [modelDraft, setModelDraft] = useState("");
+  const [personaConfirmId, setPersonaConfirmId] = useState<string | null>(null);
   const [newSlotTitle, setNewSlotTitle] = useState("");
   const slotTitleByRoleId = useMemo(
     () => new Map(state.roleSlots.map((slot) => [slot.id, slot.title])),
@@ -271,6 +281,69 @@ export function OpcOrgView({
                   },
                 )}
               </p>
+              {modelEditingId === employee.id ? (
+                <div className="flex flex-col gap-1">
+                  <Input
+                    value={modelDraft}
+                    placeholder="providerId/modelId"
+                    onChange={(event) => setModelDraft(event.target.value)}
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      onClick={() => {
+                        const key = modelDraft.trim();
+                        const parts = key.includes("/") ? key.split("/") : [];
+                        const providerId = parts[0];
+                        const modelId = parts.slice(1).join("/");
+                        onUpdateEmployee(employee.id, {
+                          modelSelection:
+                            providerId && modelId
+                              ? { providerId, modelId }
+                              : undefined,
+                        });
+                        setModelEditingId(null);
+                      }}
+                    >
+                      {intl.formatMessage({ id: "opc.org.modelSave" })}
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setModelEditingId(null)}
+                    >
+                      {intl.formatMessage({ id: "opc.org.cancel" })}
+                    </Button>
+                  </div>
+                  <p className="text-ui-xs text-foreground-faint">
+                    {intl.formatMessage({ id: "opc.org.modelHint" })}
+                  </p>
+                </div>
+              ) : personaConfirmId === employee.id ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-ui-xs text-foreground-subtle">
+                    {intl.formatMessage({ id: "opc.org.personaResetConfirm" })}
+                  </span>
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => {
+                      onResetPersona(employee.id);
+                      setPersonaConfirmId(null);
+                    }}
+                  >
+                    {intl.formatMessage({ id: "opc.org.personaResetYes" })}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setPersonaConfirmId(null)}
+                  >
+                    {intl.formatMessage({ id: "opc.org.cancel" })}
+                  </Button>
+                </div>
+              ) : null}
               <div className="mt-auto flex items-center gap-1.5">
                 <Button
                   size="xs"
@@ -279,6 +352,34 @@ export function OpcOrgView({
                 >
                   {intl.formatMessage({ id: "opc.org.retro" })}
                 </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    setModelEditingId(
+                      modelEditingId === employee.id ? null : employee.id,
+                    );
+                    setPersonaConfirmId(null);
+                  }}
+                >
+                  {employee.modelSelection
+                    ? `${intl.formatMessage({ id: "opc.org.model" })}: ${employee.modelSelection.modelId}`
+                    : intl.formatMessage({ id: "opc.org.model" })}
+                </Button>
+                {employee.stats.retrospectives > 0 || employee.stats.completed > 0 ? (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="text-foreground-faint"
+                    onClick={() =>
+                      setPersonaConfirmId(
+                        personaConfirmId === employee.id ? null : employee.id,
+                      )
+                    }
+                  >
+                    {intl.formatMessage({ id: "opc.org.personaReset" })}
+                  </Button>
+                ) : null}
                 {employee.status === "active" ? (
                   <Button
                     size="xs"

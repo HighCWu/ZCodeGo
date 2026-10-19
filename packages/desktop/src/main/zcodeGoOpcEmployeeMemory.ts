@@ -9,7 +9,7 @@
  * 纯 fs 副作用留在 main；纯计算（路径/键/规则/prompt 段）在 shared 的
  * opc-employee-memory.ts（hash 算法与 CLI project-root.ts 双向同步）。
  */
-import { cp, mkdir, readdir, readFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { createHash } from "node:crypto";
 import {
@@ -141,6 +141,33 @@ async function migrateLegacyMemoryDir(legacyDir: string, memoryDir: string): Pro
     await cp(legacyDir, memoryDir, { recursive: true });
   } catch {
     /* 迁移失败不阻塞：记忆内容可由后续任务重建 */
+  }
+}
+
+/**
+ * 管理者重置员工人格画像（spec「人格画像」）：删除记忆根下的 persona.md
+ * （记忆事实文件保留）。persona 缺失本就是合法态（新员工无画像），删除
+ * 后 GetState 回读 personaDigest 自然回到 null，委派 prompt 不再注入画像。
+ */
+export async function resetOpcEmployeePersona(
+  workspacePath: string,
+  employeeId: string,
+): Promise<boolean> {
+  try {
+    const ws = workspacePath;
+    if (!employeeId || /[/\\]/.test(employeeId) || !isAbsolute(ws)) {
+      return false;
+    }
+    const sandbox = resolveOpcEmployeeSandbox(ws, opcEmployeeMemoryIdentity(employeeId, ws));
+    if (!sandbox) return false;
+    const personaPath = join(
+      opcEmployeeSandboxMemoryRoot(sandbox.employeeDir, opcEmployeeMemoryHash(employeeId, ws)),
+      "persona.md",
+    );
+    await rm(personaPath, { force: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 

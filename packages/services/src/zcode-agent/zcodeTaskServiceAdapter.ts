@@ -419,6 +419,7 @@ export function createZCodeTaskServiceAdapter(
       logReason?: string;
       modelSelection?: CommandPayloadMap["sendText"]["modelSelection"];
       modelExecution?: CommandPayloadMap["sendText"]["modelExecution"];
+      observeAfterMs?: number;
     } & ZCodeBackgroundTurnAttribution,
   ): Promise<void> {
     const startedAt = Date.now();
@@ -505,6 +506,7 @@ export function createZCodeTaskServiceAdapter(
         workspaceKey: resolveWorkspaceKey(target),
         workspacePath: target.workspacePath,
       });
+      scheduleHeadlessTurnObservation(target, params);
     } catch (error) {
       activePromptInputIds.delete(taskKey(target));
       logger.warn(params.traceId, "ZCode task facade sendPrompt 失败", {
@@ -519,6 +521,53 @@ export function createZCodeTaskServiceAdapter(
       });
       throw error;
     }
+  }
+
+  /**
+   * 无界面派发的轮次观测：headless 会话没有界面流，轮次失败（模型校验、
+   * 权限、admission 卡住等）只能靠延时回读会话归因。ACK 后延迟回读一次，
+   * 状态与 lastError 落 host 日志；读取失败静默（会话可能尚未持久化）。
+   */
+  function scheduleHeadlessTurnObservation(
+    target: TaskTarget,
+    params: { observeAfterMs?: number; traceId: TraceId },
+  ): void {
+    const delayMs = params.observeAfterMs ?? 0;
+    if (delayMs <= 0) return;
+    const timer = setTimeout(() => {
+      void options.zcodeAgentService
+        .readSession({
+          ...target,
+          sessionId: target.taskId,
+          runtimePolicy: "existing-only",
+          contentProfile: "index",
+        })
+        .then((snapshot) => {
+          logger.warn(
+            params.traceId,
+            "ZCode 无界面派发轮次观测",
+            {
+              sessionId: target.taskId,
+              status: snapshot.session.status,
+              lastError: snapshot.projection.lastError?.message ?? null,
+              lastErrorKind:
+                snapshot.projection.lastError?.code ??
+                snapshot.projection.lastError?.type ??
+                null,
+              model: snapshot.settings.model.current ?? null,
+              workspaceIdentity: target.workspaceIdentity ?? null,
+            },
+          );
+        })
+        .catch((error: unknown) => {
+          logger.debug(
+            params.traceId,
+            "ZCode 无界面派发轮次观测回读失败（会话可能未持久化）",
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+        });
+    }, delayMs);
+    timer.unref?.();
   }
 
   function setRuntimeCommands(params: TaskTarget, commands: ZCodeTaskRuntimeCommand[]): void {
@@ -2027,6 +2076,12 @@ export function createZCodeTaskServiceAdapter(
         }
       }
       const baseMeta = snapshotToMeta(snapshot);
+      // identity 键会话（OPC 员工/远端）的子进程 createSession 投影会把 workspace
+      // 归属报坏（workspacePath 退化成 identity 串、workspaceIdentity 丢空）——
+      // createTask 的入参 target 才是权威归属。不在出生点修正的话，索引行与
+      // rememberIndexedTaskMeta 的内存 target 一起被毒化。
+      baseMeta.workspacePath = target.workspacePath;
+      baseMeta.workspaceIdentity = target.workspaceIdentity;
       const meta = await syncTaskIndexMeta({
         ...baseMeta,
         ...(params.automationId ? { cronAutomationId: params.automationId } : {}),
@@ -2300,6 +2355,7 @@ export function createZCodeTaskServiceAdapter(
         clientMode: params.clientMode,
         modelSelection: params.modelSelection,
         modelExecution: params.modelExecution,
+        observeAfterMs: params.observeAfterMs,
       });
     },
 

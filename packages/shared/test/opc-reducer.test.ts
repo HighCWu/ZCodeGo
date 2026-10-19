@@ -197,6 +197,74 @@ describe("招聘与组织", () => {
   });
 });
 
+describe("员工级模型偏好与画像重置", () => {
+  it("employee.update 可写入/清除 modelSelection（编排器派发依据）", () => {
+    let state = applyOpcMutation(
+      createEmptyOpcCompanyState(NOW),
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: null,
+        custom: { name: "小陈", category: "engineering" },
+      },
+      NOW,
+    ).state;
+    const employee = state.employees.find((item) => item.name === "小陈")!;
+    const withModel = applyOpcMutation(
+      state,
+      {
+        kind: "employee.update",
+        employeeId: employee.id,
+        patch: {
+          modelSelection: { providerId: "zcode-go-fake", modelId: "fake-model" },
+        },
+      },
+      NOW + 1,
+    ).state;
+    expect(
+      withModel.employees.find((item) => item.id === employee.id)?.modelSelection,
+    ).toEqual({ providerId: "zcode-go-fake", modelId: "fake-model" });
+    const cleared = applyOpcMutation(
+      withModel,
+      {
+        kind: "employee.update",
+        employeeId: employee.id,
+        patch: { modelSelection: undefined },
+      },
+      NOW + 2,
+    ).state;
+    expect(
+      cleared.employees.find((item) => item.id === employee.id)?.modelSelection,
+    ).toBeUndefined();
+  });
+
+  it("employee.resetPersona 落 persona-reset 进化事件且不改员工状态", () => {
+    let state = applyOpcMutation(
+      createEmptyOpcCompanyState(NOW),
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: null,
+        custom: { name: "小陈", category: "engineering" },
+      },
+      NOW,
+    ).state;
+    const employee = state.employees.find((item) => item.name === "小陈")!;
+    const applied = applyOpcMutation(
+      state,
+      { kind: "employee.resetPersona", employeeId: employee.id },
+      NOW + 1,
+    );
+    // wrapper 会把事件追加进进化日志（新 state 对象）；员工本体必须原样保留
+    expect(
+      applied.state.employees.find((item) => item.id === employee.id),
+    ).toEqual(state.employees.find((item) => item.id === employee.id));
+    expect(applied.events).toHaveLength(1);
+    expect(applied.events[0]?.kind).toBe("persona-reset");
+    expect(applied.events[0]?.summary).toContain("小陈");
+  });
+});
+
 describe("技能导入与升级", () => {
   it("首次导入创建 v1，重复导入走版本覆盖", () => {
     let state = createEmptyOpcCompanyState(NOW);

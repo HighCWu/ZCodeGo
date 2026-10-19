@@ -161,6 +161,22 @@ export async function dispatchReadyWorkItems(
       outcome.failed.push({ workItemId: workItem.id, error: "员工缺失" });
       continue;
     }
+    // 模型优先级：员工级偏好（spec「员工级模型偏好」）→ 工作区当前选型。
+    // 员工偏好只含 providerId/modelId；档位借用当前选型（同模型时），
+    // 否则不带 options 交由子会话注册表补默认档位。
+    const modelSelection: ModelSelection | undefined = employee.modelSelection
+      ? {
+          ...employee.modelSelection,
+          ...(deps.modelSelection &&
+          deps.modelSelection.modelId === employee.modelSelection.modelId
+            ? { options: deps.modelSelection.options }
+            : {}),
+        }
+      : deps.modelSelection;
+    if (!modelSelection) {
+      outcome.failed.push({ workItemId: workItem.id, error: "模型选型缺失（fail-safe 不派发）" });
+      continue;
+    }
     // 员工持久记忆：绑定（.opc data dir 内的记忆根）→ 索引注入 prompt；
     // 会话身份切到员工键（记忆根与会话隔离同键，spec「员工持久记忆」）。
     const personaSection = buildOpcPersonaPromptSection(
@@ -185,8 +201,8 @@ export async function dispatchReadyWorkItems(
         workspacePath,
         // 员工键覆盖 workspace 键：记忆根与会话隔离落到员工维度
         workspaceIdentity: opcEmployeeMemoryIdentity(employee.id, workspacePath),
-        // 钉定模型：员工会话跟随工作区当前选型（防 builtin 默认兜底烧错模型）
-        modelSelection: deps.modelSelection,
+        // 钉定模型：员工级偏好优先，回落工作区当前选型
+        modelSelection,
         v4Create: true,
         deferPersistenceUntilFirstPrompt: true,
         permissionScope: "session",
@@ -194,6 +210,8 @@ export async function dispatchReadyWorkItems(
       await taskService.sendPrompt({
         taskId: created.taskId,
         traceId: workItem.id,
+        // headless 无界面流：ACK 后延时回读会话归因轮次失败（可观测性）
+        observeAfterMs: 15_000,
         content:
           (personaSection ? personaSection + "\n\n" : "") +
           (memorySection ? `${prompt}\n\n${memorySection}` : prompt),

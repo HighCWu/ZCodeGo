@@ -31,6 +31,7 @@ import {
   buildOpcCompanyImportMutations,
   isOpcWorkItemRunnable,
   parseOpcCompanyPackage,
+  type ModelSelection,
   type OpcRoleTemplateDraft,
   type OpcWorkItem,
 } from "@zcode/shared";
@@ -212,8 +213,17 @@ export function ZcodeGoOpcPanelRoot({
       });
       void (async () => {
         try {
-          // 钉定模型：与派发同一 fail-safe（无选型不派发，防 builtin 默认兜底）
-          const pinnedModelSelection = await readPinnedModelSelection();
+          // 钉定模型：员工级偏好优先 → 工作区当前选型；两者皆缺失 fail-safe 不派发
+          const workspaceSelection = await readPinnedModelSelection();
+          const pinnedModelSelection: ModelSelection | undefined = employee.modelSelection
+            ? {
+                ...employee.modelSelection,
+                ...(workspaceSelection &&
+                workspaceSelection.modelId === employee.modelSelection.modelId
+                  ? { options: workspaceSelection.options }
+                  : {}),
+              }
+            : workspaceSelection;
           if (!pinnedModelSelection) return;
           const created = await taskService.createTask({
             workspacePath,
@@ -226,6 +236,7 @@ export function ZcodeGoOpcPanelRoot({
           await taskService.sendPrompt({
             taskId: created.taskId,
             traceId: `opc-reflect:${item.id}:${now}`,
+            observeAfterMs: 15_000,
             content: prompt,
             // 反思要读写记忆文件：拒绝 shell/node_repl 等执行通道，保留文件工具
             toolDenylist: buildOpcToolDenylist("workspace-write"),
@@ -429,7 +440,7 @@ export function ZcodeGoOpcPanelRoot({
       });
       if (outcome.mutations.length > 0) void apply(outcome.mutations);
       logger.lifecycle.info(
-        `[zcode-go][opc] 编排完成：派发 ${outcome.dispatched.length} / 失败 ${outcome.failed.length}`,
+        `[zcode-go][opc] 编排完成：派发 ${outcome.dispatched.length} / 失败 ${outcome.failed.length}${outcome.failed.length > 0 ? `（${outcome.failed.map((f) => `${f.workItemId}: ${f.error}`).join("；")}）` : ""}`,
       );
     })()
       .catch((error) => {
@@ -772,6 +783,9 @@ export function ZcodeGoOpcPanelRoot({
                 onRetrospective={(employee) =>
                   setRetroDialog({ employeeId: employee.id })
                 }
+                onResetPersona={(employeeId) => {
+                  void apply([{ kind: "employee.resetPersona", employeeId }]);
+                }}
                 onUpdateEmployee={(employeeId, patch) => {
                   void apply([{ kind: "employee.update", employeeId, patch }]);
                 }}

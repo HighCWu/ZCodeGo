@@ -325,6 +325,9 @@ export interface IZCodeTaskService {
       modelSelection?: CommandPayloadMap["sendText"]["modelSelection"];
       /** 单次执行约束与动态鉴权；仅 idle start-now 接受，不进入普通队列。 */
       modelExecution?: CommandPayloadMap["sendText"]["modelExecution"];
+      /** 无界面派发观测：ACK 后延迟该毫秒数回读会话并落状态/lastError 日志
+       * （headless 会话无界面流，轮次失败只能靠这条通道归因）。 */
+      observeAfterMs?: number;
     } & ZCodeBackgroundTurnAttribution,
   ): Promise<void>;
 

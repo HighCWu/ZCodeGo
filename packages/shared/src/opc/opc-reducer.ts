@@ -246,6 +246,26 @@ function applyOnce(
           : state.roleSlots;
       return { state: { ...state, employees, roleSlots }, events: [] };
     }
+    case "employee.resetPersona": {
+      // 人格画像重置（spec「人格画像」）：persona.md 的删除在 desktop Apply
+      // handler 落地（fs 副作用不过 reducer）；这里只留进化事件痕迹。
+      const employee = state.employees.find(
+        (item) => item.id === mutation.employeeId,
+      );
+      if (!employee) return { state, events: [] };
+      const now = Date.now();
+      return {
+        state,
+        events: [
+          {
+            id: opcStableId("ev", `${employee.name}-persona-reset-${now}`),
+            at: now,
+            kind: "persona-reset",
+            summary: `重置 ${employee.name} 的人格画像（persona.md 已删除，记忆事实保留）`,
+          },
+        ],
+      };
+    }
     case "employee.depart": {
       const employee = state.employees.find(
         (item) => item.id === mutation.employeeId,
