@@ -737,6 +737,34 @@ try {
     assert(!leaked, "主实例沙箱 db 不含员工会话（物理隔离）");
   }
 
+  // ── 7.5 人格画像重置验收（mutation → main fs 副作用 → GetState 回读归零）──
+  {
+    const memoryRoot2 = sandboxMemoryRoot(WORKSPACE, laowangId);
+    writeFileSync(join(memoryRoot2, "persona.md"), "早期误反馈固化的倾向\n", "utf8");
+    let stPersona = await getState();
+    assert(
+      stPersona.employeePersonaDigests?.[laowangId]?.includes("早期误反馈"),
+      "personaDigest 回读画像（重置前）",
+    );
+    const reset = await applyMutations([
+      { kind: "employee.resetPersona", employeeId: laowangId },
+    ]);
+    assert(reset && reset.ok, "employee.resetPersona（Apply 经真实 IPC）");
+    assert(
+      !existsSync(join(memoryRoot2, "persona.md")),
+      "persona.md 已删除（记忆事实文件保留）",
+    );
+    stPersona = await getState();
+    assert(
+      stPersona.employeePersonaDigests?.[laowangId] === null,
+      "GetState 回读 personaDigest 归 null（重置生效）",
+    );
+    assert(
+      existsSync(join(memoryRoot2, "MEMORY.md")),
+      "记忆事实（MEMORY.md）保留",
+    );
+  }
+
   // ── 8. tasks-index：任务行 identity = 员工键（主列表不被污染） ─────────────
   {
     const indexDb = join(sandboxHome, ".zcode", "v2", "tasks-index.sqlite");
