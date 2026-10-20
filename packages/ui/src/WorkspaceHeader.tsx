@@ -8,7 +8,7 @@ import type {
   UserInfo,
 } from "@zcode/shared";
 import { useState } from "react";
-import { TID_WORKSPACE_HEADER } from "@zcode/shared";
+import { TID_WORKSPACE_HEADER } from "@zcode/shared/test-ids";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import { cn } from "@/components/lib/utils.js";
@@ -199,7 +199,7 @@ export function WorkspaceHeader({
             <SidebarToggleIcon className="size-4" />
           </Button>
         ) : null}
-        {variant === "task" ? (
+        {variant === "task" || remoteTarget || workspaceIdentity || remoteSessionId ? (
           <WorkspaceHeaderTitleSection
             variant={variant}
             readOnlyReason={readOnlyReason}
@@ -264,7 +264,6 @@ export function WorkspaceHeader({
           onSelectedEditorChange={setSelectedEditor}
         />
       </div>
-
     </header>
   );
 }

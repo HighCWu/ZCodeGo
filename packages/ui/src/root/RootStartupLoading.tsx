@@ -25,14 +25,33 @@ export function RootStartupLoading({ label, children, busy = true }: RootStartup
 }
 
 /** 初始化与引导共用品牌图标，保持底色、描边、圆角和标志比例一致。 */
-export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean }) {
+export function ZCodeStartupLogoBadge({
+  animated = true,
+  size = "default",
+}: {
+  animated?: boolean;
+  size?: "default" | "titlebar";
+}) {
   return (
-    <div className="relative flex size-24 items-center justify-center rounded-3xl bg-[linear-gradient(180deg,#000000_0%,#151718_100%)] text-[#ffffff] shadow-xl/20 before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:border before:border-[rgba(255,255,255,0.1)] before:content-['']">
-      <ZCodeStartupLogo className="h-auto w-[66px]" animated={animated} />
+    <div
+      data-desktop-logo-badge={size === "titlebar" ? "true" : undefined}
+      className={cn(
+        "relative flex items-center justify-center bg-[linear-gradient(180deg,#000000_0%,#151718_100%)] text-[#ffffff] before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:border before:border-[rgba(255,255,255,0.1)] before:content-['']",
+        size === "titlebar"
+          ? "size-5 rounded shadow-sm/20 before:border-white/20"
+          : "size-24 rounded-3xl shadow-xl/20",
+      )}
+    >
+      {/* Button 会给 SVG 默认尺寸；紧凑 Logo 显式恢复自动高度，保持标志原始比例。 */}
+      <ZCodeStartupLogo
+        className={size === "titlebar" ? "size-auto w-3.25" : "h-auto w-14"}
+        animated={animated}
+      />
       {/* zcode-go Go 徽章：锚定容器（圆角方块）右下角，比例取自 B5 定稿 512px 图实测——
           Z 占宽 68.4%；徽章按生成脚本 draw_badge(0.26, inset 0.02) 换算：高 26%
           （25px）、宽 max(bh, Go宽+0.72·bh)→比 1.49（37px）、白边 9% 徽章高
-          （2px）、Go 字号 52% 徽章高（13px）、贴角 inset 2%。 */}
+          （2px）、Go 字号 52% 徽章高（13px）、贴角 inset 2%。titlebar（20px 容器）
+          按同族比例给可读下限的紧凑定值。 */}
       <span
         aria-hidden
         className={cn(
@@ -41,6 +60,8 @@ export function ZCodeStartupLogoBadge({ animated = true }: { animated?: boolean 
           "zcode-go-badge-mark absolute right-[2px] bottom-[2px] flex h-[25px] w-[37px] items-center justify-center rounded-full border-2 border-white bg-[linear-gradient(180deg,#9AA5B1_0%,#5C6673_38%,#3F4854_62%,#5B6572_100%)] text-[13px] font-bold leading-none text-white",
           // 跟随 Z 的忽明忽暗：同 begin/dur/values（SMIL 线性 ↔ CSS 线性关键帧）。
           animated && "[animation:zcode-go-badge-pulse_1.8s_linear_3s_infinite]",
+          size === "titlebar" &&
+            "right-[1px] bottom-[1px] h-2 w-3 border text-[6px]",
         )}
       />
     </div>

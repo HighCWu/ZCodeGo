@@ -53,6 +53,10 @@ function loadSqlite(): { DatabaseSync: new (path: string, options?: { timeout?: 
   throw new Error("node:sqlite unavailable in this runtime");
 }
 
+// 任务索引库（与 zcodeGoTaskSweep 同路径）；SqliteDb 为本文件内别名。
+const TASKS_INDEX_DB = join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
+type SqliteDb = NodeSqliteDatabase;
+
 export interface TrimForkedSessionResult {
   ok: boolean;
   childSessionId: string;

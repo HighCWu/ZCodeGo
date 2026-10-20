@@ -37,6 +37,7 @@ import {
   OPC_TEMPLATES_DIR,
   parseOpcInboxFile,
   parseOpcRoleTemplate,
+  parseOpcSkillMarkdown,
   PlatformChannels,
   renderOpcEmployeeMemory,
   renderOpcSkillFile,
@@ -73,7 +74,7 @@ const silentOpcLogger: OpcStoreLogger = {
 };
 
 /** 模块级 warn 便捷入口（scanInbox 等无 logger 参数的路径）。 */
-function opcLoggerWarn(message: string, error: unknown): void {
+function opcLoggerWarn(message: string, error?: unknown): void {
   (opcLogger ?? silentOpcLogger).warn(message, error);
 }
 

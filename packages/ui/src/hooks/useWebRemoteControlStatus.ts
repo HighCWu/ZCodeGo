@@ -12,10 +12,13 @@ function isSameWebRemoteControlStatus(
     left.sessionId === right.sessionId &&
     left.windowControlSessionId === right.windowControlSessionId &&
     left.mobileConnected === right.mobileConnected &&
-    left.mobileViewState?.activeWorkspaceKey ===
-      right.mobileViewState?.activeWorkspaceKey &&
+    left.mobileViewState?.activeWorkspaceKey === right.mobileViewState?.activeWorkspaceKey &&
     left.mobileViewState?.activeTaskId === right.mobileViewState?.activeTaskId &&
     left.mobileViewState?.updatedAt === right.mobileViewState?.updatedAt &&
+    left.mobileTaskView?.taskId === right.mobileTaskView?.taskId &&
+    left.mobileTaskView?.workspacePath === right.mobileTaskView?.workspacePath &&
+    left.mobileTaskView?.workspaceIdentity === right.mobileTaskView?.workspaceIdentity &&
+    left.mobileTaskView?.remoteSessionId === right.mobileTaskView?.remoteSessionId &&
     left.mobileDeviceInfo?.updatedAt === right.mobileDeviceInfo?.updatedAt &&
     left.mobileDeviceInfo?.userAgent === right.mobileDeviceInfo?.userAgent &&
     left.mobileDeviceInfo?.viewport?.width === right.mobileDeviceInfo?.viewport?.width &&
@@ -55,9 +58,7 @@ export function useWebRemoteControlStatus({
       // 状态即可，不能让比较器读 undefined.status 炸掉整个 home（CI 三平台
       // fresh-model 实证：错误边界接管后再无 composer 可输入）。
       setStatus((currentStatus) =>
-        isSameWebRemoteControlStatus(currentStatus, nextStatus)
-          ? currentStatus
-          : nextStatus,
+        isSameWebRemoteControlStatus(currentStatus, nextStatus) ? currentStatus : nextStatus,
       );
     };
 
@@ -76,13 +77,11 @@ export function useWebRemoteControlStatus({
     };
 
     void syncStatus();
-    const disposeStatusChanged = platform.onWebRemoteControlStatusChanged?.(
-      (nextStatus) => {
-        // Bugfix: start/refresh 后如果只等 1s 轮询，手机立刻扫码时 main 还没拿到 renderer 同步的 task 快照。
-        // main 已经是远控 session/transport 状态事实源，这里优先消费事件推送，轮询只保留为旧平台兜底。
-        applyStatus(nextStatus);
-      },
-    );
+    const disposeStatusChanged = platform.onWebRemoteControlStatusChanged?.((nextStatus) => {
+      // Bugfix: start/refresh 后如果只等 1s 轮询，手机立刻扫码时 main 还没拿到 renderer 同步的 task 快照。
+      // main 已经是远控 session/transport 状态事实源，这里优先消费事件推送，轮询只保留为旧平台兜底。
+      applyStatus(nextStatus);
+    });
     const intervalId = window.setInterval(() => {
       void syncStatus();
     }, intervalMs);

@@ -73,11 +73,11 @@ describe("模式切换不改写已打开面板", () => {
     mode.general = true;
     rerender();
     await act(async () => result.current.handleCloseSidePaneTab(gitId));
-    expect(result.current.sidePaneState?.tabs ?? []).toEqual([]);
+    expect(result.current.sidePaneState).toBeNull();
     expect(result.current.recentClosedSidePaneTabs).toEqual([]);
     act(() => result.current.handleReopenClosedSidePaneTab(gitId));
     act(() => result.current.handleOpenGit());
-    expect(result.current.sidePaneState?.tabs ?? []).toEqual([]);
+    expect(result.current.sidePaneState).toBeNull();
     mode.general = false;
     rerender();
     expect(

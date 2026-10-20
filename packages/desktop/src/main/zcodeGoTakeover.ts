@@ -30,7 +30,8 @@ const STATE_JSON = join(ZCODE_GO_DIR, "takeover-state.json");
 const PID_FILE = join(ZCODE_GO_DIR, "desktop.pid");
 const SHOW_FILE = join(ZCODE_GO_DIR, "SHOW");
 
-const OFFICIAL_BIN_DEFAULTS: Record<NodeJS.Platform, string[]> = {
+// 桌面端只支持三大平台；Partial 显式表达「其它平台无官版默认路径」，读取处 ?? [] 兜底。
+const OFFICIAL_BIN_DEFAULTS: Partial<Record<NodeJS.Platform, string[]>> = {
   linux: ["/opt/ZCode/zcode", "/usr/lib/zcode/zcode", "/usr/local/zcode/zcode"],
   darwin: ["/Applications/ZCode.app/Contents/MacOS/zcode"],
   win32: [

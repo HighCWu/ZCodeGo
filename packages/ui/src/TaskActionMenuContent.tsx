@@ -1,4 +1,4 @@
-import { TID_V4_TASK_OPEN_IN_SPLIT } from "@zcode/shared";
+import { TID_V4_TASK_OPEN_IN_SPLIT } from "@zcode/shared/test-ids";
 
 interface TaskActionMenuItemProps {
   children: React.ReactNode;
@@ -15,6 +15,7 @@ interface TaskActionMenuSeparatorProps {
 export function TaskActionMenuContent({
   intl,
   isPinned,
+  isArchived = false,
   fileManagerLabel,
   taskSessionFile,
   activeSessionId,
@@ -44,12 +45,10 @@ export function TaskActionMenuContent({
   onOpenProviderConfig,
 }: {
   intl: {
-    formatMessage: (
-      desc: { id: string },
-      values?: Record<string, string>,
-    ) => string;
+    formatMessage: (desc: { id: string }, values?: Record<string, string>) => string;
   };
   isPinned: boolean;
+  isArchived?: boolean;
   fileManagerLabel: string;
   taskSessionFile: { loading: boolean; path: string | null; exists: boolean };
   activeSessionId?: string | null;
@@ -86,8 +85,7 @@ export function TaskActionMenuContent({
   onOpenProviderConfig: () => void;
   /** zcode-go：会话已打开显示（fork 走会话内横幅）或分叉进行中时禁用菜单项。 */
 }) {
-  const taskTargetActionsDisabled =
-    disableTaskActions || disableTaskTargetActions;
+  const taskTargetActionsDisabled = disableTaskActions || disableTaskTargetActions;
 
   return (
     <>
@@ -122,7 +120,7 @@ export function TaskActionMenuContent({
           }
         }}
       >
-        {intl.formatMessage({ id: "taskList.archive" })}
+        {intl.formatMessage({ id: isArchived ? "taskList.unarchive" : "taskList.archive" })}
       </Item>
       <Item
         disabled={taskTargetActionsDisabled}
@@ -171,11 +169,7 @@ export function TaskActionMenuContent({
         {intl.formatMessage({ id: "appHeader.copyPath" })}
       </Item>
       <Item
-        disabled={
-          taskTargetActionsDisabled ||
-          taskSessionFile.loading ||
-          !taskSessionFile.path
-        }
+        disabled={taskTargetActionsDisabled || taskSessionFile.loading || !taskSessionFile.path}
         title={taskTargetActionsDisabled ? disabledReason : undefined}
         onSelect={onCopyTaskPath}
       >
@@ -207,11 +201,7 @@ export function TaskActionMenuContent({
         /* Bugfix: 手机远控运行在浏览器里，无法可靠打开桌面端 provider 配置文件。
            这里只在远控移动端隐藏入口，桌面端仍沿用“路径已知即可前往配置”的能力。 */
         <Item
-          disabled={
-            disableTaskActions ||
-            providerConfigFile.loading ||
-            !providerConfigFile.path
-          }
+          disabled={disableTaskActions || providerConfigFile.loading || !providerConfigFile.path}
           title={disableTaskActions ? disabledReason : undefined}
           onSelect={() => {
             if (!disableTaskActions) {

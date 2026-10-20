@@ -39,7 +39,8 @@ export function getDatabaseStartupPortPayload(
 export function bindDatabaseStartupRelay(
   win: BrowserWindow,
   child: UtilityProcess,
-  startupId = randomUUID(),
+  // 显式 string：重复配对会回传缓存的 startupId（普通 string），不能收窄成 UUID 模板字面量类型。
+  startupId: string = randomUUID(),
 ) {
   // 同窗口重建 Host 时，旧监听不能继续重放 ready 或接收用户控制命令。
   windowBindings.get(win)?.();

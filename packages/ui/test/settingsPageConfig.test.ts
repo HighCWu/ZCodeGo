@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BarChart3, Blocks, Cable, Package, WandSparkles } from "lucide-react";
+import { Blocks, Cable, Package, WandSparkles } from "lucide-react";
 import enUS from "../src/i18n/locales/en-US.js";
 import zhCN from "../src/i18n/locales/zh-CN.js";
+import { isSettingsSectionAvailable } from "../src/settings/settingsPageConfig.js";
 
 async function loadSettingsPageConfig(env: "test" | "production") {
   vi.resetModules();
@@ -13,7 +14,6 @@ async function loadSettingsPageConfig(env: "test" | "production") {
       ZCODE_ENV: env,
     };
   });
-
   return import("../src/settings/settingsPageConfig.js");
 }
 
@@ -23,11 +23,14 @@ afterEach(() => {
 });
 
 describe("settingsPageConfig", () => {
-  it("按设置页心智顺序展示 test 分区", async () => {
+  it("only exposes remote device management on desktop", () => {
+    expect(isSettingsSectionAvailable("remoteDevices", true)).toBe(true);
+    expect(isSettingsSectionAvailable("remoteDevices", false)).toBe(false);
+    expect(isSettingsSectionAvailable("general", false)).toBe(true);
+  });
+  it("按设置页分组与顺序展示公开分区", async () => {
     const { createSettingsPageConfig } = await loadSettingsPageConfig("test");
-    const { settingsSectionGroups, settingsSections } =
-      createSettingsPageConfig({});
-
+    const { settingsSectionGroups, settingsSections } = createSettingsPageConfig({});
     expect(
       settingsSectionGroups.map((group) => ({
         id: group.id,
@@ -41,7 +44,9 @@ describe("settingsPageConfig", () => {
           "appearance",
           "modelProvider",
           "browser",
+          "remoteDevices",
           "shortcuts",
+          // zcode-go：ZCode Go 设置板块（P2P 桥/hover fork/移动抽屉/UI 恢复/接管关闭官版）
           "zcodeGo",
         ],
       },
@@ -57,12 +62,8 @@ describe("settingsPageConfig", () => {
           "hooks",
         ],
       },
-      {
-        id: "dataAndStats",
-        sections: ["usage"],
-      },
+      { id: "dataAndStats", sections: ["usage", "archives"] },
     ]);
-
     expect(settingsSections.map((section) => section.id)).toEqual([
       "general",
       "appearance",
@@ -75,16 +76,17 @@ describe("settingsPageConfig", () => {
       "commands",
       "hooks",
       "browser",
+      "remoteDevices",
       "shortcuts",
       // zcode-go：ZCode Go 设置板块（P2P 桥/hover fork/移动抽屉/UI 恢复/接管关闭官版）
       "zcodeGo",
       "usage",
+      "archives",
     ]);
   });
 
   it("按设置页心智顺序展示 production 分区并保留 usage", async () => {
-    const { createSettingsPageConfig } =
-      await loadSettingsPageConfig("production");
+    const { createSettingsPageConfig } = await loadSettingsPageConfig("production");
     const { settingsSections } = createSettingsPageConfig({});
 
     expect(settingsSections.map((section) => section.id)).toEqual([
@@ -99,18 +101,18 @@ describe("settingsPageConfig", () => {
       "commands",
       "hooks",
       "browser",
+      "remoteDevices",
       "shortcuts",
       // zcode-go：ZCode Go 设置板块（P2P 桥/hover fork/移动抽屉/UI 恢复/接管关闭官版）
       "zcodeGo",
       "usage",
+      "archives",
     ]);
   });
 
   it("Plugins 内容标题不再配置 beta 徽标", async () => {
     const { SETTINGS_SECTIONS } = await loadSettingsPageConfig("test");
-    const pluginsSection = SETTINGS_SECTIONS.find(
-      (section) => section.id === "plugin",
-    );
+    const pluginsSection = SETTINGS_SECTIONS.find((section) => section.id === "plugin");
 
     expect(pluginsSection?.titleBadgeId).toBeUndefined();
   });
@@ -120,47 +122,26 @@ describe("settingsPageConfig", () => {
     expect(
       SETTINGS_SECTIONS.find((section) => section.id === "modelProvider")?.icon,
     ).toBe(Package);
-    expect(
-      SETTINGS_SECTIONS.find((section) => section.id === "plugin")?.icon,
-    ).toBe(Blocks);
-    expect(
-      SETTINGS_SECTIONS.find((section) => section.id === "mcp")?.icon,
-    ).toBe(Cable);
-    expect(
-      SETTINGS_SECTIONS.find((section) => section.id === "skill")?.icon,
-    ).toBe(WandSparkles);
+    expect(SETTINGS_SECTIONS.find((section) => section.id === "plugin")?.icon).toBe(Blocks);
+    expect(SETTINGS_SECTIONS.find((section) => section.id === "mcp")?.icon).toBe(Cable);
+    expect(SETTINGS_SECTIONS.find((section) => section.id === "skill")?.icon).toBe(WandSparkles);
   });
 
-  it("Usage 分区文案和头像菜单使用统计入口保持一致", async () => {
-    const { SETTINGS_SECTIONS } = await loadSettingsPageConfig("test");
-    const usageSection = SETTINGS_SECTIONS.find(
-      (section) => section.id === "usage",
-    );
-
-    expect(usageSection?.icon).toBe(BarChart3);
-    expect(enUS["settings.usageTitle"]).toBe(
-      enUS["sidebar.usage.plan.openStats"],
-    );
-    expect(enUS["settings.usage.sectionTitle"]).toBe(
-      enUS["sidebar.usage.plan.openStats"],
-    );
-    expect(zhCN["settings.usageTitle"]).toBe(
-      zhCN["sidebar.usage.plan.openStats"],
-    );
+  it("Usage 分区文案和头像菜单使用统计入口保持一致", () => {
+    expect(enUS["settings.usageTitle"]).toBe(enUS["sidebar.usage.plan.openStats"]);
+    expect(enUS["settings.usage.sectionTitle"]).toBe(enUS["sidebar.usage.plan.openStats"]);
+    expect(zhCN["settings.usageTitle"]).toBe(zhCN["sidebar.usage.plan.openStats"]);
   });
 
   it("侧栏分组标题同时提供中英文文案", () => {
     expect(enUS["settings.sidebar.group.basics"]).toBe("Basics");
-    expect(enUS["settings.sidebar.group.agentCapabilities"]).toBe(
-      "Agent capabilities",
-    );
-    expect(enUS["settings.sidebar.group.dataAndStats"]).toBe(
-      "Data and statistics",
-    );
+    expect(enUS["settings.sidebar.group.agentCapabilities"]).toBe("Agent capabilities");
+    expect(enUS["settings.sidebar.group.dataAndStats"]).toBe("Data and statistics");
     expect(zhCN["settings.sidebar.group.basics"]).toBe("基础设置");
     expect(zhCN["settings.sidebar.group.agentCapabilities"]).toBe("Agent 能力");
     expect(zhCN["settings.sidebar.group.dataAndStats"]).toBe("数据与统计");
   });
+
 
   it.each([
     ["macOS", { isMacDesktop: true }, true],
@@ -191,6 +172,7 @@ describe("settingsPageConfig", () => {
       "appearance",
       "modelProvider",
       "browser",
+      "remoteDevices",
       "computerUse",
       "shortcuts",
       // zcode-go：ZCode Go 设置板块在 shortcuts 之后追加

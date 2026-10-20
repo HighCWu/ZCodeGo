@@ -53,6 +53,7 @@ function loadSqlite(): { DatabaseSync: new (path: string, options?: { timeout?: 
     run: (...args: unknown[]) => unknown;
   };
   exec: (sql: string) => void;
+  close: () => void;
 } } {
   const builtin = (
     process as unknown as {
@@ -66,6 +67,7 @@ function loadSqlite(): { DatabaseSync: new (path: string, options?: { timeout?: 
           run: (...args: unknown[]) => unknown;
         };
         exec: (sql: string) => void;
+        close: () => void;
       } }
     | undefined;
   if (!builtin) throw new Error("node:sqlite unavailable in this runtime");
@@ -94,6 +96,24 @@ function saveTasks(tasks: ForkFullHistoryTask[]): void {
     JSON.stringify({ version: 1, tasks }, null, 1),
     "utf8",
   );
+}
+
+/**
+ * 登记一个待补齐任务（fork 落地时由 host 侧调用）：同 childSessionId 幂等覆盖，
+ * 落盘后由后台 tick 逐段推进。返回登记后的任务（含 status/injected/updatedAt 初值）。
+ */
+export function registerForkFullHistoryTask(
+  task: Omit<ForkFullHistoryTask, "status" | "injected" | "updatedAt">,
+): ForkFullHistoryTask {
+  const created: ForkFullHistoryTask = {
+    ...task,
+    status: "pending",
+    injected: 0,
+    updatedAt: Date.now(),
+  };
+  const tasks = loadTasks().filter((entry) => entry.childSessionId !== task.childSessionId);
+  saveTasks([...tasks, created]);
+  return created;
 }
 
 function tick(log: (message: string, meta?: unknown) => void): void {
@@ -141,6 +161,9 @@ function tick(log: (message: string, meta?: unknown) => void): void {
           }
           const ordered = [...rows].reverse();
           const count = ordered.length;
+          // 段内 sequence 从 nextLowerSeq 顶部向下分配（与 services
+          // advanceForkFullHistorySegment 同族：越旧历史 seq 越小）。
+          const startSeq = task.nextLowerSeq - count + 1;
           const childMinRow = db
             .prepare("select min(sequence) as s from message where session_id = ?")
             .get(task.childSessionId) as unknown as { s: number | null };
@@ -159,7 +182,7 @@ function tick(log: (message: string, meta?: unknown) => void): void {
             "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
               "values (?, ?, ?, ?, ?, ?, ?)",
           );
-          let seq = 1;
+          let seq = startSeq;
           for (const row of ordered) {
             const newId = `msg_zgk_fb_${sha24(row.id)}`;
             const insertedRow = insertMessage.run(newId, task.childSessionId, row.time_created, row.time_updated, row.data, seq) as unknown as { changes: number | bigint };
@@ -192,14 +215,13 @@ function tick(log: (message: string, meta?: unknown) => void): void {
           }
           task.lastSRowid = lastSRowid;
           task.injected += inserted;
+          // 本段用掉的 sequence 顶端即下一段的起点（下一段更旧、seq 更小）。
+          task.nextLowerSeq = startSeq - 1;
           db.exec("commit");
         } catch (error) {
           db.exec("rollback");
           throw error;
         }
-        task.lastSRowid = rows[rows.length - 1]!.r;
-        task.nextLowerSeq = startSeq;
-        task.injected += count;
         const remaining = db
           .prepare(
             "select count(*) as c from message where session_id = ? and rowid < ? " +
@@ -215,7 +237,7 @@ function tick(log: (message: string, meta?: unknown) => void): void {
         saveTasks(loadTasks());
         log("hover fork 全量补齐推进", {
           childSessionId: task.childSessionId,
-          inserted: count,
+          inserted,
           injectedTotal: task.injected,
           boundaryTotal: task.boundaryTotal,
           done: task.status === "done",
@@ -359,6 +381,7 @@ export function runContinuousForkFullHistoryBackfill(
           db.exec("begin immediate");
           let inserted = 0;
           let lastSRowid = t.lastSRowid;
+          let segmentCount = 0;
           try {
             const rows = db
               .prepare(
@@ -388,6 +411,9 @@ export function runContinuousForkFullHistoryBackfill(
             }
             const ordered = [...rows].reverse();
             const count = ordered.length;
+            segmentCount = count;
+            // 段内 sequence 从 nextLowerSeq 顶部向下分配（与周期 worker 同款）。
+            const startSeq = t.nextLowerSeq - count + 1;
             const childMinRow = db
               .prepare("select min(sequence) as s from message where session_id = ?")
               .get(t.childSessionId) as unknown as { s: number | null };
@@ -406,7 +432,7 @@ export function runContinuousForkFullHistoryBackfill(
               "insert or ignore into part (id, session_id, message_id, time_created, time_updated, data, sequence) " +
                 "values (?, ?, ?, ?, ?, ?, ?)",
             );
-            let seq = 1;
+            let seq = startSeq;
             for (const row of ordered) {
               const newId = `msg_zgk_fb_${sha24(row.id)}`;
               const insertedRow = insertMessage.run(newId, t.childSessionId, row.time_created, row.time_updated, row.data, seq) as unknown as { changes: number | bigint };
@@ -439,6 +465,7 @@ export function runContinuousForkFullHistoryBackfill(
             }
             t.lastSRowid = lastSRowid;
             t.injected += inserted;
+            t.nextLowerSeq = t.nextLowerSeq - segmentCount;
             db.exec("commit");
           } catch (error) {
             db.exec("rollback");
@@ -457,7 +484,7 @@ export function runContinuousForkFullHistoryBackfill(
             ) as unknown as { c: number };
           if (remaining.c === 0) t.status = "done";
           saveTasks(loadTasks());
-          return count;
+          return segmentCount;
         };
         const inserted = advance();
         if (inserted > 0) {
