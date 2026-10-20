@@ -264,6 +264,64 @@ describe("员工级模型偏好与画像重置", () => {
     expect(applied.events[0]?.kind).toBe("persona-reset");
     expect(applied.events[0]?.summary).toContain("小陈");
   });
+
+  it("employee.resetPersona 在员工 busy（在跑任务）时静默拒绝（主档冻结）", () => {
+    let state = applyOpcMutation(
+      createEmptyOpcCompanyState(NOW),
+      {
+        kind: "employee.hire",
+        templateId: "custom",
+        roleId: null,
+        custom: { name: "小陈", category: "engineering" },
+      },
+      NOW,
+    ).state;
+    const employee = state.employees.find((item) => item.name === "小陈")!;
+    state = applyOpcMutation(
+      state,
+      {
+        kind: "workitem.create",
+        title: "进行中的委派",
+        detail: "d",
+        assigneeId: employee.id,
+        priority: "medium",
+        dependsOn: [],
+      },
+      NOW + 1,
+    ).state;
+    const item = state.workItems.find((w) => w.assigneeId === employee.id)!;
+    // 转换表：backlog → ready → in_progress；sessionId 由 workitem.update 落账
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: item.id, status: "ready" },
+      NOW + 2,
+    ).state;
+    state = applyOpcMutation(
+      state,
+      { kind: "workitem.status", workItemId: item.id, status: "in_progress" },
+      NOW + 3,
+    ).state;
+    state = applyOpcMutation(
+      state,
+      {
+        kind: "workitem.update",
+        workItemId: item.id,
+        patch: { sessionId: "sess_x" },
+      },
+      NOW + 4,
+    ).state;
+    const applied = applyOpcMutation(
+      state,
+      { kind: "employee.resetPersona", employeeId: employee.id },
+      NOW + 5,
+    );
+    // 主档冻结：无进化事件（Apply handler 据此跳过 persona.md 的 fs 删除）
+    expect(applied.events).toHaveLength(0);
+    // 员工在跑的任务本身不受影响
+    expect(
+      applied.state.workItems.find((w) => w.id === item.id)?.status,
+    ).toBe("in_progress");
+  });
 });
 
 describe("技能导入与升级", () => {

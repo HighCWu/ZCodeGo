@@ -18,19 +18,14 @@ afterAll(async () => {
 
 const logger = { info: () => {}, warn: () => {} };
 
-/** CLI resolveProjectMemoryRoot 同款（无 identity 输入分支）的项目目录名：
- * slug=工作区目录名（≤48）、hash=sha256(绝对路径)[:16]。 */
-function memoryProjectDirName(ws: string): string {
-  const normalized = resolve(ws);
-  const keySource = process.platform === "win32" ? normalized.toLowerCase() : normalized;
-  const hash = createHash("sha256").update(keySource).digest("hex").slice(0, 16);
-  const slug =
-    basename(normalized)
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "project";
-  return `${slug}-${hash}`;
+/** CLI resolveProjectMemoryRoot identity 分支同款的项目目录名：
+ * project-<sha256(opc-employee/<ws>::<empId>)[:16]>——位置无关键。 */
+function memoryProjectDirName(ws: string, employeeId: string): string {
+  const hash = createHash("sha256")
+    .update(`opc-employee/${ws}::${employeeId}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `project-${hash}`;
 }
 
 /** 员工记忆根（<ws>/.opc/employees/<id>/.zcode/cli/memories/projects/<dir>/memory）。
@@ -38,7 +33,7 @@ function memoryProjectDirName(ws: string): string {
  * memoryDirDisplay 正是记忆根去掉 ws 前缀的相对路径，Windows 上 join() 的
  * 反斜杠会与之失配。 */
 function memoryRoot(ws: string, employeeId: string): string {
-  return `${ws}/.opc/employees/${employeeId}/.zcode/cli/memories/projects/${memoryProjectDirName(ws)}/memory`;
+  return `${ws}/.opc/employees/${employeeId}/.zcode/cli/memories/projects/${memoryProjectDirName(ws, employeeId)}/memory`;
 }
 
 describe("员工记忆绑定（data dir 沙箱形态）", () => {

@@ -101,15 +101,11 @@ function memoryHash(workspacePath) {
     .slice(0, 16);
 }
 function sandboxMemoryRoot(workspacePath, employeeId) {
-  // 与 CLI resolveProjectMemoryRoot（无 identity 输入分支）同款：v4 子进程
-  // 的 runtime 不携带员工 identity，记忆根按「路径键」解析——slug=目录名、
-  // hash=sha256(绝对路径)[:16]。隔离由每员工独立 storage root 物理保证。
-  const slug =
-    basename(workspacePath)
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "project";
+  // 与桌面 main / CLI resolveProjectMemoryRoot（identity 分支）同款：
+  // project-<sha256(opc-employee/<ws>::<empId>)[:16]>——位置无关键，员工在
+  // 本地/远程任意位置执行都解析到同一记忆根。隔离由每员工独立 storage
+  // root 物理保证。
+  const identity = `opc-employee/${workspacePath}::${employeeId}`;
   return join(
     workspacePath,
     ".opc",
@@ -119,7 +115,7 @@ function sandboxMemoryRoot(workspacePath, employeeId) {
     "cli",
     "memories",
     "projects",
-    `${slug}-${memoryHash(workspacePath)}`,
+    `project-${createHash("sha256").update(identity).digest("hex").slice(0, 16)}`,
     "memory",
   );
 }
@@ -750,7 +746,35 @@ try {
     assert(!leaked, "主实例沙箱 db 不含员工会话（物理隔离）");
   }
 
-  // ── 7.5 人格画像重置验收（mutation → main fs 副作用 → GetState 回读归零）──
+  // ── 7.5 工作项收口：review → done（触发反思轮）──
+  // 转换表：in_progress → review → done（直接 in_progress → done 被 reducer
+  // 判非法静默 no-op，响应 ok 但状态不变——必须断言响应内的实际状态）。
+  {
+    const reviewApply = await applyMutations([
+      { kind: "workitem.status", workItemId, status: "review" },
+    ]);
+    assert(
+      reviewApply &&
+        reviewApply.ok &&
+        reviewApply.state?.workItems?.find((w) => w.id === workItemId)
+          ?.status === "review",
+      "工作项转 review（验收门）",
+    );
+    const doneApply = await applyMutations([
+      { kind: "workitem.status", workItemId, status: "done" },
+    ]);
+    assert(
+      doneApply &&
+        doneApply.ok &&
+        doneApply.state?.workItems?.find((w) => w.id === workItemId)
+          ?.status === "done",
+      "工作项转 done（触发反思轮）",
+    );
+  }
+
+  // ── 7.6 人格画像重置验收（mutation → main fs 副作用 → GetState 回读归零）──
+  // 主档冻结门控：busy（in_progress+sessionId）时 reducer 静默拒绝重置——
+  // 本段必须在 done 之后（解冻）、反思派发之前（避免 persona 写入竞态）。
   {
     const memoryRoot2 = sandboxMemoryRoot(WORKSPACE, laowangId);
     writeFileSync(join(memoryRoot2, "persona.md"), "早期误反馈固化的倾向\n", "utf8");
@@ -778,30 +802,8 @@ try {
     );
   }
 
-  // ── 7.6 L2 反思轮验收：done → 员工身份反思会话出现 ──
-  // 转换表：in_progress → review → done（直接 in_progress → done 被 reducer
-  // 判非法静默 no-op，响应 ok 但状态不变——必须断言响应内的实际状态）。
+  // ── 7.7 L2 反思轮验收：done → 员工身份反思会话出现 ──
   {
-    const reviewApply = await applyMutations([
-      { kind: "workitem.status", workItemId, status: "review" },
-    ]);
-    assert(
-      reviewApply &&
-        reviewApply.ok &&
-        reviewApply.state?.workItems?.find((w) => w.id === workItemId)
-          ?.status === "review",
-      "工作项转 review（验收门）",
-    );
-    const doneApply = await applyMutations([
-      { kind: "workitem.status", workItemId, status: "done" },
-    ]);
-    assert(
-      doneApply &&
-        doneApply.ok &&
-        doneApply.state?.workItems?.find((w) => w.id === workItemId)
-          ?.status === "done",
-      "工作项转 done（触发反思轮）",
-    );
     const employeeDb = join(
       WORKSPACE,
       ".opc",

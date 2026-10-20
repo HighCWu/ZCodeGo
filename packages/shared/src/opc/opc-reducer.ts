@@ -265,6 +265,17 @@ function applyOnce(
         (item) => item.id === mutation.employeeId,
       );
       if (!employee) return { state, events: [] };
+      // 主档冻结（spec「记忆主档与多地点」）：员工有在跑任务时拒绝重置——
+      // 执行中的抽取/反思轮可能正在写 persona.md，删除会与写入竞态；
+      // 静默 no-op（同 workitem.status 非法转换），Apply handler 以事件
+      // 是否产生判定是否执行 fs 删除。
+      const busy = state.workItems.some(
+        (workItem) =>
+          workItem.assigneeId === mutation.employeeId &&
+          workItem.status === "in_progress" &&
+          Boolean(workItem.sessionId),
+      );
+      if (busy) return { state, events: [] };
       const now = Date.now();
       return {
         state,

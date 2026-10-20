@@ -122,17 +122,32 @@ CLI agent 通过普通文件读取即可消费——RSI 闭环经由文件系统
      主实例与官版 zcode 对员工 data dir 零可见；任务列表索引（tasks-index.sqlite）
      为 host 单例，按 workspaceIdentity 分区，不随沙箱路由。
    - 存储位置：`<工作区>/.opc/employees/<employeeId>/.zcode/cli/memories/
-     projects/<slug>-<hash>/memory/`（CLI resolveProjectMemoryRoot「无 identity
-     输入分支」同款布局：slug = 工作区目录名（sanitize ≤48，fallback project）、
-     hash = sha256(绝对路径)[:16]——v4 子进程的 runtime 不携带员工 identity
-     （workspaceId 必须为可执行真实路径，见「模型钉定」节的 workspaceId 约束），
-     记忆根按「路径键」解析；员工间隔离由每员工独立 storage root 物理保证，
-     hash 键源不承担隔离职责。一事实一 md，frontmatter 含 name/description/
-     type，type 取 CLI 同款四类 user/feedback/project/reference，`MEMORY.md`
-     为索引）。物理数据随工作区/公司包走，员工离职记忆留在 .opc 归档，不跟
-     人消失。symlink 时代（`.opc/<id>/memory/` 与 identity 键哈希根）的旧数据
-     由 GetState ensure 一次性迁移进现记忆根（新根非空绝不覆盖；旧目录保留）。symlink 绑定时代的旧 `.opc/employees/<id>/memory/` 数据
-     由 GetState ensure 一次性迁移进新记忆根（新根非空绝不覆盖；旧目录保留）。
+     projects/project-<hash>/memory/`（**identity 键**：hash =
+     sha256(`opc-employee/<workspacePath>::<employeeId>`)[:16]，与 spawn env
+     `ZCODE_WORKSPACE_IDENTITY` 同串。CLI 侧由 bootstrap runtime-config 从进程
+     env 兜底读取该 identity（仅认 `opc-employee/` 前缀，普通/远程会话保持
+     既有路径键行为），使 resolveProjectMemoryRoot 走 identity 分支——记忆根
+     **位置无关**：员工在本地/SSH/远程 server 任意位置执行都解析到同一记忆根，
+     换工作区路径也不分裂（多地点执行的前提，见「记忆主档与多地点」节）。
+     员工间隔离由每员工独立 storage root（env 三键路由）物理保证，hash 键源
+     不承担隔离职责。一事实一 md，frontmatter 含 name/description/type，
+     type 取 CLI 同款四类 user/feedback/project/reference，`MEMORY.md` 为索引）。
+     物理数据随工作区/公司包走，员工离职记忆留在 .opc 归档，不跟人消失。
+     历史布局旧数据由 GetState ensure 一次性迁移进 identity 键记忆根（新根
+     非空绝不覆盖；旧目录保留）：symlink 时代 `.opc/employees/<id>/memory/`、
+     旧 identity 键变体（resolve 后路径哈希）、路径键时代 `<slug>-<hash(路径)>`。
+   - **记忆主档与多地点**（远程员工执行位置 = 本地/SSH/远程 server）：员工
+     记忆主档永远住在公司工作区 `.opc`（唯一所有者 = main），执行位置只是
+     「出差」——派发前检出（主档 → 执行地 data 根），收口后检入（clone →
+     主档整体替换）。写者串行（编排器 busy 门控保证同一员工同时只有一个
+     活跃会话）故检入无需合并；检入两段式：机会性（done 收口后等记忆树
+     mtime 静默，失败不阻塞）+ 权威性（下次检出前强制前置，幂等兜底）。
+     检入白名单 = 记忆目录（+ 可选 L0 会话库归档），**绝不拉回 v2/凭据**。
+     主档冻结：员工 busy 时 main 侧主档写操作被拒绝（人格画像重置在
+     reducer 静默 no-op，Apply handler 以事件是否产生决定是否执行 fs 删除）；
+     反思轮固定在公司本地主档上执行，不随工作轮次外出。L0（会话库）留驻
+     执行地不随迁；远程模式落地时主档/clone 走连接作用域 fileService
+     （remote-ssh / remote-server 双模式设计见「远程工作区」规划）。
    - **会话身份**：员工会话 `workspaceIdentity = opc-employee/<workspacePath>::
      <employeeId>`（含 workspacePath 维度：跨工作区同名员工必须落到不同 data 根；
      与 AGENTS.md 的 Workspace Identity 规则同构，记忆与会话隔离同键）。

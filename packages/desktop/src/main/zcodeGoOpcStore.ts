@@ -487,6 +487,10 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
     ) => {
       const events: OpcEvolutionEvent[] = [];
       const promotedSkillIds: string[] = [];
+      // resetPersona 的 fs 副作用只在 reducer 真正受理时执行（主档冻结：
+      // 员工 busy 时 reducer 静默 no-op 不产事件——fs 删除必须同样跳过，
+      // 否则 GetState 回读的 personaDigest 与进化痕迹互相矛盾）。
+      const personaResetAccepted = new Set<string>();
       const result = await withState(
         payload.workspacePath,
         async (state, workspaceRoot) => {
@@ -494,6 +498,12 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           for (const mutation of payload.mutations) {
             const applied = applyOpcMutation(current, mutation, Date.now());
             current = applied.state;
+            if (
+              mutation.kind === "employee.resetPersona" &&
+              applied.events.length > 0
+            ) {
+              personaResetAccepted.add(mutation.employeeId);
+            }
             events.push(...applied.events);
             promotedSkillIds.push(...applied.promotedSkillIds);
           }
@@ -502,7 +512,10 @@ export function initZcodeGoOpcStore(logger: OpcStoreLogger): void {
           // 人格画像重置的 fs 副作用（reducer 只落进化事件；删除失败不影响
           // 状态落账——GetState 回读时 personaDigest 仍会如实反映现状）。
           for (const mutation of payload.mutations) {
-            if (mutation.kind === "employee.resetPersona") {
+            if (
+              mutation.kind === "employee.resetPersona" &&
+              personaResetAccepted.has(mutation.employeeId)
+            ) {
               const removed = await resetOpcEmployeePersona(
                 payload.workspacePath,
                 mutation.employeeId,

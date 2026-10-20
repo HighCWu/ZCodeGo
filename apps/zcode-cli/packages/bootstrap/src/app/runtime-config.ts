@@ -2,7 +2,7 @@ import type { ConfigResult } from "@zcode/adapters/config";
 import { GEN_UI_OUTPUT_ROOT_ENV } from "@zcode/shared/node";
 import { resolveInitialModelSelection, type ModelSelectionOptions } from "@zcode/provider";
 import { resolveBashTimeoutPolicy, type AgentProfile, type AgentRuntimeConfig } from "@zcode/core";
-import { type BuiltInSubagentModelSelectionOverrides } from "@zcode/shared";
+import { OPC_EMPLOYEE_IDENTITY_PREFIX, ZCODE_WORKSPACE_IDENTITY_ENV, type BuiltInSubagentModelSelectionOverrides } from "@zcode/shared";
 import {
   type CollaborationMode,
   type HookConfigSource,
@@ -25,6 +25,16 @@ interface ResolvedAppRuntimeConfig {
   configuredMcpServers: Record<string, McpServerConfig>;
   runtimeConfig: AgentRuntimeConfig;
   untrustedProjectMcpServers: Set<string>;
+}
+
+/** OPC 员工身份的进程级来源：host spawn 注入的 ZCODE_WORKSPACE_IDENTITY。
+ * 仅认 opc-employee/ 前缀（与 shared OPC_EMPLOYEE_IDENTITY_PREFIX 同串；
+ * CLI 侧不引 shared 常量以外的主进程逻辑）。 */
+function opcEmployeeIdentityFromProcessEnv(): string | undefined {
+  const identity = process.env[ZCODE_WORKSPACE_IDENTITY_ENV]?.trim();
+  return identity && identity.startsWith(OPC_EMPLOYEE_IDENTITY_PREFIX)
+    ? identity
+    : undefined;
 }
 
 interface ResolvedInitialRegistrySelection extends ResolvedRegistrySelection {
@@ -183,7 +193,14 @@ export function resolveAppRuntimeConfig(input: {
         : { extractionEnabled: options.runtimeConfig.memory.extractionEnabled }),
       ...(input.storageRoot ? { storageRoot: input.storageRoot } : {}),
       use: options.runtimeConfig?.memory?.use ?? configResult.config.memory.use,
-      workspaceIdentity: workspaceIdentity?.trim() || undefined,
+      // OPC 员工记忆根位置无关键：host spawn 时注入 ZCODE_WORKSPACE_IDENTITY，
+      // 但 v4/协议链路的 runtimeConfig 不携带 identity（v4 workspaceId 必须为
+      // 可执行真实路径）——这里从进程 env 兜底，使 resolveProjectMemoryRoot 走
+      // identity 分支（project-<sha256(identity)[:16]>），与 desktop main 的
+      // 记忆绑定同键，且与执行位置的工作区路径解耦（多地点执行不分裂记忆）。
+      // 仅认 opc-employee/ 前缀：普通/远程会话保持既有路径键行为不变。
+      workspaceIdentity:
+        workspaceIdentity?.trim() || opcEmployeeIdentityFromProcessEnv() || undefined,
     },
   };
   return {
