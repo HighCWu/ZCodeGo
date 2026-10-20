@@ -422,6 +422,12 @@ const appEnv = {
   // development 运行时打开子进程 debug 级轮次轨迹。
   ZCODE_AGENT_STDERR_LOG: "1",
   ZCODE_RUNTIME_ENV: "development",
+  // 显式透传：standalone=1 时 agent 解析跳过官方运行时重定向（official.json），
+  // 用随包自建 runtime——本 E2E 验证的是 fork 自身全链，宿主官版落后于 fork
+  // 源码版本（如 provider/refreshRegistry）时必须以此形态运行。
+  ...(process.env.ZCODE_GO_STANDALONE?.trim()
+    ? { ZCODE_GO_STANDALONE: process.env.ZCODE_GO_STANDALONE.trim() }
+    : {}),
 };
 let appProc = spawn(ELECTRON, appArgs, {
   env: appEnv,

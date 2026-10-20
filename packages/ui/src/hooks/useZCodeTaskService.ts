@@ -1,4 +1,3 @@
-import { useServices } from "@/hooks/useServices.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import type { IZCodeTaskService } from "@zcode/services";
 import type { ZCodeTaskSnapshot } from "@zcode/shared";
@@ -306,9 +305,15 @@ export function useZCodeTaskService(
   workspaceIdentity?: string | null,
 ): IZCodeTaskService {
   // ZCode task 服务按 workspace 身份解析，保证所有 task RPC 都落到对应的 host。
-  const services = workspacePath
-    ? useWorkspaceServices(workspacePath, preferredRemoteSessionId, workspaceIdentity)
-    : useServices();
+  // 不可按 workspacePath 三元分派 hook：path 由 null→有值翻转时两条分支的 hook
+  // 序列不同（useWorkspaceServices 上游重构后不再是 useServices 的前缀），触发
+  // React「hook 顺序错位」渲染崩溃（OPC 面板 initialize 前后正是此形态）。
+  // Resolution 对 null path 有既定回落语义（未作用域服务），恒走 workspace 链。
+  const services = useWorkspaceServices(
+    workspacePath ?? null,
+    preferredRemoteSessionId,
+    workspaceIdentity,
+  );
   const rawService = services.zcodeTaskService;
   if (!rawService || typeof rawService !== "object") {
     return rawService;

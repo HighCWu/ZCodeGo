@@ -235,6 +235,8 @@ export default defineConfig(({ mode }) => {
       // 生产包若直接暴露 sourceMappingURL，攻击者可在客户端侧还原业务源码。
       // 生产使用 hidden sourcemap：本地/发布流程保留 .map，不在产物里暴露映射入口。
       sourcemap: mode === "production" ? "hidden" : true,
+      // zcode-go 诊断开关：本地排查渲染崩溃时产出未压缩产物（仅显式开启，禁止进发布链）。
+      ...(process.env.ZCODE_GO_DEBUG_UNMINIFIED === "1" ? { minify: false } : {}),
       rollupOptions: {
         // 多入口：主窗口 + 进程监控 + CUA 权限拖拽浮窗
         input: {
