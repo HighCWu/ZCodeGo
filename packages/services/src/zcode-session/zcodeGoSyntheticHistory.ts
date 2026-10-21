@@ -17,6 +17,7 @@
  * 订阅号重写与 silent-fork 的 topic 回写同技法、可叠加；重写按
  * (topic, 真实订阅号) 精确匹配，renderer 自行恢复重订时的新订阅不受影响。
  */
+import { isZcodeSessionIdLike } from "@zcode/shared";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -98,7 +99,7 @@ export function beginSyntheticHistorySubscription(
   params: SyntheticWorkspace & { sessionId: string; clientMode?: string },
 ): { subscriptionId: string; frame: unknown } | null {
   const sessionId = params.sessionId;
-  if (!sessionId.startsWith("sess_")) return null;
+  if (!isZcodeSessionIdLike(sessionId)) return null;
   // 已有 redirect（此前 fork 过）→ 正常路径直接订阅小 fork，不再合成
   if (resolveZcodeGoSessionId(sessionId) !== sessionId) return null;
   // V1 仅本地桌面（远程 web 模式的 replayable 语义另议）

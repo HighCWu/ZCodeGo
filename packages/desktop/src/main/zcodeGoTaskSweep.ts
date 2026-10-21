@@ -12,6 +12,7 @@
  * 中不存在对应 session 行的任务行。同时兜底清理「title=/zcode-go 且 0 消息」
  * 的会话本身（hook 清理失败时的残留）。
  */
+import { isZcodeSessionIdLike } from "@zcode/shared";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -83,7 +84,7 @@ export function sweepOrphanTasks(logger?: {
 
     const orphanTaskIds: string[] = [];
     for (const row of taskRows) {
-      if (!row.task_id.startsWith("sess_")) continue;
+      if (!isZcodeSessionIdLike(row.task_id)) continue;
       if (!sessionIds.has(row.task_id)) orphanTaskIds.push(row.task_id);
     }
 

@@ -11,6 +11,7 @@
  * - 状态文件 ~/.zcode-go/session-redirect.json；mtime 缓存（热路径毫秒级）。
  * - 仅在 host/主进程使用（node:fs）——renderer 不得直接 import。
  */
+import { isZcodeSessionIdLike } from "@zcode/shared";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -96,7 +97,7 @@ function writeRedirectFile(file: RedirectFile): void {
  * 链长恒为 1（轮换原地更新表项），无需递归。
  */
 export function resolveZcodeGoSessionId(sessionId: string): string {
-  if (!sessionId.startsWith("sess_")) return sessionId;
+  if (!isZcodeSessionIdLike(sessionId)) return sessionId;
   return readRedirectFile().redirects[sessionId]?.forkSessionId ?? sessionId;
 }
 
@@ -114,7 +115,7 @@ export function resolveZcodeGoSessionIdForSend(sessionId: string): string {
  * 翻译（silent fork 的读取全域翻译语义不变）。
  */
 export function resolveZcodeGoSessionIdForRead(sessionId: string): string {
-  if (!sessionId.startsWith("sess_")) return sessionId;
+  if (!isZcodeSessionIdLike(sessionId)) return sessionId;
   const entry = readRedirectFile().redirects[sessionId];
   if (!entry) return sessionId;
   return entry.hover === true ? sessionId : entry.forkSessionId;
@@ -128,7 +129,7 @@ export function resolveZcodeGoSessionIdForRead(sessionId: string): string {
 export function translateConversationTopicForRouteLookup(topic: string): string {
   if (!topic.startsWith("conversation/")) return topic;
   const sessionId = topic.slice("conversation/".length);
-  if (!sessionId.startsWith("sess_")) return topic;
+  if (!isZcodeSessionIdLike(sessionId)) return topic;
   const resolved = resolveZcodeGoSessionId(sessionId);
   return resolved === sessionId ? topic : `conversation/${resolved}`;
 }

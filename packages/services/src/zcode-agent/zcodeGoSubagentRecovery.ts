@@ -1,4 +1,5 @@
 /* oxlint-disable eslint(max-lines) -- zcode-go 机制/E2E/插件宿主文件：单文件收口是有意为之（同 SessionPane 惯例），拆散会破坏内聚。 */
+import { isZcodeSessionIdLike } from "@zcode/shared";
 import { existsSync, readFileSync } from "node:fs";
 import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
 import { homedir } from "node:os";
@@ -202,7 +203,7 @@ function extractFailedSubagentRows(frame: FrameShape): FrameRowShape[] {
     if (typeof row !== "object" || row === null) return;
     const r = row as FrameRowShape;
     if (r.kind !== "subagent" || r.status !== "failed") return;
-    if (typeof r.childSessionId !== "string" || !r.childSessionId.startsWith("sess_")) return;
+    if (typeof r.childSessionId !== "string" || !isZcodeSessionIdLike(r.childSessionId)) return;
     rows.push(r);
   };
   if (payload.kind === "snapshot" && payload.snapshot) {

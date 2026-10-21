@@ -4,7 +4,10 @@
  * （host 静默点触发）共用；在途互斥随本模块（原 index.ts 模块级 let 平移）。
  */
 import type { BrowserWindow } from "electron";
-import { PlatformChannels } from "@zcode/shared";
+import {
+  isZcodeSessionIdLike,
+  PlatformChannels,
+} from "@zcode/shared";
 import { forkCompactSessionDirect } from "./zcodeGoDirectFork.js";
 import {
   deleteZcodeGoSilentForkSession,
@@ -31,7 +34,7 @@ function executeZcodeGoSilentForkTransactionInternal(
   createdBy: "manual" | "auto-compaction",
   deps: ZcodeGoForkTransactionDeps,
 ): { ok: boolean; forkSessionId?: string; error?: string } {
-  if (!sessionId.startsWith("sess_")) {
+  if (!isZcodeSessionIdLike(sessionId)) {
     return { ok: false, error: "invalid session id" };
   }
   if (zcodeGoForkTransactionInFlight) {
@@ -148,7 +151,7 @@ export function executeZcodeGoHoverForkDualSession(
   sessionId: string,
   deps: ZcodeGoForkTransactionDeps,
 ): { ok: boolean; forkSessionId?: string; error?: string } {
-  if (!sessionId.startsWith("sess_")) {
+  if (!isZcodeSessionIdLike(sessionId)) {
     return { ok: false, error: "invalid session id" };
   }
   if (zcodeGoForkTransactionInFlight) {

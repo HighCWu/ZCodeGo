@@ -2045,6 +2045,17 @@ export const zcodeSessionEventsParamsSchema = z
   .strict();
 export type ZCodeSessionEventsParams = z.infer<typeof zcodeSessionEventsParamsSchema>;
 
+/**
+ * 会话 id 合法性判定（前缀双轨）：上游 v3.16 起 CLI 会话 id 存在两种前缀——
+ * 新路径 `session_<hex>`（v4 会话创建）与历史/委派路径 `sess_<uuid>`。
+ * 静默 fork 轮换、合成历史、redirect 解析等消费方的合法性门一律用本判定，
+ * 不得各自硬编码 startsWith（2026-10 上游同步回归：sess_ 单前缀门把
+ * session_ 会话全数拒之门外，静默 fork 与懒历史整链失效）。
+ */
+export function isZcodeSessionIdLike(sessionId: string): boolean {
+  return sessionId.startsWith("sess_") || sessionId.startsWith("session_");
+}
+
 export const zcodeSessionRuntimePreferencesScopeSchema = z.enum([
   "runtime-materialization",
   "user-execution",

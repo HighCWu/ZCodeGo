@@ -21,6 +21,7 @@
  *     子会话在首次订阅时由 CLI 从存储水合。
  *   - 任务索引行同步 upsert（侧栏唯一数据源），fork 完成即可见。
  */
+import { isZcodeSessionIdLike } from "@zcode/shared";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -152,7 +153,7 @@ export function forkCompactSessionDirect(input: {
   const base: DirectForkResult = { ok: false, childSessionId, copiedMessages: 0 };
   const sessionDbPath = input.sessionDbPath ?? SESSION_DB;
   const tasksIndexDbPath = input.tasksIndexDbPath ?? TASKS_INDEX_DB;
-  if (!parentSessionId.startsWith("sess_")) return { ...base, error: "invalid session id" };
+  if (!isZcodeSessionIdLike(parentSessionId)) return { ...base, error: "invalid session id" };
   // silent 模式不读任务索引（隐形），库缺失判定分开。
   if (!existsSync(sessionDbPath)) return { ...base, error: "session db not found" };
   if (!input.silent && !existsSync(tasksIndexDbPath)) {
