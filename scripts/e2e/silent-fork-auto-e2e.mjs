@@ -496,8 +496,10 @@ try {
       throw new Error("转接后 composer 未回归（视图卡加载/错误态）");
     }
     const sent = await sendRound("转接后续轮：验证原会话内继续对话");
-    for (let i = 0; i < 40; i += 1) {
-      await sleep(1500);
+    // fork 冷启动（runtime 懒创建：db attach + 迁移 + registry 装配）实测
+    // ~2min 才出首个模型请求——观察窗 60s 不够（转接后 live 误判 false）。
+    for (let i = 0; i < 120; i += 1) {
+      await sleep(2500);
       if (providerLogText().length > beforeLen) { postRedirectLive = true; break; }
     }
     // 观察窗 12s：统计恢复链风暴信号
@@ -567,7 +569,7 @@ try {
     })();
     for (let round = 1; round <= 8 && !rotated; round += 1) {
       await sendRound(`轮换第 ${round} 轮：继续补充实现细节`);
-      for (let i = 0; i < 22 && !rotated; i += 1) {
+      for (let i = 0; i < 50 && !rotated; i += 1) {
         await sleep(3000);
         try {
           const raw = JSON.parse(readFileSync(redirectFile, "utf8"));
