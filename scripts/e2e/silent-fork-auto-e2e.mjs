@@ -284,6 +284,11 @@ try {
     PATH: process.env.PATH,
     LANG: process.env.LANG ?? "zh_CN.UTF-8",
     HOME: sandboxHome,
+    // 显式透传：standalone=1 时 agent 解析跳过官方运行时重定向，用随包自建
+    // runtime（与 dispatch E2E 同语义；宿主官版与 fork 源码版本错配时必需）。
+    ...(process.env.ZCODE_GO_STANDALONE?.trim()
+      ? { ZCODE_GO_STANDALONE: process.env.ZCODE_GO_STANDALONE.trim() }
+      : {}),
     ...(process.platform === "linux"
       ? {
           DISPLAY: E2E_DISPLAY,
