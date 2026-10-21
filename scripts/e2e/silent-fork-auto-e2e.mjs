@@ -509,6 +509,19 @@ try {
     ).length;
     stormFree = stormSignals < 3;
     console.log(`5. post-redirect live: ${postRedirectLive}; storm signals: ${stormSignals} (stormFree=${stormFree})`);
+    if (!postRedirectLive && c) {
+      // 渲染层诊断：投影冻结/发送丢弃的 console 证据（v4-store/fault/投影错误）
+      const lines = c.consoleLines();
+      console.log("5z. renderer console 尾部 40 条:\n" + lines.slice(-40).join("\n"));
+      const dump = await ev(`(() => {
+        const errs = [];
+        return JSON.stringify({
+          rows: document.querySelectorAll('[data-testid]')?.length ?? 0,
+          text: document.body.innerText.slice(0, 300),
+        });
+      })()`, 8000).catch(() => "ev-failed");
+      console.log("5z. 页面状态:", dump);
+    }
   }
 
   // ── 6. 隐形 fork 不泄漏进任务索引（侧栏唯一数据源）──
