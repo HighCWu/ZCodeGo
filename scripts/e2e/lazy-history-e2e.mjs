@@ -389,8 +389,18 @@ try {
 
   // ╺━ 首启：UI 真实创建会话（侧栏行/运行时身份齐备） ──
   const sendViaComposer2 = async (text) => {
+    for (let i = 0; i < 20; i += 1) {
+      const ready = await ev(`!!document.querySelector('[contenteditable="true"]')`).catch(() => false);
+      if (ready) break;
+      await sleep(1500);
+    }
     await ev(`document.querySelector('[contenteditable="true"]')?.focus(); "ok"`);
-    const rect = await ev(`(() => { const r = document.querySelector('[contenteditable="true"]').getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
+    let rect = null;
+    for (let i = 0; i < 10 && !rect; i += 1) {
+      rect = await ev(`(() => { const r = document.querySelector('[contenteditable="true"]')?.getBoundingClientRect(); return r ? JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}) : "null"; })()`).catch(() => "null");
+      if (rect === "null") await sleep(1500);
+    }
+    if (!rect || rect === "null") return false;
     const { x, y } = JSON.parse(rect);
     await c.trustedTypeAndEnterAt(text, x, y);
     const btnRect = await ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (!b) return 'null'; const r = b.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
@@ -401,20 +411,29 @@ try {
   };
   const dbPath = join(sandboxHome, ".zcode", "cli", "db", "db.sqlite");
   const redirectFile = join(sandboxHome, ".zcode-go", "session-redirect.json");
-  const created0 = await sendViaComposer2("预热：创建懒读取巨会话");
-  console.log("P0. seed conversation sent:", created0);
+  // 过渡期点击可能落在未接线的 handler 上被静默丢弃——发送 + 会话落地验证
+  // + 重试（最多 3 次），避免整套件假红。
   let S = null;
-  for (let i = 0; i < 45 && !S; i += 1) {
-    await sleep(2000);
-    try {
-      const { DatabaseSync } = require("node:sqlite");
-      const db = new DatabaseSync(dbPath, { readOnly: true });
-      const row = db.prepare("select id from session order by time_created desc limit 1").get();
-      db.close();
-      if (row && (row.id ?? "").startsWith("sess_")) S = row.id;
-    } catch { /* 等待 */ }
+  for (let attempt = 1; attempt <= 3 && !S; attempt += 1) {
+    const created0 = await sendViaComposer2("预热：创建懒读取巨会话");
+    console.log(`P0. seed conversation sent (attempt ${attempt}):`, created0);
+    for (let i = 0; i < 30 && !S; i += 1) {
+      await sleep(2000);
+      try {
+        const { DatabaseSync } = require("node:sqlite");
+        const db = new DatabaseSync(dbPath, { readOnly: true });
+        const row = db.prepare("select id from session order by time_created desc limit 1").get();
+        db.close();
+        if (row && (row.id ?? "").startsWith("sess_") || (row.id ?? "").startsWith("session_")) S = row.id;
+      } catch { /* 等待 */ }
+    }
+    if (!S && attempt < 3) {
+      console.log(`P0. 会话未落地（attempt ${attempt}），清空草稿后重试`);
+      await ev(`{ const el = document.querySelector('[contenteditable="true"]'); if (el) { el.focus(); document.execCommand("selectAll"); document.execCommand("delete"); } } "ok"`).catch(() => {});
+      await sleep(2000);
+    }
   }
-  if (!S) throw new Error("会话未创建");
+  if (!S) throw new Error("种子会话三轮未落地");
   console.log("P0. session created:", S.slice(0, 24));
   killAppInstance();
   await sleep(2500);
