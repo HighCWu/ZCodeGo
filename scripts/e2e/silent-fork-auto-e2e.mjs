@@ -495,12 +495,17 @@ try {
       console.log("5z. v4-store console 尾部:\n" + storeLines.slice(-25).join("\n"));
       throw new Error("转接后 composer 未回归（视图卡加载/错误态）");
     }
-    const sent = await sendRound("转接后续轮：验证原会话内继续对话");
-    // fork 冷启动（runtime 懒创建：db attach + 迁移 + registry 装配）实测
-    // ~2min 才出首个模型请求——观察窗 60s 不够（转接后 live 误判 false）。
-    for (let i = 0; i < 120; i += 1) {
+    // 转接后首发的两段延迟：composer 点击偶发被过渡层吞掉（E2E 层伪影，重试
+    // 即可）+ fork 冷启动/compaction 延迟路径实测 ~2min 才出模型请求。策略：
+    // 总窗 6min（熔断预算内），每 90s 未观察到模型请求就补发一次。
+    let sent = await sendRound("转接后续轮：验证原会话内继续对话");
+    for (let i = 0; i < 144 && !postRedirectLive; i += 1) {
       await sleep(2500);
       if (providerLogText().length > beforeLen) { postRedirectLive = true; break; }
+      if (i > 0 && i % 36 === 0) {
+        console.log(`5r. ${(i * 2.5) | 0}s 未观察到模型请求，补发一次（上次 sent=${sent}）`);
+        sent = await sendRound("转接后续轮：验证原会话内继续对话").catch(() => false);
+      }
     }
     // 观察窗 12s：统计恢复链风暴信号
     const lines = c ? c.consoleLines() : [];
