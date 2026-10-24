@@ -435,6 +435,23 @@ try {
   }
   if (!S) throw new Error("种子会话三轮未落地");
   console.log("P0. session created:", S.slice(0, 24));
+  // 杀 app 前必须等 boot1 turn 落库（用户+assistant 消息）：CI 冷启动时 CLI
+  // 拉起+首 turn 需要数十秒，只等会话行就 SIGTERM 会把消息永久留在内存里
+  // （boot1 扩增种子读库恒空——双平台 CI 实测假红根因）。
+  {
+    let boot1Msgs = 0;
+    for (let i = 0; i < 60 && boot1Msgs < 2; i += 1) {
+      await sleep(2000);
+      try {
+        const { DatabaseSync } = require("node:sqlite");
+        const db0 = new DatabaseSync(dbPath, { readOnly: true });
+        boot1Msgs = db0.prepare("select count(*) n from message where session_id = ?").get(S).n;
+        db0.close();
+      } catch { /* 等待 */ }
+    }
+    if (boot1Msgs < 2) throw new Error(`boot1 turn 未落库（60s，msgs=${boot1Msgs}）`);
+    console.log("P0. boot1 turn persisted: msgs=", boot1Msgs);
+  }
   killAppInstance();
   await sleep(2500);
 
