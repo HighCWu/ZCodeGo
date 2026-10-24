@@ -13,10 +13,6 @@
  * delegate 未接线（CLI/server 无 silentForkArmSignal）时整个模块空转跳过。
  */
 import { isZcodeSessionIdLike } from "@zcode/shared";
-import { appendFileSync as sfkAppend } from "node:fs";
-const sfkDiagT = (line: string): void => {
-  try { sfkAppend("/tmp/sfk-diag.log", line + "\n"); } catch { /* 探针 */ }
-};
 import type { ConversationTopicWireCandidate } from "@zcode/shared/zcode-protocol-v4";
 import { getZcodeGoSessionRedirect } from "./zcodeGoSessionRedirect.js";
 import { extractLogicalFramePayload, wireFrameTopic } from "./zcodeGoWireFrame.js";
@@ -81,27 +77,21 @@ export function observeZcodeGoSilentForkFrame(
   wire: ConversationTopicWireCandidate,
 ): void {
   // CLI/server 未接线（无 host→main 信号通道）时整个触发链不工作，观测也跳过
-  sfkDiagT(`[sfk-diag] observe ENTER delegate=${Boolean(delegate)} wireTopic=${JSON.stringify(wireFrameTopic(wire))} wireKeys=${typeof wire === "object" && wire !== null ? Object.keys(wire).join("|") : "?"} payloadKind=${String((wire as { payload?: { kind?: string } })?.payload?.kind ?? "?")} frameTopic=${JSON.stringify((wire as { frame?: { topic?: string } })?.frame?.topic ?? null)}`);
   if (!delegate) return;
   const topic = wireFrameTopic(wire);
-  sfkDiagT(`[sfk-diag] G1 topic=${JSON.stringify(topic)}`);
   if (!topic || !topic.startsWith("conversation/")) return;
   const sessionId = topic.slice("conversation/".length);
-  sfkDiagT(`[sfk-diag] G2 sess=${JSON.stringify(sessionId.slice(0, 14))}`);
   if (!isZcodeSessionIdLike(sessionId)) return;
   // 只认 online 增量：initial/recovery 投递会重放历史 compact 标记（快照窗口、
   // 断线恢复），按标记无条件 arm 会在每次订阅建立时触发 fork 风暴。缺省值按
   // online 处理（与 zcodeTaskIndexSyncer.deliveryKindOf 同惯例）。
   const deliveryKind = (wire as { deliveryKind?: unknown }).deliveryKind;
-  sfkDiagT(`[sfk-diag] G3 DK=${JSON.stringify(deliveryKind)} kind=${JSON.stringify((wire as { kind?: string }).kind)} frag=${JSON.stringify([wire.logicalFrameId ?? null, wire.logicalFrameOrdinal ?? null])}`);
   if (deliveryKind === "initial" || deliveryKind === "recovery") return;
 
   const logical = extractLogicalFramePayload(wire);
   if (!logical || logical.kind !== "deltas") {
-    sfkDiagT(`[sfk-diag] observe MISS logical=${String(logical?.kind ?? "null")}`);
     return;
   }
-  sfkDiagT(`[sfk-diag] observe DELTAS n=${(logical.deltas ?? []).length}`);
   let compactSucceeded = false;
   for (const delta of logical.deltas ?? []) {
     const d = delta as {
