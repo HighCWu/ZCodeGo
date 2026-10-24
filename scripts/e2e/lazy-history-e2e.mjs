@@ -469,13 +469,26 @@ try {
     }
     if (occurrences.length === 0) {
       replicated = true;
-      const db0 = new DatabaseSync(dbPath, { readOnly: true });
-      const baseMsgs = db0.prepare(
-        "select id, data, time_created from message where session_id = ? order by time_created, id",
-      ).all(S);
-      if (baseMsgs.length < 2) { db0.close(); throw new Error("boot1 会话消息不足，无法扩增种子"); }
-      const baseParts = readParts(db0, baseMsgs.map((m) => m.id));
-      db0.close();
+      // CI 冷启动时首条消息落库滞后于 session 行（P0 只等会话行）——轮询等待
+      // 用户+assistant 消息齐备，避免慢 runner 上 boot1 即刻假红。
+      let baseMsgs = [];
+      let baseParts = [];
+      {
+        const { DatabaseSync } = require("node:sqlite");
+        for (let i = 0; i < 30; i += 1) {
+          const db0 = new DatabaseSync(dbPath, { readOnly: true });
+          baseMsgs = db0.prepare(
+            "select id, data, time_created from message where session_id = ? order by time_created, id",
+          ).all(S);
+          baseParts = baseMsgs.length >= 2
+            ? readParts(db0, baseMsgs.map((m) => m.id))
+            : [];
+          db0.close();
+          if (baseMsgs.length >= 2) break;
+          await sleep(2000);
+        }
+      }
+      if (baseMsgs.length < 2) throw new Error("boot1 会话消息不足，无法扩增种子");
       let total = 0;
       while (total < SEED_COUNT - 2) {
         const take = Math.min(baseMsgs.length, SEED_COUNT - 2 - total);
