@@ -194,7 +194,13 @@ export function rewriteSyntheticFrame<T extends { topic?: unknown; subscriptionI
   if (!topic || !subId) return wire;
   const sessionId = topic.startsWith("conversation/") ? topic.slice("conversation/".length) : null;
   if (sessionId) liveAt.set(sessionId, Date.now());
-  const rewrite = topicRewrites.get(topic)?.get(subId);
+  // 静默 fork 的帧经 silent-fork topic 改写后带 fork 自己的订阅号——精确
+  // (topic, subId) 必然 miss；回退到该会话的活跃合成订阅号，否则 fork 帧
+  // 被渲染层按订阅失配丢弃，turn 状态永不清除、queue 模式吞掉后续发送
+  // （silent-fork-auto 步骤 5/7 实测）。
+  const rewrite =
+    topicRewrites.get(topic)?.get(subId) ??
+    (sessionId !== null ? syntheticBySession.get(sessionId) : undefined);
   if (!rewrite) return wire;
   const patched = { ...wire, subscriptionId: rewrite } as T;
   const inner = (wire as { frame?: { subscriptionId?: unknown; payload?: { kind?: unknown; snapshot?: { logEpoch?: unknown } } } })

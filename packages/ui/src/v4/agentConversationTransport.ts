@@ -159,7 +159,20 @@ export function createAgentConversationTransport(
         logger.debug("[local-ttft] observation failed", { error });
       }
       const outerTopic = aliasByInnerTopic.get(frame.topic);
-      const normalized = outerTopic ? { ...frame, topic: outerTopic } : frame;
+      const normalized: ConversationTopicFrame =
+        outerTopic && outerTopic !== frame.topic ? { ...frame, topic: outerTopic } : frame;
+      if (normalized.payload.kind === "snapshot") {
+        // zcode-go 静默 fork：快照 payload.sessionId 是 CLI publisher（隐形 fork）的
+        // runtime 身份，而交付帧的 topic 已被 host 回写为订阅方 topic（原会话）。
+        // 订阅方合同是「按原会话订阅 = 拿到原会话视角」，pane 的 runtimeReady 等
+        // 比较都以原会话 id 为准——不归一化会让 fork 后发送按钮永久禁用
+        // （submissionReady=false，E2E step5 实测卡死）。按交付帧身份对齐快照，
+        // 不依赖信封别名（解码帧 topic 已是外层回写值，别名键查不中）。
+        const topicSessionId = parseConversationTopic(normalized.topic);
+        if (topicSessionId && normalized.payload.snapshot.sessionId !== topicSessionId) {
+          normalized.payload.snapshot.sessionId = topicSessionId;
+        }
+      }
       for (const listener of listeners) listener(normalized, { deliveryKind });
     },
     (fault) => {

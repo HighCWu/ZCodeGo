@@ -2452,7 +2452,19 @@ export function createZCodeAgentService(
               const frameSessionId = parsed.data.topic.slice("conversation/".length);
               const originalSession = lookupZcodeGoOriginalSession(frameSessionId);
               if (originalSession) {
-                parsed.data = { ...parsed.data, topic: `conversation/${originalSession}` };
+                // 内层 frame.topic 同步回写：renderer 的 store 按**内层 frame**
+                // 匹配会话（外层 wire.topic 只是信封路由键）——只改外层时内层
+                // 仍是 fork topic，帧被渲染层按会话失配丢弃（投影冻结实测）。
+                const innerFrame = parsed.data.frame as
+                  | { topic?: unknown }
+                  | undefined;
+                parsed.data = {
+                  ...parsed.data,
+                  topic: `conversation/${originalSession}`,
+                  ...(innerFrame && typeof innerFrame.topic === "string"
+                    ? { frame: { ...innerFrame, topic: `conversation/${originalSession}` } }
+                    : {}),
+                } as typeof parsed.data;
               }
             }
             // zcode-go 懒历史：后台真实订阅的帧重写为合成订阅号（renderer 只认
@@ -6383,7 +6395,36 @@ export function createZCodeAgentService(
       const requestedSessionId = envelope.sessionId;
       if (envelope.sessionId) {
         await waitForZcodeGoSilentForkGate(envelope.sessionId);
+        const preResolveSessionId = envelope.sessionId;
         envelope = { ...envelope, sessionId: resolveZcodeGoSessionIdForSend(envelope.sessionId) };
+        // zcode-go 静默 fork：fork 会话由 main 直写 DB 创建，CLI 网关没有它的
+        // record——sendText 会因 requireRecord 失败被静默拒绝。解析发生重定向
+        // 时先为 fork 会话建立订阅（冷路径从 DB 收养会话并创建 record，帧经
+        // 中继 topic 改写以原会话身份流向 renderer），再派发命令。
+        if (
+          envelope.type === "sendText" &&
+          envelope.sessionId !== preResolveSessionId
+        ) {
+          try {
+            logger.info(undefined, "[zcode-go-silent-fork] 发送前收养 fork 会话订阅", {
+              requested: preResolveSessionId,
+              fork: envelope.sessionId,
+            });
+            await this.subscribeConversationV4(
+              withoutTrustedV4Connection({
+                ...params,
+                sessionId: envelope.sessionId,
+                subscriberScope: "zcode-go-silent-fork-send",
+                __skipSyntheticHistory: true,
+              } as ZCodeAgentConversationSubscribeParams),
+            );
+          } catch (error) {
+            logger.warn(undefined, "[zcode-go-silent-fork] fork 会话订阅建立失败（继续发送）", {
+              sessionId: envelope.sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         // zcode-go：UI 暂停按钮的 pauseGoal 在续跑回合内会被 runtime 推迟执行并
         // 静默 no-op（icon 卡暂停态）。借道命令路径登记暂停意图——goal-keeper 在
         // 完成边沿消费：跳过复核/重触发/看门狗 resume，goal 停止续跑循环。

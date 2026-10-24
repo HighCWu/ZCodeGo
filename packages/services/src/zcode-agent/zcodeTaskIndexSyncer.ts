@@ -199,12 +199,28 @@ function resolveTerminalUnreadSignal(
 
 /**
  * zcode-go 静默 fork：sessions-index 里的隐形子会话 summary 反向映射为原会话——
- * 活跃状态（phase/spinner/标题）驱动原会话的任务行，隐形 fork 自身不产生侧栏行。
+ * 活跃状态（phase/spinner）驱动原会话的任务行，隐形 fork 自身不产生侧栏行。
  * 非 fork 会话原样返回。sessionId 一致地映射，基线/diff/删除语义保持自洽。
+ *
+ * 身份事实（title/titleSource/createdAt）恒取原会话自身的 summary（快照批次内
+ * 同批可得，delta 路径取基线）：fork 子会话的 "Fork of …" 是机械种子标题，把
+ * 它镜像到原会话行会顶掉用户可见标题（I8），createdAt 泄漏还会把排序水位挪到
+ * fork 时刻（I6）。缺失时置空标题——processSummary 的空标题守卫会跳过镜像，
+ * 等原会话自己的 summary 到达再收敛。
  */
-function remapSummarySessionId(summary: SessionSummary): SessionSummary {
+function remapSummarySessionId(
+  summary: SessionSummary,
+  originalOwn?: SessionSummary,
+): SessionSummary {
   const original = lookupZcodeGoOriginalSession(summary.sessionId);
-  return original ? { ...summary, sessionId: original } : summary;
+  if (!original) return summary;
+  return {
+    ...summary,
+    sessionId: original,
+    title: originalOwn?.title ?? "",
+    titleSource: originalOwn?.titleSource,
+    createdAt: originalOwn?.createdAt ?? summary.createdAt,
+  };
 }
 
 interface WorkspaceIngestState {
@@ -1027,10 +1043,25 @@ export function createZCodeTaskIndexSyncer(
       state.indexLogEpoch = frame.payload.snapshot.logEpoch;
       state.indexSeq = frame.toSeq;
       state.indexHasAppliedBase = true;
-      const nextSummaries = new Map<string, SessionSummary>();
+      const rawSummariesById = new Map<string, SessionSummary>();
       for (const rawSummary of frame.payload.snapshot.sessions) {
-        const summary = remapSummarySessionId(rawSummary);
-        nextSummaries.set(summary.sessionId, summary);
+        rawSummariesById.set(rawSummary.sessionId, rawSummary);
+      }
+      const nextSummaries = new Map<string, SessionSummary>();
+      // 两段式：先收非 fork 条目，再让 fork 的 remap 条目覆盖——fork 是活跃端点，
+      // 原会话自身条目的 phase 是被接管前的陈旧事实，不能因批次顺序反过来覆盖。
+      for (const rawSummary of frame.payload.snapshot.sessions) {
+        if (!lookupZcodeGoOriginalSession(rawSummary.sessionId)) {
+          nextSummaries.set(rawSummary.sessionId, rawSummary);
+        }
+      }
+      for (const rawSummary of frame.payload.snapshot.sessions) {
+        const originalId = lookupZcodeGoOriginalSession(rawSummary.sessionId);
+        if (!originalId) continue;
+        nextSummaries.set(
+          originalId,
+          remapSummarySessionId(rawSummary, rawSummariesById.get(originalId)),
+        );
       }
       if (!state.seeded) {
         // 首帧 = 静默基线：不回放历史终态、不发列表广播；仅原子补齐缺失行，
@@ -1089,7 +1120,10 @@ export function createZCodeTaskIndexSyncer(
     }
     for (const delta of frame.payload.deltas) {
       if (delta.op === "session.upserted") {
-        const summary = remapSummarySessionId(delta.session);
+        const identityOwn = state.summaries.get(
+          lookupZcodeGoOriginalSession(delta.session.sessionId) ?? delta.session.sessionId,
+        );
+        const summary = remapSummarySessionId(delta.session, identityOwn);
         processSummary(state, state.summaries.get(summary.sessionId), summary, deliveryKind);
         continue;
       }
