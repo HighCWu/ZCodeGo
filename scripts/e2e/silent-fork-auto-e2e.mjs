@@ -269,8 +269,12 @@ try {
     `--user-data-dir=${join(ws, PROFILE_TAG)}`,
     `--remote-debugging-port=${CDP_PORT}`,
     // linux：生产启动器固定 --no-sandbox（CI 的 chrome-sandbox 无 SUID）；
-    // win/mac CI 的 GPU 栈不稳（官方对照步骤同款规避）
-    ...(process.platform === "linux" ? ["--no-sandbox"] : ["--disable-gpu"]),
+    // xvfb 长跑实测 GPU 进程会在运行中期崩掉并拖死整个 app（FATAL: GPU process
+    // isn't usable → renderer evaluate 超时/CDP 拒连，历史上被误判为渲染层卡死）。
+    // linux 一并禁 GPU（软件光栅对 DOM 断言无影响）；win/mac 保持官方同款规避。
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    ...(process.platform === "linux" ? ["--no-sandbox"] : []),
   ];
   // profile 目录预创建：Electron 偶发在 DevToolsActivePort 写入时目录尚未建好（竞态实测）
   mkdirSync(join(ws, PROFILE_TAG), { recursive: true });
@@ -396,9 +400,26 @@ try {
   }
 
   // ── 2. 多轮普通消息（可信输入 + 发送按钮；每轮 turn 结束即静默点） ──
+  // DOM 级点击/提交捕获钩子（capture 阶段，先于 React）+ 主线程 congestion ping。
+  // 安装失败不阻断（老 bundle 无此探针时仍可跑）。
+  await ev(`(() => {
+    if (window.__sfkHooks) return "already";
+    window.__sfkHooks = true;
+    const log = (msg) => console.log("[sfk-diag] " + msg);
+    document.addEventListener("pointerdown", (e) => log("doc pointerdown tag=" + e.target.tagName + " x=" + e.clientX + " y=" + e.clientY), true);
+    document.addEventListener("click", (e) => log("doc click tag=" + e.target.tagName + " txt=" + String(e.target.textContent || "").slice(0, 16)), true);
+    document.addEventListener("submit", () => log("doc submit"), true);
+    window.__sfkPing = () => new Promise((res) => { const t0 = performance.now(); setTimeout(() => res("pong " + Math.round(performance.now() - t0) + "ms"), 0); });
+    log("hooks installed");
+    return "ok";
+  })()`).catch(() => "hook-install-fail");
   const sendRound = async (text) => {
-    await ev(`document.querySelector('[contenteditable="true"]')?.focus(); "ok"`);
-    const rect = await ev(`(() => { const r = document.querySelector('[contenteditable="true"]').getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
+    let rect = null;
+    for (let i = 0; i < 5 && !rect; i += 1) {
+      rect = await ev(`(() => { const el = document.querySelector('[contenteditable="true"]'); if (!el) return null; const r = el.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
+      if (!rect) await sleep(1000);
+    }
+    if (!rect) return false;
     const { x, y } = JSON.parse(rect);
     await c.trustedTypeAndEnterAt(text, x, y);
     for (let i = 0; i < 30; i += 1) {
@@ -410,7 +431,7 @@ try {
       if (state === "ready") break;
       await sleep(1000);
     }
-    const btnRect = await ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (!b) return 'null'; const r = b.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`);
+    const btnRect = await ev(`(() => { const b = document.querySelector('[contenteditable="true"]')?.closest('form')?.querySelector('button[type="submit"]'); if (!b) return 'null'; const r = b.getBoundingClientRect(); return JSON.stringify({x:r.x+r.width/2,y:r.y+r.height/2}); })()`, 20000).catch(() => "null");
     if (btnRect === "null") return false;
     const b = JSON.parse(btnRect);
     await c.trustedClick(b.x, b.y);
@@ -431,9 +452,28 @@ try {
     }
   };
   let compactionSeen = false;
+  let failRounds = 0;
   for (let round = 1; round <= 8 && !compactionSeen; round += 1) {
     const sent = await sendRound(`第 ${round} 轮：继续补充实现细节`);
     console.log(`2. round ${round} sent:`, sent);
+    if (!sent) {
+      // 发送失败快诊：composer 是否存在、busy 态、主线程 congestion。连续 3 轮失败
+      // 直接 fail-fast，避免烧满硬熔断（实测 18min 全烧）。
+      const diag = await ev(`(() => {
+        const eds = document.querySelectorAll('[contenteditable="true"]');
+        const btn = eds[0]?.closest('form')?.querySelector('button[type="submit"]');
+        const stop = eds[0]?.closest('form')?.querySelector('button:not([type="submit"])');
+        return JSON.stringify({
+          editable: eds.length,
+          submitBtn: !!btn, submitDisabled: btn?.disabled ?? null,
+          stopBtn: !!stop, stopTxt: String(stop?.textContent ?? "").slice(0, 12),
+        });
+      })()`).catch(() => "diag-fail");
+      const pong = await ev(`window.__sfkPing ? window.__sfkPing() : "no-hook"`).catch((e) => "ping-fail:" + String(e).slice(0, 60));
+      console.log(`2d. round ${round} DOM:`, diag, "mainThread:", pong);
+      failRounds += 1;
+      if (failRounds >= 3) throw new Error(`连续 ${failRounds} 轮发送失败（busy 卡死/视图异常）`);
+    } else failRounds = 0;
     for (let i = 0; i < 30 && !compactionSeen; i += 1) {
       await sleep(2000);
       compactionSeen = compactionInDb();
@@ -498,13 +538,50 @@ try {
     // 转接后首发的两段延迟：composer 点击偶发被过渡层吞掉（E2E 层伪影，重试
     // 即可）+ fork 冷启动/compaction 延迟路径实测 ~2min 才出模型请求。策略：
     // 总窗 6min（熔断预算内），每 90s 未观察到模型请求就补发一次。
+    await ev(`(() => {
+      if (window.__sfkHooks) return "already";
+      window.__sfkHooks = true;
+      const log = (msg) => console.log("[sfk-diag] " + msg);
+      document.addEventListener("pointerdown", (e) => log("doc pointerdown tag=" + e.target.tagName + " x=" + e.clientX + " y=" + e.clientY), true);
+      document.addEventListener("click", (e) => log("doc click tag=" + e.target.tagName + " txt=" + String(e.target.textContent || "").slice(0, 16)), true);
+      document.addEventListener("submit", () => log("doc submit"), true);
+      window.__sfkPing = () => new Promise((res) => { const t0 = performance.now(); setTimeout(() => res("pong " + Math.round(performance.now() - t0) + "ms"), 0); });
+      log("hooks installed");
+      return "ok";
+    })()`).catch(() => "hook-install-fail");
     let sent = await sendRound("转接后续轮：验证原会话内继续对话");
     for (let i = 0; i < 144 && !postRedirectLive; i += 1) {
       await sleep(2500);
       if (providerLogText().length > beforeLen) { postRedirectLive = true; break; }
       if (i > 0 && i % 36 === 0) {
         console.log(`5r. ${(i * 2.5) | 0}s 未观察到模型请求，补发一次（上次 sent=${sent}）`);
+        const domProbe = await ev(`(() => {
+          const eds = document.querySelectorAll('[contenteditable="true"]');
+          const first = eds[0];
+          const btn = first?.closest('form')?.querySelector('button[type="submit"]');
+          let atPoint = null;
+          if (btn) {
+            const r = btn.getBoundingClientRect();
+            const el = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            atPoint = el ? (el.tagName + "|" + String(el.textContent || "").slice(0, 12)) : "none";
+          }
+          return JSON.stringify({
+            editableCount: eds.length,
+            firstInForm: !!first?.closest('form'),
+            firstTextHead: (first?.textContent ?? '').slice(0, 40),
+            btnFound: !!btn,
+            btnDisabled: btn?.disabled ?? null,
+            elementAtBtnPoint: atPoint,
+            activeEl: document.activeElement ? document.activeElement.tagName : "none",
+            composerState: window.__sfkComposerState ?? null,
+            paneReady: window.__sfkPaneReady ?? null,
+            bodyHead: document.body.innerText.slice(0, 80).replace(/\\n/g, '|'),
+          });
+        })()`).catch((e) => "probe-fail:" + String(e).slice(0, 80));
+        const pong = await ev(`window.__sfkPing ? window.__sfkPing() : "no-hook"`).catch((e) => "ping-fail:" + String(e).slice(0, 60));
+        console.log("5r. DOM:", domProbe, "mainThread:", pong);
         sent = await sendRound("转接后续轮：验证原会话内继续对话").catch(() => false);
+        console.log(`5r. resend sent=${sent}`);
       }
     }
     // 观察窗 12s：统计恢复链风暴信号
@@ -514,6 +591,10 @@ try {
     ).length;
     stormFree = stormSignals < 3;
     console.log(`5. post-redirect live: ${postRedirectLive}; storm signals: ${stormSignals} (stormFree=${stormFree})`);
+    if (c) {
+      const sfkLines = c.consoleLines().filter((l) => l.includes("sfk-diag"));
+      console.log("5s. sfk-diag console 全量:\n" + sfkLines.slice(-60).join("\n"));
+    }
     if (!postRedirectLive && c) {
       // 渲染层诊断：投影冻结/发送丢弃的 console 证据（v4-store/fault/投影错误）
       const lines = c.consoleLines();
@@ -542,9 +623,15 @@ try {
       const leak = tasksDb
         .prepare("select count(*) c from tasks where task_id = ?")
         .get(entry.fork).c;
+      // 标题串写断言：sessions-index remap 曾把 fork 子会话的 "Fork of …" 种子
+      // 标题镜像到原会话行（I8 违例）。原会话行存在时标题必须仍是自己的。
+      const originalRow = tasksDb
+        .prepare("select title from tasks where task_id = ?")
+        .get(entry.original);
+      const titleLeak = originalRow ? String(originalRow.title).startsWith("Fork of") : false;
       tasksDb.close();
-      forkRowLeakFree = leak === 0;
-      console.log(`6. fork task-row leak free: ${forkRowLeakFree} (fork rows: ${leak})`);
+      forkRowLeakFree = leak === 0 && !titleLeak;
+      console.log(`6. fork task-row leak free: ${forkRowLeakFree} (fork rows: ${leak}, titleLeak: ${titleLeak})`);
     } catch (error) {
       forkRowLeakFree = false;
       console.log("6. tasks-index 读取失败:", error.message);

@@ -315,7 +315,11 @@ try {
     "--lang=zh-CN",
     `--user-data-dir=${join(ws, PROFILE_TAG)}`,
     `--remote-debugging-port=${CDP_PORT}`,
-    ...(process.platform === "linux" ? ["--no-sandbox"] : ["--disable-gpu"]),
+    // xvfb 长跑实测 GPU 进程运行中期崩掉会拖死整个 app（FATAL: GPU process
+    // isn't usable），统一禁 GPU（软件光栅对 DOM 断言无影响）。
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    ...(process.platform === "linux" ? ["--no-sandbox"] : []),
   ];
   // profile 目录预创建：Electron 偶发在 DevToolsActivePort 写入时目录尚未建好（竞态实测）
   mkdirSync(join(ws, PROFILE_TAG), { recursive: true });
@@ -422,7 +426,9 @@ try {
   // 实测）——所有文案匹配一律双语。
   const L = {
     marketplace: ["插件市场", "Plugin Marketplace"],
-    viewReady: ["用插件为 ZCode 扩展", "Extend ZCode with skills, commands, and MCP servers"],
+    // 上游 v3.16 市场落地页标题改为「应用插件 / App plugins」（旧「用插件为
+    // ZCode 扩展」文案已删除——4a 曾因此永远判负）。
+    viewReady: ["应用插件", "App plugins"],
     add: ["添加", "Add"],
     addMarketplace: ["添加插件市场", "Add marketplace"],
     personal: ["个人", "Personal"],
@@ -467,17 +473,33 @@ try {
     return false;
   };
 
-  // 4a. 打开市场视图（侧边栏入口；文本精确匹配可见元素）
+  // 4a. 打开市场视图（侧边栏入口；文本精确匹配可见元素）。合成 .click() 在
+  // 官方组件上不触发 handler（4a.0 头注同款死点）——统一走可信点击。
   let mktOpened = false;
   for (let i = 0; i < 3 && !mktOpened; i += 1) {
-    const clicked = await ev(`(() => {
+    const hitRect = await ev(`(() => {
+      // 侧栏是 position:fixed——offsetParent 恒为 null，旧的可见性过滤一次都匹配不上
+      // （4a 历史假阴性根因）。改用几何可见性 + 取最小面积（最深层的实际标签）。
       const hits = Array.from(document.querySelectorAll('button, a, [role="button"], li, span, div'))
-        .filter(el => el.offsetParent !== null && ${JSON.stringify(L.marketplace)}.includes((el.innerText || "").trim()));
+        .filter(el => {
+          if (!${JSON.stringify(L.marketplace)}.includes((el.innerText || "").trim())) return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0
+            && r.top < window.innerHeight && r.left < window.innerWidth;
+        });
       if (!hits.length) return null;
-      hits[0].click();
-      return "sidebar-clicked";
+      const el = hits.reduce((a, b) => {
+        const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        return ra.width * ra.height <= rb.width * rb.height ? a : b;
+      });
+      const r = el.getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) });
     })()`);
-    if (clicked && await waitVisibleTextList(L.viewReady, 20)) { mktOpened = true; break; }
+    if (hitRect) {
+      const pt = JSON.parse(hitRect);
+      await c.trustedClick(pt.x, pt.y);
+    }
+    if (hitRect && await waitVisibleTextList(L.viewReady, 20)) { mktOpened = true; break; }
     await dumpUi(`4a.${i} 市场入口未达`);
     await sleep(2000);
   }
